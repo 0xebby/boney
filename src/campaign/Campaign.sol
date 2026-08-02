@@ -1,0 +1,472 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.30;
+
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ICampaign} from "../interfaces/ICampaign.sol";
+import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
+import {IReputationRegistry} from "../interfaces/IReputationRegistry.sol";
+import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
+import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
+import {Types} from "../libraries/Types.sol";
+
+/// @title Campaign
+/// @notice One performance campaign: escrowed rewards released automatically as attributed KPI
+///         progress crosses per-promoter thresholds.
+/// @dev Immutable once deployed (decision D8): parameters, KPIs and tiers cannot change, so a
+///      project cannot move the goalposts after promoters have done the work.
+///
+///      Reported amounts are **cumulative per user**, not increments. The contract credits only
+///      `newTotal - alreadyCredited`, so a replayed report is a no-op rather than an inflation
+///      vector — the central anti-fake-conversion property of the reporting path.
+///
+///      Rewards draw from one shared pool, first-come (D3). When the pool cannot cover a crossed
+///      tier the contract pays what remains and emits `PoolExhausted`; it never reverts, because
+///      reverting would let one exhausted tier block all further reporting for everyone.
+contract Campaign is ICampaign, ReentrancyGuard {
+    error NotProject();
+    error NotReporter();
+    error NotOracle();
+    error WrongStatus(Types.CampaignStatus actual);
+    error AlreadyJoined();
+    error NotJoined();
+    error InsufficientReputation(uint256 score, uint256 required);
+    error UnknownKpi(uint256 kpiIndex);
+    error AggregateKpi(uint256 kpiIndex);
+    error NotAggregateKpi(uint256 kpiIndex);
+    error NoAttribution(address user);
+    error NonMonotonic(uint256 current, uint256 provided);
+    error VerifierOvercredit(uint256 credited, uint256 max);
+    error OutsideWindow(uint64 startTime, uint64 endTime);
+    error NotFunded(uint256 balance, uint256 required);
+    error ClaimWindowOpen(uint64 until);
+    error NothingToReclaim();
+    error ZeroAddress();
+    error InvalidWindow();
+    error ZeroRewardPool();
+    error NoKpis();
+    error TierLengthMismatch();
+    error EmptyTiers(uint256 kpiIndex);
+    error TiersNotAscending(uint256 kpiIndex, uint256 tierIndex);
+    error ZeroTierReward(uint256 kpiIndex, uint256 tierIndex);
+    error CustomKpiNeedsVerifier(uint256 kpiIndex);
+    error TooManyKpis(uint256 provided, uint256 max);
+    error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
+
+    /// @notice Window after a campaign ends during which promoters may still settle earned tiers,
+    ///         before the project can reclaim what is left.
+    uint64 public constant CLAIM_GRACE = 7 days;
+
+    /// @notice Caps on campaign shape.
+    /// @dev `_settle` walks the tier ladder and `reportUserAction` indexes KPIs, both on
+    ///      user-facing paths. Without a bound, a campaign could be created with a ladder large
+    ///      enough that settlement exceeds the block gas limit — bricking payouts for promoters
+    ///      who already did the work. Validated once at construction.
+    uint256 public constant MAX_KPIS = 32;
+    uint256 public constant MAX_TIERS_PER_KPI = 32;
+
+    // ── dependencies ─────────────────────────────────────────────
+
+    IEscrowVault public immutable escrowVault;
+    IAttributionRegistry public immutable attributionRegistry;
+    IReputationRegistry public immutable reputationRegistry;
+    address public immutable oracleCoordinator;
+
+    // ── frozen parameters (D8) ───────────────────────────────────
+    // Stored as individual immutables because Solidity does not allow immutable structs;
+    // `config()` reassembles them for the ICampaign surface.
+
+    address public immutable project;
+    address public immutable token;
+    uint256 public immutable rewardPool;
+    uint64 public immutable startTime;
+    uint64 public immutable endTime;
+    /// @notice Recommended touch TTL for frontends when asking a user to sign an attribution.
+    /// @dev Advisory. The hard cap on touch lifetime lives in AttributionRegistry.
+    uint64 public immutable attributionWindow;
+    uint256 public immutable minReputation;
+
+    Types.KpiSpec[] private _kpis;
+    Types.RewardTier[][] private _tiers;
+
+    // ── mutable state ────────────────────────────────────────────
+
+    Types.CampaignStatus public status;
+    uint256 public paidOut;
+    uint64 public endedAt;
+
+    /// @dev promoter id => promoter wallet. Only ids this campaign issued.
+    mapping(bytes32 => address) private _promoterOf;
+    /// @dev promoter wallet => campaign-bound promoter id.
+    mapping(address => bytes32) private _promoterIdOf;
+    /// @dev promoter => kpiIndex => cumulative attributed progress.
+    mapping(address => mapping(uint256 => uint256)) private _progress;
+    /// @dev promoter => kpiIndex => number of tiers already settled.
+    mapping(address => mapping(uint256 => uint256)) private _settledTiers;
+    /// @dev user => kpiIndex => cumulative amount already credited (replay guard).
+    mapping(address => mapping(uint256 => uint256)) private _userCredited;
+    /// @dev kpiIndex => campaign-level total.
+    mapping(uint256 => uint256) private _totalProgress;
+
+    modifier onlyProject() {
+        if (msg.sender != project) revert NotProject();
+        _;
+    }
+
+    modifier onlyActive() {
+        if (status != Types.CampaignStatus.Active) revert WrongStatus(status);
+        _;
+    }
+
+    constructor(
+        Types.CampaignConfig memory cfg,
+        Types.KpiSpec[] memory kpis_,
+        Types.RewardTier[][] memory tiers_,
+        address escrowVault_,
+        address attributionRegistry_,
+        address reputationRegistry_,
+        address oracleCoordinator_
+    ) {
+        if (
+            cfg.project == address(0) || cfg.token == address(0) || escrowVault_ == address(0)
+                || attributionRegistry_ == address(0) || reputationRegistry_ == address(0)
+                || oracleCoordinator_ == address(0)
+        ) revert ZeroAddress();
+        if (cfg.rewardPool == 0) revert ZeroRewardPool();
+        if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
+        if (cfg.attributionWindow == 0) revert InvalidWindow();
+        if (kpis_.length == 0) revert NoKpis();
+        if (kpis_.length > MAX_KPIS) revert TooManyKpis(kpis_.length, MAX_KPIS);
+        if (kpis_.length != tiers_.length) revert TierLengthMismatch();
+
+        for (uint256 i; i < kpis_.length; ++i) {
+            // A Custom KPI has no protocol-defined meaning, so it is only trustworthy with an
+            // adapter that can substantiate reports.
+            if (kpis_[i].kind == Types.KpiKind.Custom && kpis_[i].verifier == address(0)) {
+                revert CustomKpiNeedsVerifier(i);
+            }
+
+            Types.RewardTier[] memory t = tiers_[i];
+            // Aggregate KPIs are analytics-only (D7) and may legitimately carry no tiers.
+            if (t.length == 0 && !kpis_[i].aggregate) revert EmptyTiers(i);
+            if (t.length > MAX_TIERS_PER_KPI) {
+                revert TooManyTiers(i, t.length, MAX_TIERS_PER_KPI);
+            }
+
+            uint256 previous;
+            for (uint256 j; j < t.length; ++j) {
+                if (t[j].reward == 0) revert ZeroTierReward(i, j);
+                // Strictly ascending thresholds let settlement walk tiers in one pass.
+                if (t[j].threshold <= previous) revert TiersNotAscending(i, j);
+                previous = t[j].threshold;
+            }
+
+            _kpis.push(kpis_[i]);
+            _tiers.push();
+            for (uint256 j; j < t.length; ++j) {
+                _tiers[i].push(t[j]);
+            }
+        }
+
+        project = cfg.project;
+        token = cfg.token;
+        rewardPool = cfg.rewardPool;
+        startTime = cfg.startTime;
+        endTime = cfg.endTime;
+        attributionWindow = cfg.attributionWindow;
+        minReputation = cfg.minReputation;
+
+        escrowVault = IEscrowVault(escrowVault_);
+        attributionRegistry = IAttributionRegistry(attributionRegistry_);
+        reputationRegistry = IReputationRegistry(reputationRegistry_);
+        oracleCoordinator = oracleCoordinator_;
+
+        status = Types.CampaignStatus.Pending;
+    }
+
+    // ── lifecycle ────────────────────────────────────────────────
+
+    /// @inheritdoc ICampaign
+    /// @dev Requires the full reward pool to be escrowed first: promoters should never start
+    ///      working against a partially funded campaign.
+    function activate() external onlyProject {
+        if (status != Types.CampaignStatus.Pending) revert WrongStatus(status);
+        uint256 balance = escrowVault.balanceOf(address(this));
+        if (balance < rewardPool) revert NotFunded(balance, rewardPool);
+        if (block.timestamp >= endTime) revert OutsideWindow(startTime, endTime);
+
+        _setStatus(Types.CampaignStatus.Active);
+        emit Activated(startTime, endTime);
+    }
+
+    /// @inheritdoc ICampaign
+    function pause() external onlyProject onlyActive {
+        _setStatus(Types.CampaignStatus.Paused);
+    }
+
+    /// @inheritdoc ICampaign
+    function unpause() external onlyProject {
+        if (status != Types.CampaignStatus.Paused) revert WrongStatus(status);
+        _setStatus(Types.CampaignStatus.Active);
+    }
+
+    /// @inheritdoc ICampaign
+    /// @dev The project may end early; anyone may end it once `endTime` has passed, so a project
+    ///      cannot leave a finished campaign in limbo to stall the claim grace window.
+    function end() external {
+        if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
+            revert WrongStatus(status);
+        }
+        if (msg.sender != project && block.timestamp < endTime) revert OutsideWindow(startTime, endTime);
+
+        endedAt = uint64(block.timestamp);
+        _setStatus(Types.CampaignStatus.Ended);
+    }
+
+    /// @inheritdoc ICampaign
+    /// @dev Only from `Pending`. Once active, promoters may have earned rewards, so cancellation
+    ///      would be a rug.
+    function cancel() external onlyProject {
+        if (status != Types.CampaignStatus.Pending) revert WrongStatus(status);
+
+        endedAt = uint64(block.timestamp);
+        _setStatus(Types.CampaignStatus.Cancelled);
+    }
+
+    function _setStatus(Types.CampaignStatus next) private {
+        Types.CampaignStatus previous = status;
+        status = next;
+        emit StatusChanged(previous, next);
+    }
+
+    // ── promoters ────────────────────────────────────────────────
+
+    /// @inheritdoc ICampaign
+    /// @dev Joining is allowed while `Pending` too, so KOLs can prepare links before launch.
+    function join() external returns (bytes32 promoterId) {
+        if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Pending) {
+            revert WrongStatus(status);
+        }
+        if (_promoterIdOf[msg.sender] != bytes32(0)) revert AlreadyJoined();
+
+        uint256 score = reputationRegistry.scoreOf(msg.sender);
+        if (minReputation != 0 && score < minReputation) {
+            revert InsufficientReputation(score, minReputation);
+        }
+
+        promoterId = keccak256(abi.encode(address(this), msg.sender));
+        _promoterIdOf[msg.sender] = promoterId;
+        _promoterOf[promoterId] = msg.sender;
+
+        // Bind the id in the attribution registry so user-signed touches naming it are accepted.
+        attributionRegistry.registerPromoter(promoterId);
+
+        emit PromoterJoined(msg.sender, promoterId, score);
+    }
+
+    // ── reporting ────────────────────────────────────────────────
+
+    /// @inheritdoc ICampaign
+    /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
+    function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
+        external
+        nonReentrant
+        onlyActive
+    {
+        if (msg.sender != project && msg.sender != oracleCoordinator) revert NotReporter();
+        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        if (user == address(0)) revert ZeroAddress();
+        _requireWindow();
+
+        Types.KpiSpec storage spec = _kpis[kpiIndex];
+        if (spec.aggregate) revert AggregateKpi(kpiIndex);
+
+        uint256 already = _userCredited[user][kpiIndex];
+        if (newTotal < already) revert NonMonotonic(already, newTotal);
+        uint256 delta = newTotal - already;
+        if (delta == 0) return; // idempotent replay
+
+        // Resolve attribution before crediting: unattributed actions have no payee.
+        bytes32 promoterId = attributionRegistry.activePromoter(address(this), user);
+        if (promoterId == bytes32(0)) revert NoAttribution(user);
+        address promoter = _promoterOf[promoterId];
+        if (promoter == address(0)) revert NoAttribution(user);
+
+        uint256 credited = delta;
+        if (spec.verifier != address(0)) {
+            credited = IKpiVerifier(spec.verifier).verify(
+                address(this), kpiIndex, user, delta, evidence, spec.params
+            );
+            // A verifier may discount a claim but must never inflate it.
+            if (credited > delta) revert VerifierOvercredit(credited, delta);
+            if (credited == 0) return;
+        }
+
+        // Credit only the verified portion, so a discounted report can be retried later with
+        // better evidence rather than being permanently burned.
+        _userCredited[user][kpiIndex] = already + credited;
+        _progress[promoter][kpiIndex] += credited;
+        _totalProgress[kpiIndex] += credited;
+
+        emit ProgressCredited(kpiIndex, promoterId, user, credited);
+
+        _settle(promoter, promoterId, kpiIndex);
+    }
+
+    /// @inheritdoc ICampaign
+    /// @dev Aggregate KPIs (TVL, volume) are campaign-level and never credit an individual
+    ///      promoter — see D7. They advance totals for display only.
+    function applyAggregateUpdate(uint256 kpiIndex, uint256 newTotal) external onlyActive {
+        if (msg.sender != oracleCoordinator) revert NotOracle();
+        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        if (!_kpis[kpiIndex].aggregate) revert NotAggregateKpi(kpiIndex);
+        _requireWindow();
+
+        uint256 current = _totalProgress[kpiIndex];
+        if (newTotal < current) revert NonMonotonic(current, newTotal);
+
+        _totalProgress[kpiIndex] = newTotal;
+        emit AggregateProgress(kpiIndex, newTotal);
+    }
+
+    // ── settlement ───────────────────────────────────────────────
+
+    /// @inheritdoc ICampaign
+    /// @dev Permissionless: anyone may push a promoter's earned rewards through, including during
+    ///      the post-end claim grace window.
+    function settle(address promoter, uint256 kpiIndex) external nonReentrant {
+        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        bytes32 promoterId = _promoterIdOf[promoter];
+        if (promoterId == bytes32(0)) revert NotJoined();
+
+        if (status == Types.CampaignStatus.Ended) {
+            if (block.timestamp > endedAt + CLAIM_GRACE) revert WrongStatus(status);
+        } else if (status != Types.CampaignStatus.Active) {
+            revert WrongStatus(status);
+        }
+
+        _settle(promoter, promoterId, kpiIndex);
+    }
+
+    /// @dev Walks the tier ladder for one `(promoter, kpi)` pair and pays every newly crossed
+    ///      tier. State is written before each external transfer (checks-effects-interactions);
+    ///      callers are `nonReentrant`.
+    function _settle(address promoter, bytes32 promoterId, uint256 kpiIndex) private {
+        Types.RewardTier[] storage ladder = _tiers[kpiIndex];
+        uint256 progress = _progress[promoter][kpiIndex];
+        uint256 next = _settledTiers[promoter][kpiIndex];
+
+        while (next < ladder.length && progress >= ladder[next].threshold) {
+            uint256 reward = ladder[next].reward;
+            uint256 remaining = rewardPool - paidOut;
+            uint256 pay = reward > remaining ? remaining : reward;
+
+            // Mark the tier settled even when the pool cannot cover it: the ladder must keep
+            // advancing, and the shortfall is surfaced via `PoolExhausted`.
+            _settledTiers[promoter][kpiIndex] = next + 1;
+
+            if (pay != 0) {
+                paidOut += pay;
+                escrowVault.release(promoter, pay);
+            }
+            emit TierSettled(promoterId, promoter, kpiIndex, next, pay);
+            if (pay < reward) emit PoolExhausted(reward - pay);
+
+            unchecked {
+                ++next;
+            }
+        }
+    }
+
+    // ── escrow return ────────────────────────────────────────────
+
+    /// @inheritdoc ICampaign
+    /// @dev Cancelled campaigns return funds immediately (nobody earned anything). Ended
+    ///      campaigns wait out `CLAIM_GRACE` so promoters can settle first.
+    function reclaimUnspent() external nonReentrant onlyProject {
+        if (status == Types.CampaignStatus.Ended) {
+            uint64 until = endedAt + CLAIM_GRACE;
+            if (block.timestamp <= until) revert ClaimWindowOpen(until);
+        } else if (status != Types.CampaignStatus.Cancelled) {
+            revert WrongStatus(status);
+        }
+
+        uint256 amount = escrowVault.balanceOf(address(this));
+        if (amount == 0) revert NothingToReclaim();
+
+        escrowVault.reclaim(project, amount);
+        emit Reclaimed(project, amount);
+    }
+
+    function _requireWindow() private view {
+        if (block.timestamp < startTime || block.timestamp > endTime) {
+            revert OutsideWindow(startTime, endTime);
+        }
+    }
+
+    // ── views ────────────────────────────────────────────────────
+
+    /// @inheritdoc ICampaign
+    function config() external view returns (Types.CampaignConfig memory) {
+        return Types.CampaignConfig({
+            project: project,
+            token: token,
+            rewardPool: rewardPool,
+            startTime: startTime,
+            endTime: endTime,
+            attributionWindow: attributionWindow,
+            minReputation: minReputation
+        });
+    }
+
+    /// @inheritdoc ICampaign
+    function kpiCount() external view returns (uint256) {
+        return _kpis.length;
+    }
+
+    /// @inheritdoc ICampaign
+    function kpi(uint256 index) external view returns (Types.KpiSpec memory) {
+        if (index >= _kpis.length) revert UnknownKpi(index);
+        return _kpis[index];
+    }
+
+    /// @inheritdoc ICampaign
+    function tiers(uint256 kpiIndex) external view returns (Types.RewardTier[] memory) {
+        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        return _tiers[kpiIndex];
+    }
+
+    /// @inheritdoc ICampaign
+    function promoterIdOf(address promoter) external view returns (bytes32) {
+        return _promoterIdOf[promoter];
+    }
+
+    /// @inheritdoc ICampaign
+    function promoterOf(bytes32 promoterId) external view returns (address) {
+        return _promoterOf[promoterId];
+    }
+
+    /// @inheritdoc ICampaign
+    function progressOf(address promoter, uint256 kpiIndex) external view returns (uint256) {
+        return _progress[promoter][kpiIndex];
+    }
+
+    /// @inheritdoc ICampaign
+    function totalProgress(uint256 kpiIndex) external view returns (uint256) {
+        return _totalProgress[kpiIndex];
+    }
+
+    /// @notice Cumulative amount already credited for a `(user, kpi)` pair.
+    function userCreditedOf(address user, uint256 kpiIndex) external view returns (uint256) {
+        return _userCredited[user][kpiIndex];
+    }
+
+    /// @notice Number of tiers already settled for a `(promoter, kpi)` pair.
+    function settledTiersOf(address promoter, uint256 kpiIndex) external view returns (uint256) {
+        return _settledTiers[promoter][kpiIndex];
+    }
+
+    /// @notice Rewards still available in the shared pool.
+    function remainingPool() external view returns (uint256) {
+        return rewardPool - paidOut;
+    }
+}
