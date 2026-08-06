@@ -35,8 +35,19 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     error RegistryAlreadySet();
     error RegistryNotSet();
 
+    /// @notice Emitted once the campaign registry is wired.
+    /// @notice Emitted once when the campaign registry is wired, enabling report submission.
+    /// @param registry The campaign registry used to validate report targets.
     event RegistrySet(address indexed registry);
 
+    /// @notice Lifecycle state of a submitted report.
+    /// @param reporter Account that submitted the report.
+    /// @param campaign Campaign the report targets.
+    /// @param kpiIndex KPI index within that campaign.
+    /// @param amount New campaign-level total being reported.
+    /// @param deadline Timestamp after which the report may be applied.
+    /// @param disputed Whether governance voided the report.
+    /// @param applied Whether the report has already been pushed to the campaign.
     struct ReportState {
         address reporter;
         address campaign;
@@ -63,14 +74,23 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     ///         collateral is still slashable while reports are in flight.
     uint256 public immutable unstakeDelay;
 
+    /// @dev reporter => collateral currently posted.
     mapping(address => uint256) private _stake;
+    /// @dev reporter => next report sequence number. Folded into the report id so a reporter can
+    ///      file the same claim twice without the second submission colliding with the first.
     mapping(address => uint256) private _sequence;
     /// @dev reporter => timestamp before which stake is locked.
     mapping(address => uint256) public stakeLockedUntil;
+    /// @dev reportId => report state.
     mapping(bytes32 => ReportState) private _reports;
     /// @notice Total slashed collateral held by the protocol.
     uint256 public slashPool;
 
+    /// @notice Deploys the coordinator with staking and dispute parameters.
+    /// @param governor Owner able to dispute reports and withdraw the slash pool.
+    /// @param minStake_ Minimum collateral required to submit reports.
+    /// @param disputeWindow_ Seconds a report stays challengeable before it can be applied.
+    /// @param unstakeDelay_ Extra cooldown past the dispute window before stake unlocks.
     constructor(address governor, uint256 minStake_, uint256 disputeWindow_, uint256 unstakeDelay_)
         Ownable(governor)
     {
@@ -81,6 +101,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @notice Wire the campaign registry. Callable exactly once, by the governor.
+    /// @param registry Address of the campaign registry.
     function setCampaignRegistry(address registry) external onlyOwner {
         if (registry == address(0)) revert ZeroAddress();
         if (address(campaignRegistry) != address(0)) revert RegistryAlreadySet();
@@ -179,6 +200,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @notice Withdraw slashed collateral to the protocol treasury.
+    /// @param to Recipient of the slashed funds.
     function withdrawSlashPool(address to) external onlyOwner nonReentrant {
         if (to == address(0)) revert ZeroAddress();
         uint256 amount = slashPool;
@@ -217,11 +239,15 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @notice Full state of a report.
+    /// @param reportId Id returned by `submitReport`.
+    /// @return The stored report state.
     function reportState(bytes32 reportId) external view returns (ReportState memory) {
         return _reports[reportId];
     }
 
     /// @notice Whether `who` currently meets the stake requirement.
+    /// @param who Address to check.
+    /// @return True if their stake is at or above `minStake`.
     function isReporter(address who) external view returns (bool) {
         return _stake[who] >= minStake;
     }

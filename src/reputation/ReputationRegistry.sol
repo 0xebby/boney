@@ -31,12 +31,21 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     ///      Schemas are governance-controlled and few in practice; this is a backstop.
     uint256 public constant MAX_SCHEMAS = 64;
 
+    /// @notice A registered metric that can be attested against.
+    /// @param name Stable human-readable name (e.g. "X_FOLLOWERS").
+    /// @param weight Contribution to the composite score; 0 disables the schema without erasing
+    ///        data already attested against it.
+    /// @param exists Whether the schema has been registered. Distinguishes a disabled schema from
+    ///        an unknown one, since both carry zero weight.
     struct Schema {
         string name;
         uint256 weight;
         bool exists;
     }
 
+    /// @notice The latest attested value for one `(wallet, schema)` pair.
+    /// @param value The attested value.
+    /// @param updatedAt When it was last attested.
     struct Record {
         uint256 value;
         uint64 updatedAt;
@@ -54,6 +63,9 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     /// @dev Consumed attestation bundle ids.
     mapping(bytes32 => bool) public usedAttestations;
 
+    /// @notice Deploys the reputation registry with a designated admin and verifier.
+    /// @param admin Address that can register schemas and set weights.
+    /// @param verifier_ Verifier used to authenticate attestation bundles.
     constructor(address admin, address verifier_) Ownable(admin) {
         if (admin == address(0) || verifier_ == address(0)) revert ZeroAddress();
         verifier = IAttestationVerifier(verifier_);
@@ -65,6 +77,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice Deterministic id for a schema name.
+    /// @param name The schema name.
+    /// @return The schema id derived from the name.
     function schemaId(string memory name) public pure returns (bytes32) {
         return keccak256(bytes(name));
     }
@@ -92,6 +106,12 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     /// @notice Verify an attestation bundle and store the attested value.
     /// @dev Permissionless to call: authority comes from the signatures, not the caller. This is
     ///      what lets a KOL (or a relayer) submit their own reputation proof.
+    /// @param subject The wallet the attested value belongs to.
+    /// @param id Registered schema the value is attested against.
+    /// @param value The attested value.
+    /// @param attestations The attestation payloads, one per signature.
+    /// @param signatures EIP-712 signatures, aligned to `attestations`.
+    /// @return attestationId Unique id of the verified bundle, consumed to block replays.
     function submitAttestation(
         address subject,
         bytes32 id,
@@ -150,6 +170,9 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice When `wallet`'s value for `id` was last attested.
+    /// @param wallet The wallet to query.
+    /// @param id The schema id.
+    /// @return Timestamp of the last update, or 0 if never attested.
     function updatedAtOf(address wallet, bytes32 id) external view returns (uint64) {
         return _records[wallet][id].updatedAt;
     }
@@ -160,17 +183,24 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice Full schema definition.
+    /// @param id The schema id.
+    /// @return name Human-readable schema name.
+    /// @return weight Contribution to the composite score; 0 means disabled.
+    /// @return exists Whether the schema is registered.
     function schemaInfo(bytes32 id) external view returns (string memory name, uint256 weight, bool exists) {
         Schema storage s = _schemas[id];
         return (s.name, s.weight, s.exists);
     }
 
     /// @notice Number of registered schemas.
+    /// @return The schema count.
     function schemaCount() external view returns (uint256) {
         return _schemaIds.length;
     }
 
     /// @notice Registered schema id at `index`.
+    /// @param index Position in the schema list.
+    /// @return The schema id.
     function schemaIdAt(uint256 index) external view returns (bytes32) {
         return _schemaIds[index];
     }

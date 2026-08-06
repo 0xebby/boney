@@ -27,11 +27,17 @@ contract Boney is IBoney {
     error NotProject(address project, address caller);
     error CampaignMismatch(address expected, address provided);
 
+    /// @notice Factory and directory the facade resolves campaign ids through.
     ICampaignRegistry public immutable registry;
+    /// @notice Vault holding every campaign's escrowed rewards.
     IEscrowVault public immutable escrowVault;
+    /// @notice Registry backing promoter reputation lookups.
     IReputationRegistry public immutable reputationRegistry;
+    /// @notice Registry storing user-signed attribution touches.
     IAttributionRegistry public immutable attributionRegistry;
 
+    /// @notice Deploys the Boney facade and wires it to the protocol modules.
+    /// @param registry_ Address of the campaign registry.
     constructor(address registry_) {
         if (registry_ == address(0)) revert ZeroAddress();
         registry = ICampaignRegistry(registry_);
@@ -43,6 +49,11 @@ contract Boney is IBoney {
     // ── project actions ──────────────────────────────────────────
 
     /// @inheritdoc IBoney
+    /// @param cfg Immutable campaign parameters; `cfg.project` must be the caller.
+    /// @param kpis KPI specs; at least one required.
+    /// @param tiers Per-KPI reward tiers, outer index aligned to `kpis`.
+    /// @return campaignId Sequential id assigned by the registry.
+    /// @return campaign Address of the deployed campaign.
     /// @dev `cfg.project` must be the caller: the registry enforces this too, but failing here
     ///      gives a clearer error before deployment gas is spent.
     function createCampaign(
@@ -55,6 +66,8 @@ contract Boney is IBoney {
     }
 
     /// @inheritdoc IBoney
+    /// @param campaignId The campaign to fund.
+    /// @param amount Amount of the campaign's token to escrow.
     /// @dev Pulls tokens through the facade so a project needs only one approval (to this
     ///      contract) rather than one per campaign. Funds land in the vault, never held here.
     function fundCampaign(uint256 campaignId, uint256 amount) external {
@@ -68,16 +81,22 @@ contract Boney is IBoney {
 
     // ── promoter actions ─────────────────────────────────────────
 
-    /// @notice Promoters join by calling `Campaign.join()` directly from the wallet that will
-    ///         receive rewards.
-    /// @dev Intentionally not proxied: the campaign records `msg.sender` as the promoter, so a
-    ///      facade-relayed join would register the facade. Use `campaignAddress` to resolve the
-    ///      target, then call `join()` on it.
+    /// @notice Returns the campaign address for joining.
+    /// @dev Promoters join by calling `Campaign.join()` directly from the wallet that will
+    ///      receive rewards. Intentionally not proxied: the campaign records `msg.sender` as the
+    ///      promoter, so a facade-relayed join would register the facade. Resolve the target with
+    ///      this function, then call `join()` on it from the promoter's own wallet.
+    /// @param campaignId The campaign id.
+    /// @return The campaign contract address.
     function campaignJoinTarget(uint256 campaignId) external view returns (address) {
         return registry.campaignAt(campaignId);
     }
 
     /// @inheritdoc IBoney
+    /// @param campaignId The campaign the touch belongs to.
+    /// @param user The end user who signed the touch.
+    /// @param touch The signed attribution message.
+    /// @param signature EIP-712 signature over `touch` by `user`.
     function registerAttribution(
         uint256 campaignId,
         address user,
@@ -90,6 +109,9 @@ contract Boney is IBoney {
     }
 
     /// @inheritdoc IBoney
+    /// @param campaignId The campaign to settle within.
+    /// @param promoter The promoter whose earned tiers are paid out.
+    /// @param kpiIndex Index of the KPI to settle.
     function claimRewards(uint256 campaignId, address promoter, uint256 kpiIndex) external {
         ICampaign(registry.campaignAt(campaignId)).settle(promoter, kpiIndex);
     }
@@ -97,6 +119,8 @@ contract Boney is IBoney {
     // ── views ────────────────────────────────────────────────────
 
     /// @inheritdoc IBoney
+    /// @param campaignId The campaign to summarize.
+    /// @return A snapshot of the campaign's configuration and live state.
     function campaignView(uint256 campaignId) public view returns (CampaignView memory) {
         address addr = registry.campaignAt(campaignId);
         ICampaign c = ICampaign(addr);
@@ -118,6 +142,9 @@ contract Boney is IBoney {
     }
 
     /// @inheritdoc IBoney
+    /// @param offset Starting campaign id.
+    /// @param limit Maximum number of campaigns to return.
+    /// @return page Summaries for the requested range; empty when `offset` is past the end.
     function browseCampaigns(uint256 offset, uint256 limit)
         external
         view
@@ -136,16 +163,23 @@ contract Boney is IBoney {
     }
 
     /// @inheritdoc IBoney
+    /// @return The campaign count, which is also the next campaign id.
     function campaignCount() external view returns (uint256) {
         return registry.campaignCount();
     }
 
     /// @inheritdoc IBoney
+    /// @param wallet The wallet to query.
+    /// @return The wallet's composite reputation score.
     function reputationOf(address wallet) external view returns (uint256) {
         return reputationRegistry.scoreOf(wallet);
     }
 
     /// @inheritdoc IBoney
+    /// @param campaignId The campaign to query.
+    /// @param promoter The promoter.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Progress credited to the promoter so far.
     function promoterProgress(uint256 campaignId, address promoter, uint256 kpiIndex)
         external
         view
@@ -155,6 +189,8 @@ contract Boney is IBoney {
     }
 
     /// @notice Resolve a campaign id to its contract address.
+    /// @param campaignId The campaign id.
+    /// @return The campaign contract address.
     function campaignAddress(uint256 campaignId) external view returns (address) {
         return registry.campaignAt(campaignId);
     }

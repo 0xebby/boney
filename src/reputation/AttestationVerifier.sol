@@ -33,6 +33,8 @@ contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
     error InvalidThreshold(uint256 threshold, uint256 attestorCount);
     error ZeroAddress();
 
+    /// @notice EIP-712 type hash for `Attestation`. Exposed so signers can build the digest
+    ///         off-chain without duplicating the struct definition.
     bytes32 public constant ATTESTATION_TYPEHASH = keccak256(
         "Attestation(address attestor,address subject,bytes32 schemaId,uint256 value,uint256 nonce,uint64 expiresAt,bytes32 data)"
     );
@@ -52,6 +54,11 @@ contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
     /// @inheritdoc IAttestationVerifier
     mapping(address => uint256) public nonces;
 
+    /// @notice Deploys the verifier with a single attestor and a threshold of one.
+    /// @dev Starting at `threshold = 1` is the phase-1 configuration; the admin raises it with
+    ///      `setThreshold` after adding attestors, with no redeploy.
+    /// @param admin Address that may manage the attestor set and the threshold.
+    /// @param initialAttestor The first attestor, active immediately.
     constructor(address admin, address initialAttestor) EIP712("Boney Attestations", "1") Ownable(admin) {
         if (admin == address(0) || initialAttestor == address(0)) revert ZeroAddress();
         isAttestor[initialAttestor] = true;

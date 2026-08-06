@@ -512,9 +512,9 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
           status: detail.status,
           joined: true,
           payout,
-          endedAt: detail.endedAt,
-          claimGrace: detail.claimGrace,
-          now: Math.floor(Date.now() / 1000),
+          endedAtSeconds: Number(detail.endedAt),
+          claimGraceSeconds: Number(detail.claimGrace),
+          nowSeconds: Math.floor(Date.now() / 1000),
         });
 
         expect(eligibility.ok).toBe(false);
@@ -633,7 +633,9 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
         functionName: "touchOf",
         args: [campaign, signer],
       });
-      expect(stored.promoterId).toBe(state.promoterId, "promoterId must match what the signer endorsed");
+      expect(stored.promoterId, "promoterId must match what the signer endorsed").toBe(
+        state.promoterId,
+      );
       expect(stored.signedAt).toBe(touch.signedAt);
       expect(stored.expiresAt).toBe(touch.expiresAt);
     });

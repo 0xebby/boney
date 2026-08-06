@@ -29,10 +29,18 @@ contract CampaignRegistry is ICampaignRegistry {
     /// @inheritdoc ICampaignRegistry
     address public immutable oracleCoordinator;
 
+    /// @dev Every campaign ever deployed, indexed by campaign id.
     address[] private _campaigns;
+    /// @dev campaign => deployed by this registry. Lets other modules reject spoofed campaigns.
     mapping(address => bool) private _isCampaign;
+    /// @dev project => their campaigns, in creation order.
     mapping(address => address[]) private _byProject;
 
+    /// @notice Deploys the registry with immutable module dependencies.
+    /// @param escrowVault_ Vault holding campaign escrow.
+    /// @param reputationRegistry_ Registry backing reputation lookups.
+    /// @param attributionRegistry_ Registry storing attribution touches.
+    /// @param oracleCoordinator_ Coordinator routing oracle reports.
     constructor(
         address escrowVault_,
         address reputationRegistry_,
@@ -104,6 +112,9 @@ contract CampaignRegistry is ICampaignRegistry {
     }
 
     /// @notice Paginated campaign listing for marketplace discovery.
+    /// @param offset Starting index in the campaign array.
+    /// @param limit Maximum number of campaigns to return.
+    /// @return page Array of campaign addresses in the requested range.
     function browse(uint256 offset, uint256 limit) external view returns (address[] memory page) {
         uint256 total = _campaigns.length;
         if (offset >= total) return new address[](0);

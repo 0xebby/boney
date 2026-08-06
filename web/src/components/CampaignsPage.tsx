@@ -56,7 +56,7 @@ export function CampaignsPage() {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-lg font-semibold text-ink">Campaigns</h1>
+        <h1 className="text-lg font-semibold text-ink">Boneyard</h1>
         <p className="mt-0.5 text-xs text-ink-muted">
           Escrowed, performance-based campaigns. Rewards release as verified milestones are met.
         </p>

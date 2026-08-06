@@ -30,13 +30,36 @@ contract SeedToken is ERC20 {
 ///      Module references live in storage rather than as locals in `run()`: the seed flow touches
 ///      five contracts and six accounts, which overflows the EVM stack if held as locals.
 contract SeedLocal is Script {
-    // Anvil's deterministic accounts.
-    uint256 constant DEPLOYER_PK = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-    uint256 constant PROJECT_PK = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
-    uint256 constant KOL_PK = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
-    uint256 constant KOL2_PK = 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
+    // Anvil's deterministic accounts, used as defaults so the local fixture is unchanged.
+    //
+    // Every broadcasting role is overridable, because none of these keys can hold value on a
+    // public chain. Deployer and project own protocol state — the deployer is the attestor and
+    // owner of the verifier, reputation registry, coordinator, and vault; the project owns every
+    // seeded campaign — so off anvil they point at a real wallet via env.
+    uint256 constant ANVIL_DEPLOYER_PK =
+        0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    uint256 constant ANVIL_PROJECT_PK =
+        0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+    // The KOL and user accounts default to anvil's, and both are overridable.
+    //
+    // Users only ever sign — `_storeTouch` relays through the deployer — so they need no gas on
+    // any chain and the deterministic keys are fine everywhere. The KOLs send their own
+    // `join()`, and on a public testnet a well-known key cannot hold gas: sweeper bots drain
+    // anything sent to anvil's accounts within seconds, so a top-up is gone before the seed can
+    // spend it. Off anvil the runner supplies burner keys derived from the deployer instead.
+    uint256 constant ANVIL_KOL_PK =
+        0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
+    uint256 constant ANVIL_KOL2_PK =
+        0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
     uint256 constant USER_PK = 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a;
     uint256 constant USER2_PK = 0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba;
+
+    // Resolved in `run()`. Storage rather than locals for the same stack-depth reason as the
+    // module references below.
+    uint256 DEPLOYER_PK;
+    uint256 PROJECT_PK;
+    uint256 KOL_PK;
+    uint256 KOL2_PK;
 
     CampaignRegistry registry;
     EscrowVault vault;
@@ -46,6 +69,11 @@ contract SeedLocal is Script {
     address project;
 
     function run() external {
+        DEPLOYER_PK = vm.envOr("SEED_DEPLOYER_PK", ANVIL_DEPLOYER_PK);
+        PROJECT_PK = vm.envOr("SEED_PROJECT_PK", ANVIL_PROJECT_PK);
+        KOL_PK = vm.envOr("SEED_KOL_PK", ANVIL_KOL_PK);
+        KOL2_PK = vm.envOr("SEED_KOL2_PK", ANVIL_KOL2_PK);
+
         registry = CampaignRegistry(vm.envAddress("REGISTRY_ADDRESS"));
         vault = EscrowVault(vm.envAddress("VAULT_ADDRESS"));
         attribution = AttributionRegistry(vm.envAddress("ATTRIBUTION_ADDRESS"));
@@ -78,12 +106,25 @@ contract SeedLocal is Script {
 
     /// @dev Registers a reputation schema and vouches for both KOLs, so reputation-gated
     ///      campaigns are actually joinable.
+    ///
+    ///      Re-runnable against an already-seeded chain, which reseeding onto a live deployment
+    ///      requires. Two separate replay guards have to be respected: `registerSchema` reverts
+    ///      with `SchemaAlreadyRegistered`, so it is skipped when `schemaInfo` reports the schema
+    ///      exists; and `storeAttestation` burns its `attestationId` permanently, so the ids are
+    ///      salted with the block number rather than being fixed strings. Attestations overwrite
+    ///      the stored record, so reseeding refreshes the values instead of duplicating them.
     function _seedReputation() internal {
-        vm.startBroadcast(DEPLOYER_PK);
-        reputation.registerSchema("X_FOLLOWERS", 1);
         bytes32 schema = reputation.schemaId("X_FOLLOWERS");
-        reputation.storeAttestation(vm.addr(KOL_PK), schema, 24_000, keccak256("seed-kol-1"));
-        reputation.storeAttestation(vm.addr(KOL2_PK), schema, 8_500, keccak256("seed-kol-2"));
+        (,, bool exists) = reputation.schemaInfo(schema);
+
+        vm.startBroadcast(DEPLOYER_PK);
+        if (!exists) reputation.registerSchema("X_FOLLOWERS", 1);
+        reputation.storeAttestation(
+            vm.addr(KOL_PK), schema, 24_000, keccak256(abi.encode("seed-kol-1", block.number))
+        );
+        reputation.storeAttestation(
+            vm.addr(KOL2_PK), schema, 8_500, keccak256(abi.encode("seed-kol-2", block.number))
+        );
         vm.stopBroadcast();
     }
 

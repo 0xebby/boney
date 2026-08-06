@@ -46,6 +46,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     /// @dev campaign => spendable balance, denominated in that campaign's token.
     mapping(address => uint256) private _balance;
 
+    /// @dev Restricts a call to the registrar, rejecting before the registrar is wired.
     modifier onlyRegistrar() {
         // Reject before wiring: an unset registrar must not match a zero-address caller.
         if (registrar == address(0)) revert RegistrarNotSet();
@@ -53,6 +54,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         _;
     }
 
+    /// @notice Deploys the escrow vault with a designated admin.
     /// @param admin_ The account allowed to set the registrar.
     constructor(address admin_) {
         if (admin_ == address(0)) revert ZeroAddress();
@@ -60,6 +62,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @notice Bind the campaign registry. Callable exactly once, by `admin`.
+    /// @param registrar_ Address of the campaign registry contract.
     function setRegistrar(address registrar_) external {
         if (msg.sender != admin) revert NotAdmin();
         if (registrar_ == address(0)) revert ZeroAddress();
@@ -69,6 +72,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
+    /// @param campaign The campaign being bound to a token.
+    /// @param token_ ERC20 the campaign escrows and pays out in.
     function registerCampaign(address campaign, address token_) external onlyRegistrar {
         if (campaign == address(0) || token_ == address(0)) revert ZeroAddress();
         if (_token[campaign] != address(0)) revert AlreadyRegistered();
@@ -78,6 +83,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
+    /// @param campaign The campaign to credit.
+    /// @param amount Amount to pull from the caller.
     /// @dev Credits the balance actually received, which may be less than `amount` for a
     ///      fee-on-transfer token. The caller must have approved this vault.
     function deposit(address campaign, uint256 amount) external nonReentrant {
@@ -95,6 +102,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
+    /// @param to Recipient of the payout.
+    /// @param amount Amount to release from the caller's balance.
     /// @dev The caller *is* the campaign; there is no campaign parameter to spoof.
     function release(address to, uint256 amount) external nonReentrant {
         _spend(msg.sender, to, amount);
@@ -102,6 +111,8 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
+    /// @param to Recipient of the returned funds.
+    /// @param amount Amount to reclaim from the caller's balance.
     function reclaim(address to, uint256 amount) external nonReentrant {
         _spend(msg.sender, to, amount);
         emit Reclaimed(msg.sender, to, amount);
@@ -109,6 +120,9 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     /// @dev Debits `campaign`'s ledger entry and transfers out. Reverts if the campaign is
     ///      unregistered or underfunded, so a campaign can only ever spend what it escrowed.
+    /// @param campaign The campaign whose ledger entry is debited.
+    /// @param to Recipient of the transfer.
+    /// @param amount Amount to debit and transfer.
     function _spend(address campaign, address to, uint256 amount) private {
         address token_ = _token[campaign];
         if (token_ == address(0)) revert CampaignNotRegistered();
@@ -125,11 +139,15 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @inheritdoc IEscrowVault
+    /// @param campaign Address of the campaign to query.
+    /// @return The escrowed balance for the campaign.
     function balanceOf(address campaign) external view returns (uint256) {
         return _balance[campaign];
     }
 
     /// @inheritdoc IEscrowVault
+    /// @param campaign Address of the campaign to query.
+    /// @return The token address bound to the campaign.
     function tokenOf(address campaign) external view returns (address) {
         return _token[campaign];
     }

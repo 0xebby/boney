@@ -8,6 +8,8 @@ import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 ///      so the verifier reads whichever registry the calling campaign actually uses rather than
 ///      one wired in at deploy time.
 interface ICampaignAttribution {
+    /// @notice The attribution registry the calling campaign resolves touches against.
+    /// @return The registry this verifier should read.
     function attributionRegistry() external view returns (IAttributionRegistry);
 }
 
@@ -88,6 +90,12 @@ contract TouchWindowVerifier is IKpiVerifier {
     }
 
     /// @notice The earliest action timestamp this touch can credit.
+    /// @dev Exposed so frontends can show promoters which activity currently counts for them.
+    /// @param campaign The campaign to read attribution from.
+    /// @param user The end user whose touch sets the floor.
+    /// @param params The KPI's configured `params` blob, carrying the lookback.
+    /// @return The cutoff timestamp; actions at or after it are credited. 0 when the user has no
+    ///         stored touch, since an unset `signedAt` credits nothing anyway.
     function windowFloor(address campaign, address user, bytes calldata params)
         external
         view
@@ -99,11 +107,18 @@ contract TouchWindowVerifier is IKpiVerifier {
     }
 
     /// @dev A KPI configured without params is strict — the safe reading of "unset".
+    /// @param params The KPI's `params` blob; a single abi-encoded `uint64`.
+    /// @return Seconds before `signedAt` that an action still counts, or 0 if params are unset or
+    ///         not the expected width.
     function _lookback(bytes calldata params) private pure returns (uint64) {
         if (params.length != 32) return 0;
         return abi.decode(params, (uint64));
     }
 
+    /// @dev Clamps at 0 rather than underflowing for a touch signed within `lookback` of the epoch.
+    /// @param signedAt When the user signed the live touch.
+    /// @param lookback Grace period before `signedAt`.
+    /// @return The earliest creditable action timestamp.
     function _floor(uint64 signedAt, uint64 lookback) private pure returns (uint64) {
         return signedAt > lookback ? signedAt - lookback : 0;
     }

@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "abis": "tsx scripts/extract-abis.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
-    "deployments": "tsx scripts/generate-deployments.ts"
+    "deployments": "tsx scripts/generate-deployments.ts",
+    "seed": "tsx scripts/seed-local.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

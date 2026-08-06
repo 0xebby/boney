@@ -40,6 +40,8 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     error PromoterNotRegistered(address campaign, bytes32 promoterId);
     error ZeroWindow();
 
+    /// @notice EIP-712 type hash for `Touch`. Exposed so wallets and frontends can build the
+    ///         digest a user signs without duplicating the struct definition.
     bytes32 public constant TOUCH_TYPEHASH =
         keccak256("Touch(address campaign,bytes32 promoterId,uint64 signedAt,uint64 expiresAt)");
 
@@ -54,6 +56,8 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     ///      non-campaign sits in that sender's own namespace, which no campaign ever reads.
     mapping(address => mapping(bytes32 => bool)) private _registered;
 
+    /// @notice Deploys the attribution registry with a maximum touch duration.
+    /// @param maxTouchDuration_ Longest attribution horizon a single touch may claim.
     constructor(uint64 maxTouchDuration_) EIP712("Boney Attribution", "1") {
         if (maxTouchDuration_ == 0) revert ZeroWindow();
         maxTouchDuration = maxTouchDuration_;
