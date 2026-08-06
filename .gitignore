@@ -11,6 +11,13 @@ out/
 docs/
 BoneyDocs.md
 todo.md
+todo-frontend.md
+
+# Web app
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel
 
 # Dotenv file
 .env

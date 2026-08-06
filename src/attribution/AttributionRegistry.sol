@@ -16,10 +16,17 @@ import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 ///      wallet's consent, and consent expires — so a KOL who goes quiet loses attribution for
 ///      users who stop interacting.
 ///
+///      Recency is taken from the signed `signedAt`, not from relay order. Relayers are the
+///      promoters competing for the credit, so whoever transacts last would otherwise win: a
+///      displaced promoter could re-submit the user's earlier signature and take the attribution
+///      back without fresh consent. Ordering therefore has to live inside the signature, and a
+///      touch only lands if it is strictly newer than the one already stored.
+///
 ///      Promoter ids are registered by the campaign itself (`registerPromoter` is called by the
-///      campaign when a KOL joins). A touch naming an id that no campaign registered is rejected,
-///      and the id is checked against the campaign in the signed payload, so a promoter id from
-///      one campaign cannot be used to farm attribution in another.
+///      campaign when a KOL joins). Registration is namespaced by the registrant, so a touch is
+///      only valid if the campaign named in the signed payload registered that id itself — a
+///      promoter id from one campaign cannot be used to farm attribution in another, and no one
+///      can deny a campaign an id by claiming it first.
 contract AttributionRegistry is IAttributionRegistry, EIP712 {
     using ECDSA for bytes32;
 
@@ -27,14 +34,14 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     error ZeroPromoterId();
     error TouchExpired(uint64 expiresAt, uint64 timestamp);
     error TouchTooLong(uint64 expiresAt, uint64 maxExpiresAt);
+    error TouchNotYetValid(uint64 signedAt, uint64 timestamp);
+    error TouchNotNewer(uint64 signedAt, uint64 storedSignedAt);
     error InvalidSignature();
-    error PromoterNotRegistered(bytes32 promoterId);
-    error PromoterCampaignMismatch(bytes32 promoterId, address expected, address provided);
-    error PromoterAlreadyRegistered(bytes32 promoterId);
+    error PromoterNotRegistered(address campaign, bytes32 promoterId);
     error ZeroWindow();
 
     bytes32 public constant TOUCH_TYPEHASH =
-        keccak256("Touch(address campaign,bytes32 promoterId,uint64 expiresAt)");
+        keccak256("Touch(address campaign,bytes32 promoterId,uint64 signedAt,uint64 expiresAt)");
 
     /// @notice Longest attribution horizon a single touch may claim. Prevents a user signing an
     ///         effectively permanent attribution, and bounds how stale a relayed touch can be.
@@ -43,8 +50,9 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @dev user => campaign => live touch.
     mapping(address => mapping(address => Touch)) private _touches;
 
-    /// @dev promoterId => campaign that registered it.
-    mapping(bytes32 => address) private _campaignOf;
+    /// @dev campaign => promoterId => registered. Namespaced by registrant: an id claimed by a
+    ///      non-campaign sits in that sender's own namespace, which no campaign ever reads.
+    mapping(address => mapping(bytes32 => bool)) private _registered;
 
     constructor(uint64 maxTouchDuration_) EIP712("Boney Attribution", "1") {
         if (maxTouchDuration_ == 0) revert ZeroWindow();
@@ -52,17 +60,14 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     }
 
     /// @inheritdoc IAttributionRegistry
-    /// @dev `msg.sender` is the campaign. Permissionless by design: a non-campaign caller can
-    ///      only ever bind ids under its own address, which no campaign will ever read.
+    /// @dev `msg.sender` is the campaign. Permissionless and idempotent by design: a registration
+    ///      only ever writes the caller's own namespace, so it can neither grant a non-campaign
+    ///      anything readable nor block a campaign from registering the same id.
     function registerPromoter(bytes32 promoterId) external {
         if (promoterId == bytes32(0)) revert ZeroPromoterId();
-        address existing = _campaignOf[promoterId];
-        if (existing != address(0)) {
-            if (existing != msg.sender) revert PromoterAlreadyRegistered(promoterId);
-            return; // idempotent re-registration by the same campaign
-        }
+        if (_registered[msg.sender][promoterId]) return;
 
-        _campaignOf[promoterId] = msg.sender;
+        _registered[msg.sender][promoterId] = true;
         emit PromoterRegistered(msg.sender, promoterId);
     }
 
@@ -74,27 +79,31 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         if (touch.promoterId == bytes32(0)) revert ZeroPromoterId();
 
         uint64 nowTs = uint64(block.timestamp);
+        if (touch.signedAt > nowTs) revert TouchNotYetValid(touch.signedAt, nowTs);
         if (touch.expiresAt <= nowTs) revert TouchExpired(touch.expiresAt, nowTs);
         if (touch.expiresAt > nowTs + maxTouchDuration) {
             revert TouchTooLong(touch.expiresAt, nowTs + maxTouchDuration);
         }
 
-        // The promoter id must belong to the campaign named in the signed payload.
-        address boundCampaign = _campaignOf[touch.promoterId];
-        if (boundCampaign == address(0)) revert PromoterNotRegistered(touch.promoterId);
-        if (boundCampaign != touch.campaign) {
-            revert PromoterCampaignMismatch(touch.promoterId, boundCampaign, touch.campaign);
+        // The campaign named in the signed payload must have registered the id itself.
+        if (!_registered[touch.campaign][touch.promoterId]) {
+            revert PromoterNotRegistered(touch.campaign, touch.promoterId);
         }
 
-        bytes32 structHash =
-            keccak256(abi.encode(TOUCH_TYPEHASH, touch.campaign, touch.promoterId, touch.expiresAt));
+        bytes32 structHash = keccak256(
+            abi.encode(TOUCH_TYPEHASH, touch.campaign, touch.promoterId, touch.signedAt, touch.expiresAt)
+        );
         address recovered = _hashTypedDataV4(structHash).recover(signature);
         if (recovered != user) revert InvalidSignature();
 
-        // LAST_TOUCH: overwrite whatever attribution this user had for this campaign.
+        // LAST_TOUCH, ordered by the user's own clock. Replaying a superseded signature is a
+        // no-op, so a displaced promoter cannot buy back attribution the user moved away.
+        Touch storage prev = _touches[user][touch.campaign];
+        if (touch.signedAt <= prev.signedAt) revert TouchNotNewer(touch.signedAt, prev.signedAt);
+
         _touches[user][touch.campaign] = touch;
 
-        emit TouchStored(touch.campaign, user, touch.promoterId, touch.expiresAt, relayer);
+        emit TouchStored(touch.campaign, user, touch.promoterId, touch.signedAt, touch.expiresAt, relayer);
     }
 
     /// @inheritdoc IAttributionRegistry
@@ -104,14 +113,14 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         return t.promoterId;
     }
 
-    /// @notice The live touch for a user in a campaign, expired or not.
+    /// @inheritdoc IAttributionRegistry
     function touchOf(address campaign, address user) external view returns (Touch memory) {
         return _touches[user][campaign];
     }
 
     /// @inheritdoc IAttributionRegistry
-    function campaignOf(bytes32 promoterId) external view returns (address) {
-        return _campaignOf[promoterId];
+    function isRegistered(address campaign, bytes32 promoterId) external view returns (bool) {
+        return _registered[campaign][promoterId];
     }
 
     /// @inheritdoc IAttributionRegistry

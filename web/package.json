@@ -1,0 +1,39 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "abis": "tsx scripts/extract-abis.ts",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "deployments": "tsx scripts/generate-deployments.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.4",
+    "next": "16.2.12",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "viem": "^2.55.10",
+    "wagmi": "^3.7.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "playwright": "^1.62.1",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.5",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
+  }
+}

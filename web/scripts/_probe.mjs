@@ -1,0 +1,16 @@
+import {chromium} from "playwright";
+const browser = await chromium.launch({executablePath: process.env.CHROME_PATH, args: ["--no-sandbox"]});
+const page = await browser.newPage({viewport: {width: 1440, height: 1200}});
+const errs = [];
+page.on("pageerror", (e) => errs.push("PAGEERROR: " + e.message));
+page.on("console", (m) => { if (m.type() === "error") errs.push("CONSOLE: " + m.text()); });
+await page.goto("http://localhost:3000/campaign/1", {waitUntil: "domcontentloaded", timeout: 60000});
+await page.waitForTimeout(8000);
+console.log("=== HEADINGS ===");
+console.log((await page.getByRole("heading").allInnerTexts()).join(" | "));
+console.log("=== BODY TEXT (first 1500) ===");
+console.log((await page.locator("body").innerText()).slice(0, 1500));
+console.log("=== ERRORS ===");
+console.log(errs.slice(0, 15).join("\n"));
+await page.screenshot({path: "/tmp/probe.png", fullPage: true});
+await browser.close();
