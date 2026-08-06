@@ -8,6 +8,7 @@ import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState} from "@/components/ui/States";
 import {useStoreTouch, type TxState} from "@/hooks/useWriteCampaign";
 import {fetchCampaignDetail} from "@/lib/campaignDetail";
+import {fetchBrowseCampaigns} from "@/lib/contracts";
 import {shortAddress, formatDuration} from "@/lib/format";
 import {useNow} from "@/hooks/useNow";
 import type {PublicClient} from "viem";
@@ -30,14 +31,28 @@ function AttributionPageContent() {
   const campaign = (searchParams.get("c") as `0x${string}`) || undefined;
   const promoterId = (searchParams.get("p") as `0x${string}`) || undefined;
 
-  const {data: detail, isLoading, error, refetch} = useQuery({
-    queryKey: ["campaignDetailForAttribution", campaign],
+  const {data, isLoading, error, refetch} = useQuery({
+    queryKey: ["campaignForAttribution", campaign],
     enabled: Boolean(client && campaign),
     queryFn: async () => {
       if (!client || !campaign) return null;
-      return await fetchCampaignDetail(client as PublicClient, campaign);
+
+      // The tracking link carries an address, but `/campaign/[id]` is keyed by the registry's
+      // numeric id and rejects anything else. The registry has no address→id lookup, so the id
+      // is recovered from the browse list — without it a confirmed attribution would redirect
+      // the user straight into an "Invalid campaign" page.
+      const [detail, views] = await Promise.all([
+        fetchCampaignDetail(client as PublicClient, campaign),
+        fetchBrowseCampaigns(client as PublicClient, BigInt(0), BigInt(1000)),
+      ]);
+
+      const match = views.find((v) => v.campaign.toLowerCase() === campaign.toLowerCase());
+      return {detail, campaignId: match?.campaignId};
     },
   });
+
+  const detail = data?.detail;
+  const campaignId = data?.campaignId;
 
   const storeTouchTx = useStoreTouch();
 
@@ -47,12 +62,14 @@ function AttributionPageContent() {
     }
   };
 
-  // Redirect to the campaign once confirmed.
+  // Redirect once confirmed. Falls back to the marketplace when the id could not be resolved,
+  // which beats routing to a detail page that will refuse to render.
   useEffect(() => {
-    if (storeTouchTx.state.status === "confirmed" && campaign) {
-      setTimeout(() => router.push(`/campaign/${campaign}`), 1500);
-    }
-  }, [storeTouchTx.state.status, campaign, router]);
+    if (storeTouchTx.state.status !== "confirmed") return;
+    const target = campaignId === undefined ? "/" : `/campaign/${campaignId}`;
+    const timer = setTimeout(() => router.push(target), 1500);
+    return () => clearTimeout(timer);
+  }, [storeTouchTx.state.status, campaignId, router]);
 
   if (!campaign || !promoterId) {
     return (

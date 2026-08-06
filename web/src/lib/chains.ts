@@ -1,4 +1,4 @@
-import {anvil, sepolia, mainnet} from "viem/chains";
+import {anvil, sepolia, baseSepolia, mainnet} from "viem/chains";
 import {GENERATED_DEPLOYMENTS} from "./deployments";
 
 /**
@@ -12,6 +12,7 @@ import {GENERATED_DEPLOYMENTS} from "./deployments";
 export const SUPPORTED_CHAINS = {
   anvil: anvil.id,
   sepolia: sepolia.id,
+  baseSepolia: baseSepolia.id,
   mainnet: mainnet.id,
 } as const;
 
@@ -41,7 +42,6 @@ function env(key: string): `0x${string}` {
  * the others come from env vars and are zero until set.
  */
 export const DEPLOYMENTS: Partial<Record<number, Deployment>> = {
-  ...GENERATED_DEPLOYMENTS,
   [sepolia.id]: {
     boney: env("NEXT_PUBLIC_SEPOLIA_BONEY"),
     campaignRegistry: env("NEXT_PUBLIC_SEPOLIA_CAMPAIGN_REGISTRY"),
@@ -51,6 +51,19 @@ export const DEPLOYMENTS: Partial<Record<number, Deployment>> = {
     attestationVerifier: env("NEXT_PUBLIC_SEPOLIA_ATTESTATION_VERIFIER"),
     oracleCoordinator: env("NEXT_PUBLIC_SEPOLIA_ORACLE_COORDINATOR"),
   },
+  [baseSepolia.id]: {
+    boney: env("NEXT_PUBLIC_BASE_SEPOLIA_BONEY"),
+    campaignRegistry: env("NEXT_PUBLIC_BASE_SEPOLIA_CAMPAIGN_REGISTRY"),
+    escrowVault: env("NEXT_PUBLIC_BASE_SEPOLIA_ESCROW_VAULT"),
+    attributionRegistry: env("NEXT_PUBLIC_BASE_SEPOLIA_ATTRIBUTION_REGISTRY"),
+    reputationRegistry: env("NEXT_PUBLIC_BASE_SEPOLIA_REPUTATION_REGISTRY"),
+    attestationVerifier: env("NEXT_PUBLIC_BASE_SEPOLIA_ATTESTATION_VERIFIER"),
+    oracleCoordinator: env("NEXT_PUBLIC_BASE_SEPOLIA_ORACLE_COORDINATOR"),
+  },
+  // Generated entries come last so they win: they are read from the broadcast receipt, so they
+  // describe what actually landed on chain rather than what an env var claims. Spread first, a
+  // generated deployment would be silently clobbered by unset env vars resolving to zero.
+  ...GENERATED_DEPLOYMENTS,
 };
 
 export function getDeployment(chainId: number | undefined): Deployment | undefined {
@@ -71,9 +84,10 @@ export function explorerAddressUrl(chainId: number, address: string): string | u
   const base: Record<number, string> = {
     [mainnet.id]: "https://etherscan.io",
     [sepolia.id]: "https://sepolia.etherscan.io",
+    [baseSepolia.id]: "https://sepolia.basescan.org",
   };
   const root = base[chainId];
   return root ? `${root}/address/${address}` : undefined;
 }
 
-export {anvil, sepolia, mainnet};
+export {anvil, sepolia, baseSepolia, mainnet};

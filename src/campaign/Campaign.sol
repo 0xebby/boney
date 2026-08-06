@@ -62,36 +62,54 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ///      enough that settlement exceeds the block gas limit — bricking payouts for promoters
     ///      who already did the work. Validated once at construction.
     uint256 public constant MAX_KPIS = 32;
+    /// @notice Cap on tiers per KPI, bounding the per-report settlement loop.
     uint256 public constant MAX_TIERS_PER_KPI = 32;
 
     // ── dependencies ─────────────────────────────────────────────
 
+    /// @notice Vault holding this campaign's escrowed rewards.
     IEscrowVault public immutable escrowVault;
+    /// @notice Registry resolving which promoter owns a given end user.
     IAttributionRegistry public immutable attributionRegistry;
+    /// @notice Registry consulted for the `minReputation` gate at join time.
     IReputationRegistry public immutable reputationRegistry;
+    /// @notice Coordinator allowed to push aggregate updates and user reports.
     address public immutable oracleCoordinator;
 
     // ── frozen parameters (D8) ───────────────────────────────────
     // Stored as individual immutables because Solidity does not allow immutable structs;
     // `config()` reassembles them for the ICampaign surface.
 
+    /// @notice Owner of the campaign; funds it, controls its lifecycle, receives unspent escrow.
     address public immutable project;
+    /// @notice ERC20 used for escrow and payouts.
     address public immutable token;
+    /// @notice Total escrow required before the campaign can be activated, and the ceiling on
+    ///         everything this campaign can ever pay out.
     uint256 public immutable rewardPool;
+    /// @notice Start of the window in which reports are accepted.
     uint64 public immutable startTime;
+    /// @notice End of that window. Past it, anyone may `end()` the campaign.
     uint64 public immutable endTime;
     /// @notice Recommended touch TTL for frontends when asking a user to sign an attribution.
     /// @dev Advisory. The hard cap on touch lifetime lives in AttributionRegistry.
     uint64 public immutable attributionWindow;
+    /// @notice Minimum reputation score a promoter needs to join. 0 disables the gate.
     uint256 public immutable minReputation;
 
+    /// @dev KPI specs, indexed by `kpiIndex` throughout the contract.
     Types.KpiSpec[] private _kpis;
+    /// @dev Reward ladders, outer index aligned to `_kpis`; each inner array ascends by threshold.
     Types.RewardTier[][] private _tiers;
 
     // ── mutable state ────────────────────────────────────────────
 
+    /// @inheritdoc ICampaign
     Types.CampaignStatus public status;
+    /// @inheritdoc ICampaign
     uint256 public paidOut;
+    /// @notice When the campaign became terminal, and the start of `CLAIM_GRACE`.
+    /// @dev 0 until `end()` or `cancel()` runs.
     uint64 public endedAt;
 
     /// @dev promoter id => promoter wallet. Only ids this campaign issued.
@@ -107,16 +125,26 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev kpiIndex => campaign-level total.
     mapping(uint256 => uint256) private _totalProgress;
 
+    /// @dev Restricts a call to the campaign's project.
     modifier onlyProject() {
         if (msg.sender != project) revert NotProject();
         _;
     }
 
+    /// @dev Restricts a call to the Active status.
     modifier onlyActive() {
         if (status != Types.CampaignStatus.Active) revert WrongStatus(status);
         _;
     }
 
+    /// @notice Deploys a campaign with immutable configuration.
+    /// @param cfg Immutable campaign parameters.
+    /// @param kpis_ KPI specifications.
+    /// @param tiers_ Reward tiers per KPI.
+    /// @param escrowVault_ Vault holding escrowed rewards.
+    /// @param attributionRegistry_ Registry storing attribution touches.
+    /// @param reputationRegistry_ Registry backing reputation lookups.
+    /// @param oracleCoordinator_ Coordinator authorized to push oracle updates.
     constructor(
         Types.CampaignConfig memory cfg,
         Types.KpiSpec[] memory kpis_,
@@ -232,6 +260,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
         _setStatus(Types.CampaignStatus.Cancelled);
     }
 
+    /// @dev Transitions the campaign to a new status and emits the state change.
+    /// @param next The new status.
     function _setStatus(Types.CampaignStatus next) private {
         Types.CampaignStatus previous = status;
         status = next;
@@ -350,6 +380,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Walks the tier ladder for one `(promoter, kpi)` pair and pays every newly crossed
     ///      tier. State is written before each external transfer (checks-effects-interactions);
     ///      callers are `nonReentrant`.
+    /// @param promoter Wallet receiving the payouts.
+    /// @param promoterId The promoter's campaign-bound id, used for event indexing.
+    /// @param kpiIndex Index of the KPI whose ladder is walked.
     function _settle(address promoter, bytes32 promoterId, uint256 kpiIndex) private {
         Types.RewardTier[] storage ladder = _tiers[kpiIndex];
         uint256 progress = _progress[promoter][kpiIndex];
@@ -397,6 +430,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         emit Reclaimed(project, amount);
     }
 
+    /// @dev Reverts unless the current block timestamp is inside the campaign window.
     function _requireWindow() private view {
         if (block.timestamp < startTime || block.timestamp > endTime) {
             revert OutsideWindow(startTime, endTime);
@@ -456,16 +490,23 @@ contract Campaign is ICampaign, ReentrancyGuard {
     }
 
     /// @notice Cumulative amount already credited for a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Amount credited so far; the replay guard for reports.
     function userCreditedOf(address user, uint256 kpiIndex) external view returns (uint256) {
         return _userCredited[user][kpiIndex];
     }
 
     /// @notice Number of tiers already settled for a `(promoter, kpi)` pair.
+    /// @param promoter The promoter.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Count of settled tiers, which is also the next tier index.
     function settledTiersOf(address promoter, uint256 kpiIndex) external view returns (uint256) {
         return _settledTiers[promoter][kpiIndex];
     }
 
     /// @notice Rewards still available in the shared pool.
+    /// @return The unpaid remainder of the reward pool.
     function remainingPool() external view returns (uint256) {
         return rewardPool - paidOut;
     }

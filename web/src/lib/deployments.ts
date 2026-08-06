@@ -6,12 +6,21 @@ import type {Deployment} from './chains';
 /** Addresses that actually landed on chain, read from Foundry's broadcast receipt. */
 export const GENERATED_DEPLOYMENTS: Record<number, Deployment> = {
   31337: {
-    attributionRegistry: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-    attestationVerifier: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-    reputationRegistry: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-    oracleCoordinator: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
-    escrowVault: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
-    campaignRegistry: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-    boney: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+    attributionRegistry: "0x998abeb3E57409262aE5b751f60747921B33613E",
+    attestationVerifier: "0x70e0bA845a1A0F2DA3359C97E0285013525FFC49",
+    reputationRegistry: "0x4826533B4897376654Bb4d4AD88B7faFD0C98528",
+    oracleCoordinator: "0x99bbA657f2BbC93c02D617f8bA121cB8Fc104Acf",
+    escrowVault: "0x0E801D84Fa97b50751Dbf25036d067dCf18858bF",
+    campaignRegistry: "0x8f86403A4DE0BB5791fa46B8e795C547942fE4Cf",
+    boney: "0x36C02dA8a0983159322a80FFE9F24b1acfF8B570",
+  },
+  84532: {
+    attributionRegistry: "0xd4ae67b54d859C4637C1ba3bf0902E823053E556",
+    attestationVerifier: "0xB8519aFCC5d3038555188AB4984aeEE6ab9529dB",
+    reputationRegistry: "0x3672C20063343fb474116365c696DF3958c76681",
+    oracleCoordinator: "0xe6889f8ACD0F3d6239f76b5e55920794908b71F0",
+    escrowVault: "0x4413E640EF120C1aeE191335655620d636a460D1",
+    campaignRegistry: "0x316224aB5b32e0037c836EbE279640Cb90C52280",
+    boney: "0x614B33272b1Bc9033A596373c08E75f3B4B5CDA4",
   },
 };
