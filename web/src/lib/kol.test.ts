@@ -1,0 +1,251 @@
+import {describe, it, expect} from "vitest";
+import {
+  derivePromoterId,
+  hasJoined,
+  canJoin,
+  canSettle,
+  claimWindowRemaining,
+  trackingLink,
+  parseTrackingLink,
+  type JoinContext,
+  type SettleContext,
+} from "./kol";
+import {CLAIM_GRACE_SECONDS} from "./types";
+
+/**
+ * KOL guard tests.
+ *
+ * Same standard as `lifecycle.test.ts`: the negative cases carry the weight, because an
+ * over-permissive mirror renders a button whose only feedback is a reverted transaction the KOL
+ * paid gas for. Each test names the Solidity error it stands in for.
+ */
+
+const NOW = 1_800_000_000;
+const CAMPAIGN = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const;
+const PROMOTER = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const;
+const ZERO_ID = `0x${"00".repeat(32)}` as const;
+
+describe("derivePromoterId", () => {
+  it("is deterministic for a campaign/promoter pair", () => {
+    expect(derivePromoterId(CAMPAIGN, PROMOTER)).toBe(derivePromoterId(CAMPAIGN, PROMOTER));
+  });
+
+  it("returns a 32-byte hash", () => {
+    expect(derivePromoterId(CAMPAIGN, PROMOTER)).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("differs per campaign, so one KOL's id is not reusable across campaigns", () => {
+    const other = "0xcccccccccccccccccccccccccccccccccccccccc" as const;
+    expect(derivePromoterId(CAMPAIGN, PROMOTER)).not.toBe(derivePromoterId(other, PROMOTER));
+  });
+
+  it("differs per promoter", () => {
+    const other = "0xdddddddddddddddddddddddddddddddddddddddd" as const;
+    expect(derivePromoterId(CAMPAIGN, PROMOTER)).not.toBe(derivePromoterId(CAMPAIGN, other));
+  });
+
+  it("is not symmetric — argument order is load-bearing", () => {
+    // keccak256(abi.encode(campaign, promoter)), not the reverse. Swapping them would produce a
+    // plausible-looking id that no touch would ever match.
+    expect(derivePromoterId(CAMPAIGN, PROMOTER)).not.toBe(derivePromoterId(PROMOTER, CAMPAIGN));
+  });
+
+  it("is case-insensitive about address checksums", () => {
+    // abi.encode works on the 20 raw bytes; a checksummed and a lowercase address are the same
+    // address, so they must not produce different ids.
+    expect(derivePromoterId(CAMPAIGN.toUpperCase().replace("0X", "0x") as `0x${string}`, PROMOTER))
+      .toBe(derivePromoterId(CAMPAIGN, PROMOTER));
+  });
+});
+
+describe("hasJoined", () => {
+  it("treats the zero id as not joined", () => {
+    expect(hasJoined(ZERO_ID)).toBe(false);
+  });
+
+  it("treats a real id as joined", () => {
+    expect(hasJoined(derivePromoterId(CAMPAIGN, PROMOTER))).toBe(true);
+  });
+
+  it("handles undefined and null from a pending read", () => {
+    expect(hasJoined(undefined)).toBe(false);
+    expect(hasJoined(null)).toBe(false);
+  });
+});
+
+describe("canJoin", () => {
+  const ctx = (o: Partial<JoinContext> = {}): JoinContext => ({
+    status: "Active",
+    alreadyJoined: false,
+    reputation: BigInt(1000),
+    minReputation: BigInt(0),
+    connected: true,
+    ...o,
+  });
+
+  it("allows joining an active campaign", () => {
+    expect(canJoin(ctx()).ok).toBe(true);
+  });
+
+  it("allows joining a PENDING campaign — KOLs prepare links before launch", () => {
+    // Campaign.join accepts Active *or* Pending. Restricting to Active would hide a legitimate
+    // action the contract permits.
+    expect(canJoin(ctx({status: "Pending"})).ok).toBe(true);
+  });
+
+  it("blocks Paused, Ended and Cancelled — Solidity: WrongStatus", () => {
+    for (const status of ["Paused", "Ended", "Cancelled"] as const) {
+      expect(canJoin(ctx({status})).ok, status).toBe(false);
+    }
+  });
+
+  it("blocks a second join — Solidity: AlreadyJoined", () => {
+    const r = canJoin(ctx({alreadyJoined: true}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/already joined/i);
+  });
+
+  it("blocks below the reputation floor — Solidity: InsufficientReputation", () => {
+    const r = canJoin(ctx({reputation: BigInt(999), minReputation: BigInt(1000)}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/reputation/i);
+  });
+
+  it("admits a score exactly at the floor — the contract uses <, not <=", () => {
+    expect(canJoin(ctx({reputation: BigInt(1000), minReputation: BigInt(1000)})).ok).toBe(true);
+  });
+
+  it("ignores reputation entirely when minReputation is 0", () => {
+    // The contract guards with `minReputation != 0 && score < minReputation`, so an open
+    // campaign admits a zero-score wallet.
+    expect(canJoin(ctx({reputation: BigInt(0), minReputation: BigInt(0)})).ok).toBe(true);
+  });
+
+  it("requires a wallet", () => {
+    expect(canJoin(ctx({connected: false})).ok).toBe(false);
+  });
+
+  it("gives a reason whenever it refuses", () => {
+    for (const status of ["Paused", "Ended", "Cancelled"] as const) {
+      expect(canJoin(ctx({status})).reason).toBeTruthy();
+    }
+  });
+});
+
+describe("canSettle", () => {
+  const ctx = (o: Partial<SettleContext> = {}): SettleContext => ({
+    status: "Active",
+    joined: true,
+    endedAtSeconds: 0,
+    claimGraceSeconds: CLAIM_GRACE_SECONDS,
+    nowSeconds: NOW,
+    payout: BigInt(100),
+    ...o,
+  });
+
+  it("allows claiming on an active campaign with a payout", () => {
+    expect(canSettle(ctx()).ok).toBe(true);
+  });
+
+  it("blocks a non-promoter — Solidity: NotJoined", () => {
+    expect(canSettle(ctx({joined: false})).ok).toBe(false);
+  });
+
+  it("allows claiming on an Ended campaign inside the grace window", () => {
+    const c = ctx({status: "Ended", endedAtSeconds: NOW - 10});
+    expect(canSettle(c).ok).toBe(true);
+  });
+
+  it("blocks once the grace window closes — Solidity: WrongStatus", () => {
+    const endedAt = NOW - CLAIM_GRACE_SECONDS - 1;
+    const c = ctx({status: "Ended", endedAtSeconds: endedAt});
+    expect(canSettle(c).ok).toBe(false);
+    expect(c.nowSeconds > endedAt + CLAIM_GRACE_SECONDS).toBe(true);
+  });
+
+  it("is open on the boundary second — the mirror image of reclaim", () => {
+    // settle reverts only when `block.timestamp > endedAt + CLAIM_GRACE`, while reclaim reverts
+    // while `<=`. The boundary second belongs to the promoter, and the two must never both be
+    // open on the same second.
+    const endedAt = NOW - CLAIM_GRACE_SECONDS;
+    expect(canSettle(ctx({status: "Ended", endedAtSeconds: endedAt})).ok).toBe(true);
+  });
+
+  it("blocks Pending, Paused and Cancelled", () => {
+    for (const status of ["Pending", "Paused", "Cancelled"] as const) {
+      expect(canSettle(ctx({status})).ok, status).toBe(false);
+    }
+  });
+
+  it("blocks a zero payout rather than sending a no-op transaction", () => {
+    const r = canSettle(ctx({payout: BigInt(0)}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/nothing is waiting to be claimed/i);
+  });
+});
+
+describe("claimWindowRemaining", () => {
+  it("is null while the campaign is still running — no deadline exists yet", () => {
+    // Distinct from 0, which means "the window has shut". Conflating them would show a KOL an
+    // expired countdown on a live campaign.
+    expect(claimWindowRemaining("Active", 0, CLAIM_GRACE_SECONDS, NOW)).toBeNull();
+    expect(claimWindowRemaining("Pending", 0, CLAIM_GRACE_SECONDS, NOW)).toBeNull();
+  });
+
+  it("counts down from endedAt, not endTime", () => {
+    const endedAt = NOW - 86_400;
+    expect(claimWindowRemaining("Ended", endedAt, CLAIM_GRACE_SECONDS, NOW)).toBe(
+      CLAIM_GRACE_SECONDS - 86_400,
+    );
+  });
+
+  it("is 0 once the window has shut", () => {
+    const endedAt = NOW - CLAIM_GRACE_SECONDS - 100;
+    expect(claimWindowRemaining("Ended", endedAt, CLAIM_GRACE_SECONDS, NOW)).toBe(0);
+  });
+
+  it("is null when endedAt has not been recorded", () => {
+    expect(claimWindowRemaining("Ended", 0, CLAIM_GRACE_SECONDS, NOW)).toBeNull();
+  });
+});
+
+describe("trackingLink", () => {
+  const ID = derivePromoterId(CAMPAIGN, PROMOTER);
+
+  it("round-trips through parseTrackingLink", () => {
+    const url = trackingLink("https://boney.xyz", CAMPAIGN, ID);
+    expect(parseTrackingLink(url)).toEqual({campaign: CAMPAIGN, promoterId: ID});
+  });
+
+  it("carries both fields a Touch is built from", () => {
+    const url = trackingLink("https://boney.xyz", CAMPAIGN, ID);
+    expect(url).toContain(CAMPAIGN);
+    expect(url).toContain(ID);
+  });
+
+  it("does not bake in an expiry", () => {
+    // expiresAt is set when the touch is signed, from the campaign's attributionWindow. A
+    // timestamp in a shared URL would only produce a link that silently stops working.
+    const url = trackingLink("https://boney.xyz", CAMPAIGN, ID);
+    expect(url).not.toMatch(/expire|exp=|until/i);
+  });
+
+  it("tolerates a trailing slash on the origin", () => {
+    expect(trackingLink("https://boney.xyz/", CAMPAIGN, ID)).toBe(
+      trackingLink("https://boney.xyz", CAMPAIGN, ID),
+    );
+  });
+
+  it("rejects a malformed campaign address", () => {
+    expect(parseTrackingLink(`https://boney.xyz/r?c=0xnope&p=${ID}`)).toBeNull();
+  });
+
+  it("rejects a promoter id of the wrong width", () => {
+    expect(parseTrackingLink(`https://boney.xyz/r?c=${CAMPAIGN}&p=0x1234`)).toBeNull();
+  });
+
+  it("rejects a link missing a parameter, and a non-URL", () => {
+    expect(parseTrackingLink(`https://boney.xyz/r?c=${CAMPAIGN}`)).toBeNull();
+    expect(parseTrackingLink("not a url")).toBeNull();
+  });
+});

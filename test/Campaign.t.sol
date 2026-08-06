@@ -154,10 +154,12 @@ contract CampaignTest is Test {
         IAttributionRegistry.Touch memory t = IAttributionRegistry.Touch({
             campaign: address(c),
             promoterId: promoterId,
+            signedAt: uint64(block.timestamp),
             expiresAt: uint64(block.timestamp) + ttl
         });
-        bytes32 structHash =
-            keccak256(abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.expiresAt));
+        bytes32 structHash = keccak256(
+            abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.signedAt, t.expiresAt)
+        );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         attribution.storeTouch(signer, t, abi.encodePacked(r, s, v), signer);
@@ -353,7 +355,7 @@ contract CampaignTest is Test {
         assertTrue(id != bytes32(0));
         assertEq(campaign.promoterIdOf(kol), id);
         assertEq(campaign.promoterOf(id), kol);
-        assertEq(attribution.campaignOf(id), address(campaign), "id bound in attribution registry");
+        assertTrue(attribution.isRegistered(address(campaign), id), "id bound in attribution registry");
     }
 
     function test_Join_allowedWhilePending() public {
@@ -433,6 +435,30 @@ contract CampaignTest is Test {
         vm.prank(project);
         vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
+    }
+
+    /// @dev An expired touch reverts the whole report rather than skipping the user, so the
+    ///      activity is not burned — it is merely unbanked. A fresh touch makes the same cumulative
+    ///      report land, and because `_userCredited` never advanced, the full total is still owed.
+    ///      Which means a lapse hands everything to whoever the user signs for next.
+    function test_Report_recoverableAfterAttributionExpires() public {
+        _activate(campaign);
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        _touch(campaign, userPk, user, id1, 1 days);
+        skip(1 days + 1);
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
+        campaign.reportUserAction(0, user, 5, "");
+
+        // The user re-engages through a different KOL and the same report now succeeds.
+        _touch(campaign, userPk, user, id2, 7 days);
+        _report(campaign, project, user, 5);
+
+        assertEq(campaign.progressOf(kol, 0), 0, "the lapse cost kol everything unreported");
+        assertEq(campaign.progressOf(kol2, 0), 5, "credited in full to the promoter live at report time");
     }
 
     function test_Report_onlyReporters() public {
@@ -534,11 +560,62 @@ contract CampaignTest is Test {
         _report(campaign, project, user, 5);
         assertEq(campaign.progressOf(kol, 0), 5);
 
+        // Touches are ordered by their signed timestamp, so a re-attribution has to be genuinely
+        // later than the one it replaces.
+        skip(1 hours);
         _touch(campaign, userPk, user, id2, 7 days);
         _report(campaign, project, user, 12);
 
         assertEq(campaign.progressOf(kol, 0), 5, "earned credit is not clawed back");
         assertEq(campaign.progressOf(kol2, 0), 7, "only the delta moves");
+    }
+
+    /// @dev Attribution is resolved when a report lands, not when the user acted — the contract
+    ///      only ever sees a cumulative `newTotal` and has no idea *when* the underlying actions
+    ///      happened. So the effective granularity of attribution is the project's reporting
+    ///      interval: everything accrued since the last report follows whoever holds the touch at
+    ///      report time, including activity that predates that touch entirely.
+    ///
+    ///      This is a known limitation, pinned here so it stays a deliberate choice rather than an
+    ///      accident. A promoter who knows the reporting cadence can farm it by getting the user
+    ///      to sign just before a batch. Closing it needs per-action timestamps in `evidence` and
+    ///      a verifier adapter that discounts actions predating the live touch's `signedAt`; note
+    ///      a verifier can only reduce `credited`, never redirect the payee, so it can deny the
+    ///      late-arriving promoter the delta but cannot award it to the earlier one.
+    function test_Report_unreportedProgressFollowsTheLaterTouch() public {
+        _activate(campaign);
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        // The user acts entirely under kol's attribution — but nothing is reported yet.
+        _touch(campaign, userPk, user, id1, 7 days);
+
+        // kol2 gets the user to sign before the project's next report lands.
+        skip(1 hours);
+        _touch(campaign, userPk, user, id2, 7 days);
+
+        _report(campaign, project, user, 10);
+
+        assertEq(campaign.progressOf(kol, 0), 0, "kol earned nothing despite being live throughout");
+        assertEq(campaign.progressOf(kol2, 0), 10, "the whole unreported delta follows the later touch");
+    }
+
+    /// @dev The corollary: reporting more often shrinks the window. Same activity, same touches,
+    ///      but a report in between locks kol's share in.
+    function test_Report_frequentReportingLimitsTheWindow() public {
+        _activate(campaign);
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        _touch(campaign, userPk, user, id1, 7 days);
+        _report(campaign, project, user, 10);
+
+        skip(1 hours);
+        _touch(campaign, userPk, user, id2, 7 days);
+        _report(campaign, project, user, 10);
+
+        assertEq(campaign.progressOf(kol, 0), 10, "banked before the switch");
+        assertEq(campaign.progressOf(kol2, 0), 0, "nothing left to redirect");
     }
 
     // ── tier settlement ──────────────────────────────────────────

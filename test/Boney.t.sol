@@ -165,10 +165,12 @@ contract BoneyTest is Test {
         IAttributionRegistry.Touch memory t = IAttributionRegistry.Touch({
             campaign: address(c),
             promoterId: promoterId,
+            signedAt: uint64(block.timestamp),
             expiresAt: uint64(block.timestamp + 7 days)
         });
-        bytes32 structHash =
-            keccak256(abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.expiresAt));
+        bytes32 structHash = keccak256(
+            abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.signedAt, t.expiresAt)
+        );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
 
@@ -323,6 +325,7 @@ contract BoneyTest is Test {
         IAttributionRegistry.Touch memory t = IAttributionRegistry.Touch({
             campaign: address(0xDEAD),
             promoterId: promoterId,
+            signedAt: uint64(block.timestamp),
             expiresAt: uint64(block.timestamp + 1 days)
         });
 

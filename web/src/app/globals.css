@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+/**
+ * Boney design tokens.
+ *
+ * Palette values come from the dataviz reference instance and were validated with
+ * `scripts/validate_palette.js` against both surfaces:
+ *   dark  (#1a1a19): all six checks PASS
+ *   light (#fcfcfb): PASS, with a contrast WARN on aqua/yellow/magenta — those three
+ *                    sit below 3:1 on the light surface, so anything using them ships
+ *                    visible labels or a table view (the "relief rule").
+ *
+ * Dark is the default: this is a data terminal, and dark is the selected mode, not an
+ * inverted light theme — the dark series steps are their own validated set.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — page plane sits below the raised chart/card surface */
+  --plane: #0d0d0d;
+  --surface-1: #1a1a19;
+  --surface-2: #212120;
+  --surface-hover: #262625;
+
+  /* Ink */
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+
+  /* Chrome */
+  --gridline: #2c2c2a;
+  --baseline: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Categorical series — fixed order, never cycled, never assigned by rank */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  /* Status — reserved; never reused as a series color. Always paired with a label. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  /* Sequential blue ramp (magnitude encoding, meters) */
+  --seq-100: #cde2fb;
+  --seq-250: #86b6ef;
+  --seq-400: #3987e5;
+  --seq-450: #2a78d6;
+  --seq-550: #1c5cab;
+  --seq-600: #184f95;
+  --seq-700: #0d366b;
+
+  /* De-emphasis (the "rest" in an emphasis chart, meter tracks) */
+  --muted-track: #2c2c2a;
+
+  /* Density scale — a data terminal is tighter than a marketing page */
+  --row-h: 40px;
+  --row-h-compact: 32px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --plane: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #f4f4f1;
+  --surface-hover: #efeeea;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+
+  --gridline: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --border-strong: rgba(11, 11, 11, 0.16);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  --muted-track: #e1e0d9;
+}
+
+@theme inline {
+  --color-plane: var(--plane);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-ink: var(--text-primary);
+  --color-ink-secondary: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+
+  --color-gridline: var(--gridline);
+  --color-baseline: var(--baseline);
+  --color-hairline: var(--border);
+  --color-hairline-strong: var(--border-strong);
+
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+
+  --color-good: var(--status-good);
+  --color-warning: var(--status-warning);
+  --color-serious: var(--status-serious);
+  --color-critical: var(--status-critical);
+
+  --color-track: var(--muted-track);
+
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--plane);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * Columns of numbers must align vertically, so table cells and axis ticks get
+ * tabular figures. Large standalone values (stat tiles, hero figures) deliberately
+ * keep proportional figures — tabular makes a number like `121` look loose at
+ * display sizes.
+ */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visible focus ring for keyboard nav; never removed, only restyled. */
+:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Respect reduced-motion for every transition in the app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

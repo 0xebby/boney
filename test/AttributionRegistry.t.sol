@@ -40,17 +40,32 @@ contract AttributionRegistryTest is Test {
 
     // ── helpers ──────────────────────────────────────────────────
 
+    /// @dev A touch signed "now", the way a frontend would produce one.
     function _touch(address campaign_, bytes32 id, uint64 expiresAt)
+        internal
+        view
+        returns (IAttributionRegistry.Touch memory)
+    {
+        return _touchAt(campaign_, id, uint64(block.timestamp), expiresAt);
+    }
+
+    function _touchAt(address campaign_, bytes32 id, uint64 signedAt, uint64 expiresAt)
         internal
         pure
         returns (IAttributionRegistry.Touch memory)
     {
-        return IAttributionRegistry.Touch({campaign: campaign_, promoterId: id, expiresAt: expiresAt});
+        return IAttributionRegistry.Touch({
+            campaign: campaign_,
+            promoterId: id,
+            signedAt: signedAt,
+            expiresAt: expiresAt
+        });
     }
 
     function _sign(uint256 pk, IAttributionRegistry.Touch memory t) internal view returns (bytes memory) {
-        bytes32 structHash =
-            keccak256(abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.expiresAt));
+        bytes32 structHash = keccak256(
+            abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.signedAt, t.expiresAt)
+        );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
@@ -63,22 +78,41 @@ contract AttributionRegistryTest is Test {
     // ── promoter registration ────────────────────────────────────
 
     function test_RegisterPromoter() public view {
-        assertEq(attribution.campaignOf(promoterId), campaign);
+        assertTrue(attribution.isRegistered(campaign, promoterId));
     }
 
     function test_RegisterPromoter_idempotentForSameCampaign() public {
         vm.prank(campaign);
         attribution.registerPromoter(promoterId);
-        assertEq(attribution.campaignOf(promoterId), campaign);
+        assertTrue(attribution.isRegistered(campaign, promoterId));
     }
 
-    /// @dev A different campaign must not be able to hijack an existing promoter id.
-    function test_RegisterPromoter_revertsCrossCampaignHijack() public {
+    /// @dev Registration is namespaced by the registrant, so claiming an id grants nothing in
+    ///      anyone else's namespace — and, critically, cannot deny it to them either. Promoter ids
+    ///      are `keccak256(campaign, promoter)` and therefore precomputable by anyone; a
+    ///      first-writer-wins global map would let a squatter brick `Campaign.join()` outright.
+    function test_RegisterPromoter_isNamespacedNotFirstComeFirstServed() public {
         vm.prank(otherCampaign);
-        vm.expectRevert(
-            abi.encodeWithSelector(AttributionRegistry.PromoterAlreadyRegistered.selector, promoterId)
-        );
         attribution.registerPromoter(promoterId);
+
+        assertTrue(attribution.isRegistered(campaign, promoterId), "original binding intact");
+        assertTrue(attribution.isRegistered(otherCampaign, promoterId), "squatter's own namespace");
+    }
+
+    /// @dev And the squatted id stays unusable for attribution against the real campaign.
+    function test_RegisterPromoter_squatCannotAttributeElsewhere() public {
+        bytes32 unclaimed = keccak256("not-yet-registered");
+
+        vm.prank(address(0xBAD));
+        attribution.registerPromoter(unclaimed);
+
+        IAttributionRegistry.Touch memory t = _touch(campaign, unclaimed, uint64(block.timestamp + 1 days));
+        bytes memory sig = _sign(userPk, t);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AttributionRegistry.PromoterNotRegistered.selector, campaign, unclaimed)
+        );
+        attribution.storeTouch(user, t, sig, relayer);
     }
 
     function test_RegisterPromoter_revertsZeroId() public {
@@ -193,19 +227,87 @@ contract AttributionRegistryTest is Test {
         assertEq(attribution.activePromoter(campaign, user), rivalId, "newer touch replaces older");
     }
 
-    /// @dev A replayed older signature still overwrites, which is the accepted LAST_TOUCH
-    ///      trade-off: whoever relays most recently wins, and the user consented to both.
-    function test_LastTouch_replayOfOlderSignatureOverwrites() public {
+    /// @dev Relayers are the promoters competing for the credit, so relay order cannot be allowed
+    ///      to decide recency: a displaced promoter would just re-submit the user's earlier
+    ///      signature and take the attribution — and the rewards — back without fresh consent.
+    ///      Ordering is on the signed `signedAt`, so a superseded signature is permanently dead.
+    function test_LastTouch_replayOfOlderSignatureIsRejected() public {
         IAttributionRegistry.Touch memory first =
             _touch(campaign, promoterId, uint64(block.timestamp + 7 days));
         bytes memory firstSig = _sign(userPk, first);
 
         attribution.storeTouch(user, first, firstSig, relayer);
+
+        skip(1 days);
+        IAttributionRegistry.Touch memory second = _touch(campaign, rivalId, uint64(block.timestamp + 7 days));
+        _storeTouch(userPk, user, second);
+        assertEq(attribution.activePromoter(campaign, user), rivalId);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AttributionRegistry.TouchNotNewer.selector, first.signedAt, second.signedAt
+            )
+        );
+        attribution.storeTouch(user, first, firstSig, relayer);
+
+        assertEq(attribution.activePromoter(campaign, user), rivalId, "attribution held");
+    }
+
+    /// @dev Re-relaying the *current* touch is equally a no-op — ordering is strict.
+    function test_LastTouch_replayOfCurrentTouchIsRejected() public {
+        IAttributionRegistry.Touch memory t = _touch(campaign, promoterId, uint64(block.timestamp + 7 days));
+        bytes memory sig = _sign(userPk, t);
+
+        attribution.storeTouch(user, t, sig, relayer);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AttributionRegistry.TouchNotNewer.selector, t.signedAt, t.signedAt)
+        );
+        attribution.storeTouch(user, t, sig, relayer);
+    }
+
+    /// @dev Ordering must not cost the user the ability to change their mind back: a genuinely
+    ///      fresh endorsement of an earlier promoter still wins.
+    function test_LastTouch_userCanReturnToAnEarlierPromoter() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp + 7 days)));
+
+        skip(1 days);
         _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp + 7 days)));
         assertEq(attribution.activePromoter(campaign, user), rivalId);
 
-        attribution.storeTouch(user, first, firstSig, relayer);
-        assertEq(attribution.activePromoter(campaign, user), promoterId);
+        skip(1 days);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp + 7 days)));
+        assertEq(attribution.activePromoter(campaign, user), promoterId, "back to the first promoter");
+    }
+
+    /// @dev A touch signed in the future would outrank every later touch for as long as it lived,
+    ///      which is the same capture the ordering check exists to prevent.
+    function test_StoreTouch_revertsFutureSignedAt() public {
+        uint64 future = uint64(block.timestamp) + 1;
+        IAttributionRegistry.Touch memory t =
+            _touchAt(campaign, promoterId, future, uint64(block.timestamp + 7 days));
+        bytes memory sig = _sign(userPk, t);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AttributionRegistry.TouchNotYetValid.selector, future, uint64(block.timestamp)
+            )
+        );
+        attribution.storeTouch(user, t, sig, relayer);
+    }
+
+    /// @dev Ordering is per user and per campaign, not global — one user's newer touch must not
+    ///      shut another user out.
+    function test_LastTouch_orderingIsScopedPerUser() public {
+        skip(1 days);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp + 7 days)));
+
+        // The stranger signs an older touch; it is still their first, so it lands.
+        IAttributionRegistry.Touch memory older =
+            _touchAt(campaign, rivalId, uint64(block.timestamp) - 1 hours, uint64(block.timestamp + 7 days));
+        _storeTouch(strangerPk, stranger, older);
+
+        assertEq(attribution.activePromoter(campaign, stranger), rivalId);
     }
 
     // ── campaign scoping ─────────────────────────────────────────
@@ -215,7 +317,9 @@ contract AttributionRegistryTest is Test {
         IAttributionRegistry.Touch memory t = _touch(campaign, unknown, uint64(block.timestamp + 1 days));
         bytes memory sig = _sign(userPk, t);
 
-        vm.expectRevert(abi.encodeWithSelector(AttributionRegistry.PromoterNotRegistered.selector, unknown));
+        vm.expectRevert(
+            abi.encodeWithSelector(AttributionRegistry.PromoterNotRegistered.selector, campaign, unknown)
+        );
         attribution.storeTouch(user, t, sig, relayer);
     }
 
@@ -227,7 +331,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                AttributionRegistry.PromoterCampaignMismatch.selector, promoterId, campaign, otherCampaign
+                AttributionRegistry.PromoterNotRegistered.selector, otherCampaign, promoterId
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
