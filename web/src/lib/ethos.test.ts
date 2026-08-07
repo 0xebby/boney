@@ -3,6 +3,7 @@ import {
   fetchEthosProfile,
   xHandleOf,
   fetchFollowers,
+  fetchSmartFollowers,
   buildScoreReport,
   isAddress,
   EthosError,
@@ -190,43 +191,43 @@ describe("xHandleOf", () => {
 });
 
 describe("fetchFollowers", () => {
-  const twitter = (url: string) => url.includes("/twitter/user/profile");
-  const kaito = (url: string) => url.includes("/kaito/user_status");
+  const fx = (url: string) => url.includes("fxtwitter");
+  const vx = (url: string) => url.includes("vxtwitter");
 
   it("uses the primary source when it has a count", async () => {
-    const urls = stubFetch((url) =>
-      twitter(url) ? {body: {followersCount: 24_000}} : {body: {}},
-    );
+    const urls = stubFetch((url) => (fx(url) ? {body: {user: {followers: 24_000}}} : {body: {}}));
     expect(await fetchFollowers("zp_land")).toBe(24_000);
     // Nothing to gain from the fallback once the primary answered.
-    expect(urls.filter(kaito)).toHaveLength(0);
+    expect(urls.filter(vx)).toHaveLength(0);
   });
 
   /**
-   * The observed real-world case: gomtu's Twitter proxy returns `followersCount: 0` for handles it
-   * cannot read while still echoing a valid `userId`, so a zero there means "no data" rather than
-   * "no followers" and has to fall through.
+   * A zero has to fall through rather than being trusted. Every source observed so far reports a
+   * handle it cannot read as 0 while still returning a well-formed body, so a zero is
+   * indistinguishable from a genuinely empty account — and this is precisely how the retired gomtu
+   * proxy failed, quietly, for months.
    */
   it("falls through when the primary reports zero", async () => {
     stubFetch((url) =>
-      twitter(url)
-        ? {body: {followersCount: 0, userId: "1520516860155944960"}}
-        : {body: {data: {follower_count: 5_942}}},
+      fx(url) ? {body: {code: 200, user: {followers: 0}}} : {body: {followers_count: 7_336_664}},
     );
-    expect(await fetchFollowers("VitalikButerin")).toBe(5_942);
+    expect(await fetchFollowers("VitalikButerin")).toBe(7_336_664);
   });
 
   it("falls through when the primary fails", async () => {
-    stubFetch((url) =>
-      twitter(url) ? {throws: true} : {body: {data: {follower_count: 1_234}}},
-    );
+    stubFetch((url) => (fx(url) ? {throws: true} : {body: {followers_count: 1_234}}));
     expect(await fetchFollowers("someone")).toBe(1_234);
   });
 
-  it("degrades to zero when both sources are useless", async () => {
+  it("falls through on a 404 from the primary", async () => {
     stubFetch((url) =>
-      twitter(url) ? {body: {followersCount: 0}} : {body: {data: {follower_count: 0}}},
+      fx(url) ? {status: 404, body: {code: 404, message: "User not found"}} : {body: {followers_count: 99}},
     );
+    expect(await fetchFollowers("renamed_account")).toBe(99);
+  });
+
+  it("degrades to zero when both sources are useless", async () => {
+    stubFetch((url) => (fx(url) ? {body: {user: {followers: 0}}} : {body: {followers_count: 0}}));
     expect(await fetchFollowers("small_account")).toBe(0);
   });
 
@@ -238,8 +239,15 @@ describe("fetchFollowers", () => {
   });
 
   it("degrades to zero on a malformed payload", async () => {
-    stubFetch(() => ({body: {data: {follower_count: "lots"}}}));
+    stubFetch(() => ({body: {user: {followers: "lots"}}}));
     expect(await fetchFollowers("anyone")).toBe(0);
+  });
+
+  it("never asks the retired gomtu twitter proxy", async () => {
+    // It answered `followersCount: 0` for effectively every handle, so it only ever cost a lookup.
+    const urls = stubFetch(() => ({body: {user: {followers: 500}}}));
+    await fetchFollowers("anyone");
+    expect(urls.filter((u) => u.includes("/twitter/user/profile"))).toHaveLength(0);
   });
 
   it("url-encodes the handle", async () => {
@@ -250,11 +258,40 @@ describe("fetchFollowers", () => {
   });
 });
 
+describe("fetchSmartFollowers", () => {
+  it("reads Kaito's smart follower count", async () => {
+    stubFetch(() => ({body: {data: {smart_follower_count: 14_220, follower_count: 5_942}}}));
+    expect(await fetchSmartFollowers("VitalikButerin")).toBe(14_220);
+  });
+
+  /**
+   * The bug this separation exists to prevent. Kaito's `follower_count` is not a total follower
+   * count — it reads 5,942 for an account with 7.3M followers. The old ladder fell back to it
+   * whenever the primary source failed, so a KOL's reach silently collapsed by three orders of
+   * magnitude. Smart followers are now their own signal and never reach `reachFromFollowers`.
+   */
+  it("never returns Kaito's follower_count", async () => {
+    stubFetch(() => ({body: {data: {smart_follower_count: 0, follower_count: 5_942}}}));
+    expect(await fetchSmartFollowers("VitalikButerin")).toBe(0);
+  });
+
+  it("degrades to zero when Kaito does not track the handle", async () => {
+    stubFetch(() => ({body: {data: {smart_follower_count: 0}}}));
+    expect(await fetchSmartFollowers("unknown")).toBe(0);
+  });
+
+  it("degrades to zero when Kaito is down", async () => {
+    stubFetch(() => ({throws: true}));
+    expect(await fetchSmartFollowers("anyone")).toBe(0);
+  });
+});
+
 describe("buildScoreReport", () => {
   it("composes the score from Ethos plus a follower count", async () => {
     stubFetch((url) => {
       if (url.includes("/user/by/address/")) return {body: profile()};
-      if (url.includes("/twitter/user/profile")) return {body: {followersCount: 24_000}};
+      if (url.includes("fxtwitter")) return {body: {user: {followers: 24_000}}};
+      if (url.includes("/kaito/user_status")) return {body: {data: {smart_follower_count: 310}}};
       return {body: {}};
     });
 
@@ -267,16 +304,31 @@ describe("buildScoreReport", () => {
     expect(report.status).toBe("ACTIVE");
   });
 
-  it("skips the follower lookup with no linked X account", async () => {
+  it("reports smart followers alongside the total, without scoring them", async () => {
+    stubFetch((url) => {
+      if (url.includes("/user/by/address/")) return {body: profile()};
+      if (url.includes("fxtwitter")) return {body: {user: {followers: 7_375_685}}};
+      if (url.includes("/kaito/user_status")) return {body: {data: {smart_follower_count: 14_220}}};
+      return {body: {}};
+    });
+
+    const report = await buildScoreReport(WALLET);
+    expect(report.smartFollowers).toBe(14_220);
+    // Reach comes from the total only; the smart count is display data.
+    expect(report.reach).toBe(reachFromFollowers(7_375_685));
+  });
+
+  it("skips both follower lookups with no linked X account", async () => {
     const urls = stubFetch((url) =>
       url.includes("/user/by/address/")
         ? {body: profile({username: null, userkeys: ["address:0x1"]})}
-        : {body: {followersCount: 99}},
+        : {body: {user: {followers: 99}}},
     );
 
     const report = await buildScoreReport(WALLET);
     expect(report.handle).toBeNull();
     expect(report.followers).toBe(0);
+    expect(report.smartFollowers).toBe(0);
     expect(report.reach).toBe(0);
     expect(urls).toHaveLength(1);
   });
@@ -287,6 +339,7 @@ describe("buildScoreReport", () => {
     const report = await buildScoreReport(WALLET);
     expect(report.ethos).toBe(2034);
     expect(report.followers).toBe(0);
+    expect(report.smartFollowers).toBe(0);
     expect(report.reach).toBe(0);
   });
 
@@ -305,15 +358,21 @@ describe("buildScoreReport", () => {
  * means unknown wallet, that an unclaimed profile still arrives as a 200 carrying a score, and that
  * a claimed one still exposes the X handle reach depends on. Scores drift, so nothing here asserts
  * an exact number.
+ *
+ * Each test carries an explicit timeout: these reach three separate third-party services, and
+ * `fetchFollowers` walks its whole source ladder before giving up, so the default 5s is not enough
+ * for a fallback path to run to completion.
  */
 describe.skipIf(!process.env.LIVE_ETHOS)("live Ethos API", () => {
+  /** Generous enough for a full ladder traversal with one source timing out. */
+  const LIVE_TIMEOUT = 30_000;
   it("resolves a claimed profile and its X handle", async () => {
     const result = await fetchEthosProfile(LIVE_CLAIMED);
     expect(result.profileId).toBe(20);
     expect(result.status).toBe("ACTIVE");
     expect(result.score).toBeGreaterThan(0);
     expect(xHandleOf(result)).toBe("zp_land");
-  });
+  }, LIVE_TIMEOUT);
 
   it("accepts a checksummed address and its lowercase form alike", async () => {
     const [checksummed, lowercased] = await Promise.all([
@@ -321,21 +380,21 @@ describe.skipIf(!process.env.LIVE_ETHOS)("live Ethos API", () => {
       fetchEthosProfile(LIVE_CLAIMED.toLowerCase()),
     ]);
     expect(checksummed.profileId).toBe(lowercased.profileId);
-  });
+  }, LIVE_TIMEOUT);
 
   it("404s an address it has no record of", async () => {
     const error = await fetchEthosProfile(LIVE_UNKNOWN).catch((e) => e as EthosError);
     expect(error).toBeInstanceOf(EthosError);
     expect(error.code).toBe("no_ethos_profile");
     expect(error.httpStatus).toBe(400);
-  });
+  }, LIVE_TIMEOUT);
 
   it("still refuses a known address with no claimed profile", async () => {
     // Carries a real score despite being unclaimed — precisely why profileId, not score, decides.
     const error = await fetchEthosProfile(LIVE_UNCLAIMED).catch((e) => e as EthosError);
     expect(error).toBeInstanceOf(EthosError);
     expect(error.code).toBe("no_ethos_profile");
-  });
+  }, LIVE_TIMEOUT);
 
   it("builds a full report for a claimed wallet", async () => {
     const report = await buildScoreReport(LIVE_CLAIMED);
@@ -344,10 +403,33 @@ describe.skipIf(!process.env.LIVE_ETHOS)("live Ethos API", () => {
     // Follower sources are unreliable by design here; only the invariant is safe to assert.
     expect(report.reach).toBe(reachFromFollowers(report.followers));
     expect(report.reach).toBeLessThanOrEqual(2800);
-  });
+  }, LIVE_TIMEOUT);
 
   it("never throws from the follower lookup", async () => {
     await expect(fetchFollowers("VitalikButerin")).resolves.toBeTypeOf("number");
     await expect(fetchFollowers("no_such_handle_9f8a7b6c5d")).resolves.toBe(0);
-  });
+  }, LIVE_TIMEOUT);
+
+  /**
+   * The check that the retired gomtu proxy would have failed. A source that answers but returns 0
+   * is worse than one that errors, because it degrades reach silently — so assert a real count for a
+   * handle with millions of followers, not merely that something came back.
+   */
+  it("returns a real follower count for a large account", async () => {
+    expect(await fetchFollowers("VitalikButerin")).toBeGreaterThan(1_000_000);
+  }, LIVE_TIMEOUT);
+
+  it("resolves a small account too, not just famous ones", async () => {
+    expect(await fetchFollowers("peceka")).toBeGreaterThan(0);
+  }, LIVE_TIMEOUT);
+
+  it("keeps smart followers well below the total", async () => {
+    // Guards the confusion that motivated splitting them: Kaito's number is a different signal, and
+    // if it ever exceeded the total that would mean the two got crossed somewhere.
+    const [total, smart] = await Promise.all([
+      fetchFollowers("VitalikButerin"),
+      fetchSmartFollowers("VitalikButerin"),
+    ]);
+    expect(smart).toBeLessThan(total);
+  }, LIVE_TIMEOUT);
 });

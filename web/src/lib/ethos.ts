@@ -8,7 +8,19 @@
 import {reachFromFollowers} from "./boneyscore";
 
 const ETHOS_API = process.env.ETHOS_API ?? "https://api.ethos.network";
-const GOMTU_API = process.env.GOMTU_API ?? "https://gomtu.xyz/api";
+/** FixTweet's public JSON API. Primary follower source. */
+const FXTWITTER_API = process.env.FXTWITTER_API ?? "https://api.fxtwitter.com";
+/** vxTwitter's public JSON API. Independent implementation, used when FixTweet is down. */
+const VXTWITTER_API = process.env.VXTWITTER_API ?? "https://api.vxtwitter.com";
+/**
+ * Kaito's crypto-Twitter index, reached through gomtu's proxy.
+ *
+ * Note this is *not* a follower source. gomtu's own Twitter proxy used to be the primary one and
+ * was removed: it returns `followersCount: 0` for effectively every handle now (and 500s outright
+ * for most), so it only ever cost a lookup. Kaito is kept for `smart_follower_count`, which is a
+ * different signal — see `fetchSmartFollowers`.
+ */
+const KAITO_API = process.env.KAITO_API ?? "https://gomtu.xyz/api";
 const TIMEOUT_MS = 10_000;
 
 /** Ethos user record, narrowed to the fields we depend on. */
@@ -62,7 +74,7 @@ async function getJson(url: string): Promise<unknown> {
  * the fix is to go and claim a profile — so both paths give the same instruction.
  */
 const NO_PROFILE_MESSAGE =
-  "This wallet has no claimed Ethos profile. Claim one at app.ethos.network to join reputation-gated campaigns.";
+  "This wallet has no claimed Ethos profile. Claim one at app.ethos.network to join campaigns on boneyard.";
 
 /**
  * Fetch an Ethos profile, refusing anything that is not a claimed one.
@@ -137,46 +149,105 @@ export function xHandleOf(profile: EthosProfile): string | null {
 }
 
 /**
- * Follower count for an X handle, or 0 when unavailable.
+ * One follower source: a URL to try and how to read a count out of the response.
+ *
+ * Modelled as data rather than a chain of try/catch blocks because these endpoints are the least
+ * stable dependency in the system and the list is expected to churn. Adding, reordering, or
+ * dropping a source is an edit to this array; the traversal in `fetchFollowers` never changes, and
+ * `FOLLOWER_SOURCES` is exported so a health check can probe each one by name.
+ */
+export type FollowerSource = {
+  /** Stable identifier, used in health-check output. */
+  name: string;
+  url: (encodedHandle: string) => string;
+  /** Pull the count out of a parsed response, or return null when the payload carries none. */
+  read: (raw: unknown) => number | null;
+};
+
+export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
+  {
+    // FixTweet reads X's public GraphQL layer, so its count is the live one. Verified against
+    // handles from 718 to 241M followers.
+    name: "fxtwitter",
+    url: (h) => `${FXTWITTER_API}/${h}`,
+    read: (raw) => {
+      const body = raw as {code?: number; user?: {followers?: unknown}};
+      const count = body?.user?.followers;
+      return typeof count === "number" ? count : null;
+    },
+  },
+  {
+    // Independent implementation of the same idea. Runs a few thousand followers behind FixTweet on
+    // large accounts, which is well inside the log curve's noise floor.
+    name: "vxtwitter",
+    url: (h) => `${VXTWITTER_API}/${h}`,
+    read: (raw) => {
+      const count = (raw as {followers_count?: unknown})?.followers_count;
+      return typeof count === "number" ? count : null;
+    },
+  },
+];
+
+/**
+ * Total follower count for an X handle, or 0 when unavailable.
  *
  * Deliberately total: every failure path returns 0 rather than throwing. Reach is the softer half
- * of BoneyScore and the follower sources are the least reliable dependency in the system — an
- * outage there should cost a KOL their reach points, not their ability to join at all.
+ * of BoneyScore and these are the least reliable dependency in the system — an outage should cost a
+ * KOL their reach points, not their ability to join at all.
  *
- * Tries gomtu's Twitter proxy first, then Kaito's user_status, which carries `follower_count` for
- * accounts Kaito tracks.
+ * Walks `FOLLOWER_SOURCES` in order and takes the first positive count. A zero is treated as "no
+ * data" and falls through, because every source observed so far reports an unreadable handle as 0
+ * while still returning a well-formed body — so a zero cannot be distinguished from a genuinely
+ * empty account, and falling through costs one request while trusting it costs the KOL 30% of their
+ * score.
  */
 export async function fetchFollowers(handle: string): Promise<number> {
   const encoded = encodeURIComponent(handle);
 
-  try {
-    const raw = (await getJson(`${GOMTU_API}/twitter/user/profile?username=${encoded}`)) as {
-      followersCount?: number;
-    };
-    if (typeof raw?.followersCount === "number" && raw.followersCount > 0) {
-      return raw.followersCount;
+  for (const source of FOLLOWER_SOURCES) {
+    try {
+      const count = source.read(await getJson(source.url(encoded)));
+      if (typeof count === "number" && count > 0) return count;
+    } catch {
+      // Try the next source. A 404 here means "no such handle" and every source will agree, but
+      // distinguishing that from an outage is not worth the branch when the answer is 0 either way.
     }
-  } catch {
-    // fall through to the Kaito source
-  }
-
-  try {
-    const raw = (await getJson(`${GOMTU_API}/kaito/user_status?username=${encoded}`)) as {
-      data?: {follower_count?: number};
-    };
-    const count = raw?.data?.follower_count;
-    if (typeof count === "number" && count > 0) return count;
-  } catch {
-    // no follower data available
   }
 
   return 0;
+}
+
+/**
+ * Kaito's *smart* follower count for a handle, or 0 when Kaito does not track it.
+ *
+ * A different signal from `fetchFollowers`, not a fallback for it: Kaito counts followers it
+ * considers reputable crypto-Twitter accounts, so the number is far smaller than the total
+ * (`VitalikButerin` reads ~14k smart against ~7.3M total). Mixing the two would be a bug — a smart
+ * count fed into `reachFromFollowers` understates reach by orders of magnitude, which is exactly
+ * what the old gomtu-then-Kaito ladder did whenever the primary source failed.
+ *
+ * Kept out of the BoneyScore arithmetic for now and surfaced for display only. It is the more
+ * sybil-resistant of the two counts and a plausible future input, but it is also sparse — most
+ * handles return 0 — so weighting it today would penalise everyone Kaito has not indexed.
+ */
+export async function fetchSmartFollowers(handle: string): Promise<number> {
+  try {
+    const raw = (await getJson(
+      `${KAITO_API}/kaito/user_status?username=${encodeURIComponent(handle)}`,
+    )) as {data?: {smart_follower_count?: unknown}};
+    const count = raw?.data?.smart_follower_count;
+    return typeof count === "number" && count > 0 ? count : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export type ScoreReport = {
   wallet: `0x${string}`;
   ethos: number;
   followers: number;
+  /** Kaito's smart-follower count. Display only — contributes nothing to the score. */
+  smartFollowers: number;
   reach: number;
   handle: string | null;
   profileId: number;
@@ -187,12 +258,16 @@ export type ScoreReport = {
 export async function buildScoreReport(wallet: string): Promise<ScoreReport> {
   const profile = await fetchEthosProfile(wallet);
   const handle = xHandleOf(profile);
-  const followers = handle ? await fetchFollowers(handle) : 0;
+  // Independent lookups against different hosts, so run them together rather than serially.
+  const [followers, smartFollowers] = handle
+    ? await Promise.all([fetchFollowers(handle), fetchSmartFollowers(handle)])
+    : [0, 0];
 
   return {
     wallet: wallet as `0x${string}`,
     ethos: profile.score,
     followers,
+    smartFollowers,
     reach: reachFromFollowers(followers),
     handle,
     profileId: profile.profileId as number,

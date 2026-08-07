@@ -16,11 +16,13 @@ import {
   WETH_BASE,
   type EventSource,
   type ProbeClient,
-  type ProbeFinding,
 } from "./kpiSource";
 
 const WETH_DEPOSIT_TOPIC =
   "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c";
+
+/** The log shape `getLogs` resolves to, so stubbed logs need no `any`. */
+type ProbeLog = Awaited<ReturnType<ProbeClient["getLogs"]>>[number];
 
 function src(overrides: Partial<EventSource> = {}): EventSource {
   return {
@@ -307,7 +309,7 @@ describe("probeEventSource", () => {
           data: "0x" + "22".repeat(32),
           blockNumber: BigInt(9500),
           address: WETH_BASE,
-        } as any,
+        } as ProbeLog,
       ],
     });
     const findings = await probeEventSource(client, {
