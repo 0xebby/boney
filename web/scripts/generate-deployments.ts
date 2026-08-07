@@ -67,6 +67,32 @@ export function readBroadcast(chainId: number): Record<string, string> {
   return out;
 }
 
+/**
+ * The block the protocol was deployed in — the earliest receipt in the run.
+ *
+ * This exists so log scans have a floor. Promoters are not enumerable on chain (a campaign emits
+ * `PromoterJoined` and stores no list), so listing them means `getLogs`, and public RPCs cap a
+ * single query at ~2000 blocks. Without a floor the only honest `fromBlock` is genesis, which on
+ * a live L2 is tens of thousands of requests. With it, the scan spans deploy→head.
+ *
+ * Returns 0 when the receipt carries no block — a scan from genesis is correct on a local chain
+ * and merely slow, which is better than guessing a floor that silently hides older events.
+ */
+export function readStartBlock(chainId: number): number {
+  const path = resolve(REPO_ROOT, `broadcast/DeployBoney.s.sol/${chainId}/run-latest.json`);
+  if (!existsSync(path)) return 0;
+
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+    receipts?: {blockNumber?: string | number}[];
+  };
+
+  const blocks = (parsed.receipts ?? [])
+    .map((r) => (typeof r.blockNumber === "string" ? Number(r.blockNumber) : r.blockNumber))
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0);
+
+  return blocks.length > 0 ? Math.min(...blocks) : 0;
+}
+
 function emit(byChain: Record<number, Record<string, string>>): string {
   const blocks = Object.keys(byChain)
     .map(Number)
@@ -75,7 +101,9 @@ function emit(byChain: Record<number, Record<string, string>>): string {
       const entries = Object.entries(byChain[chainId])
         .map(([k, v]) => `    ${k}: "${v}",`)
         .join("\n");
-      return [`  ${chainId}: {`, entries, "  },"].join("\n");
+      // BigInt literal: every consumer compares it against a viem block number, which is bigint.
+      const start = `    startBlock: ${readStartBlock(chainId)}n,`;
+      return [`  ${chainId}: {`, entries, start, "  },"].join("\n");
     });
 
   return [

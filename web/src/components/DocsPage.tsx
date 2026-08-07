@@ -11,7 +11,7 @@ export function DocsPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <header>
-        <h1 className="text-lg font-semibold text-ink">How Boney works</h1>
+        <h1 className="font-display text-2xl text-ink">How Boney works</h1>
         <p className="mt-0.5 text-xs text-ink-muted">
           Escrowed, performance-based campaigns between projects and promoters.
         </p>
@@ -101,8 +101,7 @@ export function DocsPage() {
           number comes from a chain read, and every action is a transaction you sign.
         </p>
         <p className="text-ink-muted">
-          Running against a local anvil chain and unaudited. Do not point it at funds you care
-          about.
+          Running on a testnet and unaudited. Do not point it at funds you care about.
         </p>
       </Section>
 
@@ -127,7 +126,7 @@ export function DocsPage() {
 function Section({title, children}: {title: string; children: React.ReactNode}) {
   return (
     <section className="space-y-2.5">
-      <h2 className="text-sm font-semibold text-ink">{title}</h2>
+      <h2 className="font-display text-base text-brand">{title}</h2>
       <div className="space-y-2.5 text-[13px] leading-relaxed text-ink-secondary">{children}</div>
     </section>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import {useMemo} from "react";
+import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
 import {useCampaigns, type TokenMeta} from "@/hooks/useCampaigns";
@@ -11,6 +11,7 @@ import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
+import {KolDirectory} from "@/components/KolDirectory";
 import {trackingLink} from "@/lib/kol";
 import {formatTokenAmount, formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
@@ -34,7 +35,7 @@ type JoinedRow = {
  * which are already present in the `CampaignView` the marketplace fetched.
  */
 export function KolPage() {
-  const {address, isConnected} = useAccount();
+  const {isConnected} = useAccount();
   const {campaigns, tokens, isLoading, error, refetch, deployed} = useCampaigns();
   const joinedQuery = useJoinedCampaigns(campaigns);
   const now = useNow();
@@ -60,8 +61,8 @@ export function KolPage() {
     return (
       <Card>
         <EmptyState
-          title="Protocol not deployed on this network"
-          description="Switch to a network with a Boney deployment, or run a local anvil chain and deploy with script/DeployBoney.s.sol."
+          title="Boneyard is not available on this network"
+          description="Switch your wallet to a supported network to see campaigns."
         />
       </Card>
     );
@@ -70,13 +71,14 @@ export function KolPage() {
   if (!isConnected) {
     return (
       <div className="space-y-5">
-        <Header />
-        <Card>
-          <EmptyState
-            title="Connect a wallet"
-            description="Join campaigns to earn performance-based rewards. Connect to see your memberships and tracking links."
-          />
-        </Card>
+        <Header connected={false} />
+        <KolDirectory
+          campaigns={campaigns}
+          tokens={tokens}
+          isLoading={isLoading}
+          error={error}
+          onRetry={() => refetch()}
+        />
       </div>
     );
   }
@@ -133,12 +135,20 @@ export function KolPage() {
   );
 }
 
-function Header() {
+/**
+ * The heading says different things to different visitors: a connected promoter is looking at
+ * their own memberships, an anonymous one is browsing everybody's.
+ */
+function Header({connected = true}: {connected?: boolean}) {
   return (
     <header>
-      <h1 className="text-lg font-semibold text-ink">KOL dashboard</h1>
+      <h1 className="font-display text-2xl text-ink">
+        {connected ? "KOL dashboard" : "KOLs"}
+      </h1>
       <p className="mt-0.5 text-xs text-ink-muted">
-        Campaigns you joined. Open one to see progress, claim rewards, and copy your tracking link.
+        {connected
+          ? "Campaigns you joined. Open one to see progress, claim rewards, and copy your tracking link."
+          : "Promoters active on each campaign, and the links they share. Connect a wallet to join and get your own."}
       </p>
     </header>
   );
@@ -189,22 +199,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       key: "link",
       header: "Tracking link",
       sortValue: () => 0,
-      render: (r) => (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            navigator.clipboard.writeText(r.link);
-          }}
-          className="flex items-center gap-1.5 rounded border border-hairline px-2 py-1 text-xs text-ink-secondary hover:bg-surface-hover hover:text-ink"
-          title="Copy tracking link"
-        >
-          <span aria-hidden className="text-[10px]">
-            ⎘
-          </span>
-          Copy link
-        </button>
-      ),
+      render: (r) => <CopyLinkButton link={r.link} />,
     },
     {
       key: "ends",
@@ -221,4 +216,56 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       },
     },
   ];
+}
+
+/**
+ * Copy-to-clipboard for a tracking link, with the confirmation the bare `writeText` call lacked.
+ *
+ * Copying is invisible by nature — nothing on screen changes — so without feedback the only way
+ * to know it worked is to paste somewhere and check. This is its own component rather than
+ * inline JSX because it owns state, and `buildColumns` is a pure function called from a `useMemo`.
+ *
+ * The failure path matters as much as the success one. `navigator.clipboard` is permission-gated
+ * and absent over plain http on some browsers, and an unhandled rejection there would leave the
+ * user believing they had copied a link they had not. So the promise is caught and the button
+ * says so, mirroring `PromoterPanel`.
+ */
+function CopyLinkButton({link}: {link: string}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+
+  const copy = async (e: React.MouseEvent) => {
+    // The row is itself clickable; copying must not also navigate.
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(link);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+    setTimeout(() => setState("idle"), 2_000);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-colors ${
+        state === "copied"
+          ? "border-good/40 text-good"
+          : state === "failed"
+            ? "border-critical/40 text-critical"
+            : "border-hairline text-ink-secondary hover:bg-surface-hover hover:text-ink"
+      }`}
+      title={state === "failed" ? link : "Copy tracking link"}
+    >
+      <span aria-hidden className="text-[10px]">
+        {state === "copied" ? "✓" : state === "failed" ? "!" : "⎘"}
+      </span>
+      {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy link"}
+      {/* Announced to screen readers, which see no color change. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {state === "copied" ? "Tracking link copied" : state === "failed" ? "Copy failed" : ""}
+      </span>
+    </button>
+  );
 }

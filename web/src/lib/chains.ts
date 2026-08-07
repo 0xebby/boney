@@ -27,6 +27,15 @@ export type Deployment = {
   reputationRegistry: `0x${string}`;
   attestationVerifier: `0x${string}`;
   oracleCoordinator: `0x${string}`;
+  /**
+   * Block the protocol was deployed in — the floor for any log scan.
+   *
+   * Nothing on chain enumerates a campaign's promoters, so listing them means `getLogs` over
+   * `PromoterJoined`, and public RPCs cap one query at ~2000 blocks. Scanning from genesis on an
+   * L2 is thousands of round trips; from here it is a handful. Zero means "scan from genesis",
+   * which is correct on a local chain and the honest default when the block is unknown.
+   */
+  startBlock: bigint;
 };
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
@@ -50,6 +59,7 @@ export const DEPLOYMENTS: Partial<Record<number, Deployment>> = {
     reputationRegistry: env("NEXT_PUBLIC_SEPOLIA_REPUTATION_REGISTRY"),
     attestationVerifier: env("NEXT_PUBLIC_SEPOLIA_ATTESTATION_VERIFIER"),
     oracleCoordinator: env("NEXT_PUBLIC_SEPOLIA_ORACLE_COORDINATOR"),
+    startBlock: BigInt(process.env.NEXT_PUBLIC_SEPOLIA_START_BLOCK ?? 0),
   },
   [baseSepolia.id]: {
     boney: env("NEXT_PUBLIC_BASE_SEPOLIA_BONEY"),
@@ -59,6 +69,7 @@ export const DEPLOYMENTS: Partial<Record<number, Deployment>> = {
     reputationRegistry: env("NEXT_PUBLIC_BASE_SEPOLIA_REPUTATION_REGISTRY"),
     attestationVerifier: env("NEXT_PUBLIC_BASE_SEPOLIA_ATTESTATION_VERIFIER"),
     oracleCoordinator: env("NEXT_PUBLIC_BASE_SEPOLIA_ORACLE_COORDINATOR"),
+    startBlock: BigInt(process.env.NEXT_PUBLIC_BASE_SEPOLIA_START_BLOCK ?? 0),
   },
   // Generated entries come last so they win: they are read from the broadcast receipt, so they
   // describe what actually landed on chain rather than what an env var claims. Spread first, a

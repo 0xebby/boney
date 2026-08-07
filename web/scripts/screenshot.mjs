@@ -6,6 +6,10 @@
  * actually paint the chain data, or does it render a shell while every read fails?
  *
  * Usage: node scripts/screenshot.mjs [url] [outfile]
+ *
+ * Set `CHROME_PATH` when Playwright's bundled `headless_shell` cannot start. On this WSL box the
+ * shell build is missing `libnspr4.so` while the full chromium build ships its own copies, so
+ * point CHROME_PATH at `chrome-linux64/chrome` under the `chromium-<rev>` cache directory.
  */
 import {chromium} from "playwright";
 import {mkdirSync} from "node:fs";
@@ -15,7 +19,10 @@ const out = process.argv[3] ?? "screenshots/campaigns.png";
 
 mkdirSync("screenshots", {recursive: true});
 
-const browser = await chromium.launch({args: ["--no-sandbox"]});
+const browser = await chromium.launch({
+  executablePath: process.env.CHROME_PATH,
+  args: ["--no-sandbox"],
+});
 const page = await browser.newPage({viewport: {width: 1440, height: 900}});
 
 // Collect anything the page throws — a shell can render while every data fetch fails.

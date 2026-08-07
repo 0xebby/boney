@@ -21,3 +21,7 @@ web/.vercel
 
 # Dotenv file
 .env
+
+# Indexer block cursors — per-machine scan position, not shared state. Losing it costs a rescan,
+# which is a no-op because reports are cumulative.
+.indexer-state.json

@@ -9,6 +9,7 @@ import {
 } from "./campaignArgs";
 import {KPI_KIND} from "./types";
 import type {CampaignDraft} from "./validation";
+import {decodeEventSource, WETH_BASE} from "./kpiSource";
 
 /**
  * Encoder tests.
@@ -297,5 +298,124 @@ describe("requiredFunding", () => {
     // not merely the sum of the ladders, which can be less.
     const [cfg] = buildCreateCampaignArgs(draft(), {project: PROJECT, tokenDecimals: 18});
     expect(requiredFunding(cfg)).toBe(cfg.rewardPool);
+  });
+});
+
+describe("event source params", () => {
+  /**
+   * The default. Every campaign created before event sourcing existed encodes this way, and the
+   * five already live on Base Sepolia carry exactly this value — so it has to stay the no-op.
+   */
+  it("encodes to 0x when the KPI has no event source", () => {
+    const [, kpis] = buildCreateCampaignArgs(draft(), {project: PROJECT, tokenDecimals: 18});
+    expect(kpis[0].params).toBe("0x");
+  });
+
+  it("encodes to 0x when the source field is left blank", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: "  ",
+            signature: "Deposit(address,uint256)",
+            actorTopic: "1",
+            amountMode: "dataWord0",
+            scale: "1",
+          },
+        },
+      ],
+    });
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    expect(kpis[0].params).toBe("0x");
+  });
+
+  it("round trips a WETH deposit source through decodeEventSource", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          kind: "Deposit",
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Deposit(address,uint256)",
+            actorTopic: "1",
+            amountMode: "dataWord0",
+            scale: "1000000000000000",
+          },
+        },
+      ],
+    });
+
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    const decoded = decodeEventSource(kpis[0].params);
+
+    expect(decoded).not.toBeNull();
+    expect(decoded!.source).toBe(WETH_BASE);
+    // Pinned to the topic read off a real Base Sepolia log.
+    expect(decoded!.topic0).toBe(
+      "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c",
+    );
+    expect(decoded!.actorTopic).toBe(1);
+    expect(decoded!.scale).toBe(BigInt(1e15));
+  });
+
+  it("defaults a blank scale to 1, like a blank target defaults to 0", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Deposit(address,uint256)",
+            actorTopic: "1",
+            amountMode: "dataWord0",
+            scale: "",
+          },
+        },
+      ],
+    });
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    expect(decodeEventSource(kpis[0].params)!.scale).toBe(BigInt(1));
+  });
+
+  it("throws on an unparseable source rather than encoding a wrong campaign", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: "not-an-address",
+            signature: "Deposit(address,uint256)",
+            actorTopic: "1",
+            amountMode: "dataWord0",
+            scale: "1",
+          },
+        },
+      ],
+    });
+    expect(() => buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18})).toThrow(
+      DraftEncodingError,
+    );
+  });
+
+  it("throws on an out-of-range actor topic", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Deposit(address,uint256)",
+            actorTopic: "0",
+            amountMode: "dataWord0",
+            scale: "1",
+          },
+        },
+      ],
+    });
+    expect(() => buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18})).toThrow(
+      /actorTopic/,
+    );
   });
 });
