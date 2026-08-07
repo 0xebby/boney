@@ -1,0 +1,353 @@
+import {describe, it, expect, afterEach, vi} from "vitest";
+import {
+  fetchEthosProfile,
+  xHandleOf,
+  fetchFollowers,
+  buildScoreReport,
+  isAddress,
+  EthosError,
+  type EthosProfile,
+} from "./ethos";
+import {reachFromFollowers} from "./boneyscore";
+
+/**
+ * Ethos client tests.
+ *
+ * The mocked suite pins the *refusal* rules, which are the security-relevant half of this module:
+ * every path that must not produce an attestation, and every path that must degrade to zero reach
+ * instead of failing. Addresses here are obviously fake so nothing depends on a stranger's live
+ * reputation staying put.
+ *
+ * The live suite at the bottom runs only with `LIVE_ETHOS=1` and asserts the real API still behaves
+ * the way this module assumes — the same opt-in shape `live.test.ts` uses for the chain. Ethos is a
+ * third-party service whose contract can shift under us, so those assumptions are worth a periodic
+ * check without making every `pnpm test` depend on the network.
+ */
+
+/** Fake wallets — the mocked suite never reaches the network, so these need only be well-formed. */
+const WALLET = "0x1111111111111111111111111111111111111111" as const;
+const MIXED_CASE = "0xAbCdEf0123456789aBcDeF0123456789AbCdEf01" as const;
+
+/** A claimed, ACTIVE Ethos profile: `zp_land`, profileId 20. Used only by the live suite. */
+const LIVE_CLAIMED = "0xBF47fE944705AeD612143C49315AE0D9161C7A97" as const;
+/** Ethos 200s this one but leaves `profileId` null — known address, unclaimed profile. */
+const LIVE_UNCLAIMED = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" as const;
+/** Well-formed and, as far as Ethos is concerned, nonexistent: answers 404. */
+const LIVE_UNKNOWN = "0x9a3f8b2c1d4e5f60718293a4b5c6d7e8f9012345" as const;
+
+type Reply = {status?: number; body?: unknown; throws?: boolean};
+
+/** Records every requested URL and replies per the handler. */
+function stubFetch(handler: (url: string) => Reply) {
+  const urls: string[] = [];
+  vi.stubGlobal("fetch", async (input: unknown) => {
+    const url = String(input);
+    urls.push(url);
+    const {status = 200, body = {}, throws} = handler(url);
+    if (throws) throw new Error("network down");
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    } as Response;
+  });
+  return urls;
+}
+
+const profile = (over: Partial<EthosProfile> = {}): EthosProfile => ({
+  score: 2034,
+  profileId: 20,
+  status: "ACTIVE",
+  username: "zp_land",
+  userkeys: ["address:0x1", "service:x.com:1520516860155944960"],
+  ...over,
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("isAddress", () => {
+  it("accepts any hex case", () => {
+    expect(isAddress(WALLET)).toBe(true);
+    expect(isAddress(MIXED_CASE)).toBe(true);
+    expect(isAddress(WALLET.toUpperCase().replace("0X", "0x"))).toBe(true);
+  });
+
+  it("rejects anything that is not 20 hex bytes", () => {
+    expect(isAddress("0x123")).toBe(false);
+    expect(isAddress(`${WALLET}00`)).toBe(false);
+    expect(isAddress("0xZZZZef0123456789aBcDeF0123456789AbCdEf01")).toBe(false);
+    expect(isAddress(WALLET.slice(2))).toBe(false);
+    expect(isAddress(undefined)).toBe(false);
+    expect(isAddress(null)).toBe(false);
+    expect(isAddress(12345)).toBe(false);
+  });
+});
+
+describe("fetchEthosProfile", () => {
+  it("returns a claimed profile", async () => {
+    stubFetch(() => ({body: profile()}));
+    const result = await fetchEthosProfile(WALLET);
+    expect(result.score).toBe(2034);
+    expect(result.profileId).toBe(20);
+    expect(result.status).toBe("ACTIVE");
+    expect(result.username).toBe("zp_land");
+  });
+
+  it("lowercases the address, because Ethos enforces EIP-55 on mixed case", async () => {
+    // A mixed-case address whose checksum does not compute earns a 400 from Ethos, which this
+    // module would then report as "could not reach Ethos". Normalising sidesteps the whole class.
+    const urls = stubFetch(() => ({body: profile()}));
+    await fetchEthosProfile(MIXED_CASE);
+    expect(urls[0]).toContain(MIXED_CASE.toLowerCase());
+    expect(urls[0]).not.toContain(MIXED_CASE);
+  });
+
+  it("refuses an invalid address without calling out", async () => {
+    const urls = stubFetch(() => ({body: profile()}));
+    await expect(fetchEthosProfile("0xnope")).rejects.toThrow(EthosError);
+    expect(urls).toHaveLength(0);
+  });
+
+  /**
+   * The regression this suite exists for. A wallet Ethos has never seen 404s, and mapping that to
+   * `ethos_unavailable` told a new KOL the service was broken when the real answer was "go claim a
+   * profile" — the single most common outcome for a first-time visitor.
+   */
+  it("treats a 404 as an unclaimed profile, not an outage", async () => {
+    stubFetch(() => ({status: 404, body: {code: "NOT_FOUND", message: "User not found"}}));
+    const error = await fetchEthosProfile(WALLET).catch((e) => e as EthosError);
+    expect(error).toBeInstanceOf(EthosError);
+    expect(error.code).toBe("no_ethos_profile");
+    expect(error.httpStatus).toBe(400);
+    expect(error.message).toMatch(/claim/i);
+  });
+
+  it("refuses a known-but-unclaimed profile", async () => {
+    // Ethos answers 200 with a real score for addresses it resolved via ENS or saw in someone
+    // else's graph. Attesting those would mint reputation for a profile nobody controls.
+    stubFetch(() => ({body: profile({profileId: null, status: "INACTIVE", username: null})}));
+    const error = await fetchEthosProfile(WALLET).catch((e) => e as EthosError);
+    expect(error.code).toBe("no_ethos_profile");
+    expect(error.httpStatus).toBe(400);
+  });
+
+  it("refuses when profileId is absent entirely", async () => {
+    const {profileId: _drop, ...withoutId} = profile();
+    stubFetch(() => ({body: withoutId}));
+    const error = await fetchEthosProfile(WALLET).catch((e) => e as EthosError);
+    expect(error.code).toBe("no_ethos_profile");
+  });
+
+  it("reports a genuine upstream failure as unavailable", async () => {
+    stubFetch(() => ({status: 500}));
+    const error = await fetchEthosProfile(WALLET).catch((e) => e as EthosError);
+    expect(error.code).toBe("ethos_unavailable");
+    expect(error.httpStatus).toBe(502);
+  });
+
+  it("reports a network error as unavailable", async () => {
+    stubFetch(() => ({throws: true}));
+    const error = await fetchEthosProfile(WALLET).catch((e) => e as EthosError);
+    expect(error.code).toBe("ethos_unavailable");
+    expect(error.httpStatus).toBe(502);
+  });
+
+  it("rejects a payload with no numeric score", async () => {
+    stubFetch(() => ({body: {profileId: 20, score: "high"}}));
+    const error = await fetchEthosProfile(WALLET).catch((e) => e as EthosError);
+    expect(error.code).toBe("ethos_unavailable");
+  });
+
+  it("defaults the optional fields", async () => {
+    stubFetch(() => ({body: {score: 1500, profileId: 7}}));
+    const result = await fetchEthosProfile(WALLET);
+    expect(result.status).toBeNull();
+    expect(result.username).toBeNull();
+    expect(result.userkeys).toEqual([]);
+  });
+});
+
+describe("xHandleOf", () => {
+  it("prefers the username", () => {
+    expect(xHandleOf(profile({username: "zp_land"}))).toBe("zp_land");
+  });
+
+  it("falls back to the x.com userkey id", () => {
+    const handle = xHandleOf(profile({username: null}));
+    expect(handle).toBe("1520516860155944960");
+  });
+
+  it("returns null with no X link at all", () => {
+    expect(xHandleOf(profile({username: null, userkeys: ["address:0x1"]}))).toBeNull();
+    expect(xHandleOf(profile({username: null, userkeys: []}))).toBeNull();
+  });
+
+  it("returns null for an empty userkey id", () => {
+    expect(xHandleOf(profile({username: null, userkeys: ["service:x.com:"]}))).toBeNull();
+  });
+});
+
+describe("fetchFollowers", () => {
+  const twitter = (url: string) => url.includes("/twitter/user/profile");
+  const kaito = (url: string) => url.includes("/kaito/user_status");
+
+  it("uses the primary source when it has a count", async () => {
+    const urls = stubFetch((url) =>
+      twitter(url) ? {body: {followersCount: 24_000}} : {body: {}},
+    );
+    expect(await fetchFollowers("zp_land")).toBe(24_000);
+    // Nothing to gain from the fallback once the primary answered.
+    expect(urls.filter(kaito)).toHaveLength(0);
+  });
+
+  /**
+   * The observed real-world case: gomtu's Twitter proxy returns `followersCount: 0` for handles it
+   * cannot read while still echoing a valid `userId`, so a zero there means "no data" rather than
+   * "no followers" and has to fall through.
+   */
+  it("falls through when the primary reports zero", async () => {
+    stubFetch((url) =>
+      twitter(url)
+        ? {body: {followersCount: 0, userId: "1520516860155944960"}}
+        : {body: {data: {follower_count: 5_942}}},
+    );
+    expect(await fetchFollowers("VitalikButerin")).toBe(5_942);
+  });
+
+  it("falls through when the primary fails", async () => {
+    stubFetch((url) =>
+      twitter(url) ? {throws: true} : {body: {data: {follower_count: 1_234}}},
+    );
+    expect(await fetchFollowers("someone")).toBe(1_234);
+  });
+
+  it("degrades to zero when both sources are useless", async () => {
+    stubFetch((url) =>
+      twitter(url) ? {body: {followersCount: 0}} : {body: {data: {follower_count: 0}}},
+    );
+    expect(await fetchFollowers("small_account")).toBe(0);
+  });
+
+  it("degrades to zero when both sources fail", async () => {
+    // Reach is the soft half of BoneyScore: an outage in the least reliable dependency in the
+    // system must cost a KOL their reach points, never their ability to join.
+    stubFetch(() => ({throws: true}));
+    expect(await fetchFollowers("anyone")).toBe(0);
+  });
+
+  it("degrades to zero on a malformed payload", async () => {
+    stubFetch(() => ({body: {data: {follower_count: "lots"}}}));
+    expect(await fetchFollowers("anyone")).toBe(0);
+  });
+
+  it("url-encodes the handle", async () => {
+    const urls = stubFetch(() => ({body: {}}));
+    await fetchFollowers("a b&c");
+    expect(urls[0]).toContain("a%20b%26c");
+    expect(urls[0]).not.toContain("a b&c");
+  });
+});
+
+describe("buildScoreReport", () => {
+  it("composes the score from Ethos plus a follower count", async () => {
+    stubFetch((url) => {
+      if (url.includes("/user/by/address/")) return {body: profile()};
+      if (url.includes("/twitter/user/profile")) return {body: {followersCount: 24_000}};
+      return {body: {}};
+    });
+
+    const report = await buildScoreReport(WALLET);
+    expect(report.ethos).toBe(2034);
+    expect(report.followers).toBe(24_000);
+    expect(report.reach).toBe(reachFromFollowers(24_000));
+    expect(report.handle).toBe("zp_land");
+    expect(report.profileId).toBe(20);
+    expect(report.status).toBe("ACTIVE");
+  });
+
+  it("skips the follower lookup with no linked X account", async () => {
+    const urls = stubFetch((url) =>
+      url.includes("/user/by/address/")
+        ? {body: profile({username: null, userkeys: ["address:0x1"]})}
+        : {body: {followersCount: 99}},
+    );
+
+    const report = await buildScoreReport(WALLET);
+    expect(report.handle).toBeNull();
+    expect(report.followers).toBe(0);
+    expect(report.reach).toBe(0);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("still produces a report when the follower sources are down", async () => {
+    stubFetch((url) => (url.includes("/user/by/address/") ? {body: profile()} : {throws: true}));
+
+    const report = await buildScoreReport(WALLET);
+    expect(report.ethos).toBe(2034);
+    expect(report.followers).toBe(0);
+    expect(report.reach).toBe(0);
+  });
+
+  it("propagates a refusal rather than scoring an unclaimed wallet", async () => {
+    stubFetch(() => ({status: 404}));
+    const error = await buildScoreReport(WALLET).catch((e) => e as EthosError);
+    expect(error).toBeInstanceOf(EthosError);
+    expect(error.code).toBe("no_ethos_profile");
+  });
+});
+
+/**
+ * Live checks against the real Ethos API — `LIVE_ETHOS=1 pnpm test`.
+ *
+ * These assert the upstream contract this module is built on, not our own arithmetic: that 404 still
+ * means unknown wallet, that an unclaimed profile still arrives as a 200 carrying a score, and that
+ * a claimed one still exposes the X handle reach depends on. Scores drift, so nothing here asserts
+ * an exact number.
+ */
+describe.skipIf(!process.env.LIVE_ETHOS)("live Ethos API", () => {
+  it("resolves a claimed profile and its X handle", async () => {
+    const result = await fetchEthosProfile(LIVE_CLAIMED);
+    expect(result.profileId).toBe(20);
+    expect(result.status).toBe("ACTIVE");
+    expect(result.score).toBeGreaterThan(0);
+    expect(xHandleOf(result)).toBe("zp_land");
+  });
+
+  it("accepts a checksummed address and its lowercase form alike", async () => {
+    const [checksummed, lowercased] = await Promise.all([
+      fetchEthosProfile(LIVE_CLAIMED),
+      fetchEthosProfile(LIVE_CLAIMED.toLowerCase()),
+    ]);
+    expect(checksummed.profileId).toBe(lowercased.profileId);
+  });
+
+  it("404s an address it has no record of", async () => {
+    const error = await fetchEthosProfile(LIVE_UNKNOWN).catch((e) => e as EthosError);
+    expect(error).toBeInstanceOf(EthosError);
+    expect(error.code).toBe("no_ethos_profile");
+    expect(error.httpStatus).toBe(400);
+  });
+
+  it("still refuses a known address with no claimed profile", async () => {
+    // Carries a real score despite being unclaimed — precisely why profileId, not score, decides.
+    const error = await fetchEthosProfile(LIVE_UNCLAIMED).catch((e) => e as EthosError);
+    expect(error).toBeInstanceOf(EthosError);
+    expect(error.code).toBe("no_ethos_profile");
+  });
+
+  it("builds a full report for a claimed wallet", async () => {
+    const report = await buildScoreReport(LIVE_CLAIMED);
+    expect(report.ethos).toBeGreaterThan(0);
+    expect(report.handle).toBe("zp_land");
+    // Follower sources are unreliable by design here; only the invariant is safe to assert.
+    expect(report.reach).toBe(reachFromFollowers(report.followers));
+    expect(report.reach).toBeLessThanOrEqual(2800);
+  });
+
+  it("never throws from the follower lookup", async () => {
+    await expect(fetchFollowers("VitalikButerin")).resolves.toBeTypeOf("number");
+    await expect(fetchFollowers("no_such_handle_9f8a7b6c5d")).resolves.toBe(0);
+  });
+});
