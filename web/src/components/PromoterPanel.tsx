@@ -5,6 +5,7 @@ import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {useJoinCampaign, useSettleRewards, isPending, type TxState} from "@/hooks/useWriteCampaign";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
+import {useEthosAttestation} from "@/hooks/useEthosAttestation";
 import {
   canJoin,
   canSettle,
@@ -40,7 +41,8 @@ export function PromoterPanel({
   const {address, isConnected} = useAccount();
   const join = useJoinCampaign();
   const settleTx = useSettleRewards();
-  const {reputation} = usePromoterReputation(address);
+  const {reputation, refetch: refetchReputation} = usePromoterReputation(address);
+  const attestation = useEthosAttestation();
   const [copied, setCopied] = useState(false);
 
   const joined = Boolean(promoter?.joined);
@@ -142,7 +144,7 @@ export function PromoterPanel({
           <p className="text-xs text-ink-secondary">
             {detail.minReputation === BigInt(0)
               ? "This campaign is open to all promoters."
-              : `Requires a reputation of ${detail.minReputation.toString()}. Yours is ${(reputation ?? BigInt(0)).toString()}.`}
+              : `Requires a BoneyScore of ${detail.minReputation.toString()}. Yours is ${(reputation ?? BigInt(0)).toString()}.`}
           </p>
 
           <button
@@ -160,6 +162,52 @@ export function PromoterPanel({
 
           {!joinEligibility.ok ? (
             <p className="text-xs text-warning">{joinEligibility.reason}</p>
+          ) : null}
+
+          {/*
+            A reputation shortfall is the one refusal a KOL can act on without leaving the page:
+            an un-attested wallet scores 0 and would otherwise see a permanently dead button on
+            every gated campaign. Verifying pulls their Ethos score and X reach on chain, after
+            which `reputation` refetches and the Join button may light up.
+          */}
+          {joinEligibility.actionable === "attest" ? (
+            <div className="space-y-2 rounded-md border border-hairline p-3">
+              <p className="text-xs text-ink-secondary">
+                BoneyScore combines your Ethos credibility with your X reach. Verifying reads both
+                and records them on chain — it needs a claimed Ethos profile.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await attestation.attest();
+                  if (ok) {
+                    await refetchReputation();
+                    onDone();
+                  }
+                }}
+                disabled={
+                  attestation.state.status === "fetching" ||
+                  attestation.state.status === "submitting"
+                }
+                className="rounded-md border border-series-1 px-3 py-1.5 text-xs font-medium text-series-1 hover:bg-series-1/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {attestation.state.status === "fetching"
+                  ? "Reading Ethos…"
+                  : attestation.state.status === "submitting"
+                    ? `Recording ${attestation.state.done + 1} of ${attestation.state.total}…`
+                    : "Verify my BoneyScore"}
+              </button>
+
+              {attestation.state.status === "error" ? (
+                <p className="text-xs text-warning">{attestation.state.message}</p>
+              ) : null}
+              {attestation.state.status === "success" ? (
+                <p className="text-xs text-ink-muted">
+                  Ethos {attestation.state.ethos} · reach {attestation.state.reach} (
+                  {attestation.state.followers.toLocaleString()} followers)
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           <TxFeedback state={join.state} onReset={join.reset} />

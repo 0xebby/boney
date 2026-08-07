@@ -50,6 +50,18 @@ contract SeedLocal is Script {
     uint256 constant USER_PK = 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a;
     uint256 constant USER2_PK = 0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba;
 
+    // ── BoneyScore ───────────────────────────────────────────────
+    // BoneyScore = 7*ETHOS_SCORE + 3*X_REACH, both inputs on a 0–2800 scale, so the composite
+    // tops out at 28,000. Trust outweighs reach 70/30 because reach is purchasable and Ethos
+    // vouches are not. Mirrored in `web/src/lib/boneyscore.ts`; the two must agree.
+    uint256 constant ETHOS_WEIGHT = 7;
+    uint256 constant REACH_WEIGHT = 3;
+
+    /// @dev Join gate for the reputation-gated seed campaign. Sits between KOL 2 (14,863) and
+    ///      KOL 1 (19,494) so one KOL clears it and one does not — otherwise the gate is invisible
+    ///      in the local fixture and a regression in `join()` would pass unnoticed.
+    uint256 constant GATED_MIN_REPUTATION = 16_000;
+
     // Resolved in `run()`. Storage rather than locals for the same stack-depth reason as the
     // module references below.
     uint256 DEPLOYER_PK;
@@ -100,8 +112,20 @@ contract SeedLocal is Script {
         vm.stopBroadcast();
     }
 
-    /// @dev Registers a reputation schema and vouches for both KOLs, so reputation-gated
+    /// @dev Registers the BoneyScore schemas and vouches for both KOLs, so reputation-gated
     ///      campaigns are actually joinable.
+    ///
+    ///      BoneyScore = 7*ETHOS_SCORE + 3*X_REACH. Both inputs are on the same 0–2800 scale,
+    ///      which is what makes the 70/30 weighting mean anything: `scoreOf` multiplies value by
+    ///      weight and never divides, so a raw follower count (tens of thousands) blended against
+    ///      an Ethos score (hundreds to low thousands) would be ~92% followers. The attestor
+    ///      normalises followers off-chain into X_REACH via
+    ///      `reach = min(2800, floor(400*log10(1+followers)))` — see `web/src/lib/boneyscore.ts`,
+    ///      which is the single source of truth for that curve.
+    ///
+    ///      X_FOLLOWERS stays registered at weight 0: still attested and readable for display and
+    ///      audit, but contributing nothing to the score. Weight 0 retires a schema's contribution
+    ///      without erasing its data, so the raw counts already stored remain intact.
     ///
     ///      Re-runnable against an already-seeded chain, which reseeding onto a live deployment
     ///      requires. Two separate replay guards have to be respected: `registerSchema` reverts
@@ -110,23 +134,48 @@ contract SeedLocal is Script {
     ///      salted with the block number rather than being fixed strings. Attestations overwrite
     ///      the stored record, so reseeding refreshes the values instead of duplicating them.
     function _seedReputation() internal {
-        bytes32 schema = reputation.schemaId("X_FOLLOWERS");
-        (,, bool exists) = reputation.schemaInfo(schema);
+        bytes32 followers = reputation.schemaId("X_FOLLOWERS");
+        bytes32 ethos = reputation.schemaId("ETHOS_SCORE");
+        bytes32 reach = reputation.schemaId("X_REACH");
+
+        (, uint256 followersWeight, bool followersExists) = reputation.schemaInfo(followers);
+        (,, bool ethosExists) = reputation.schemaInfo(ethos);
+        (,, bool reachExists) = reputation.schemaInfo(reach);
 
         vm.startBroadcast(DEPLOYER_PK);
-        if (!exists) reputation.registerSchema("X_FOLLOWERS", 1);
-        reputation.storeAttestation(
-            vm.addr(KOL_PK), schema, 24_000, keccak256(abi.encode("seed-kol-1", block.number))
-        );
-        reputation.storeAttestation(
-            vm.addr(KOL2_PK), schema, 8_500, keccak256(abi.encode("seed-kol-2", block.number))
-        );
+        if (!followersExists) reputation.registerSchema("X_FOLLOWERS", 0);
+        if (!ethosExists) reputation.registerSchema("ETHOS_SCORE", ETHOS_WEIGHT);
+        if (!reachExists) reputation.registerSchema("X_REACH", REACH_WEIGHT);
+
+        // Retire the legacy follower weight on chains seeded before BoneyScore existed. Guarded so
+        // a reseed of an already-migrated chain is a no-op rather than a redundant write.
+        if (followersExists && followersWeight != 0) reputation.setSchemaWeight(followers, 0);
+
+        // KOL 1: Ethos 2034 ("exemplary"), 24,000 followers -> reach 1752 -> BoneyScore 19,494.
+        _attest(vm.addr(KOL_PK), ethos, 2_034, "seed-kol-1-ethos");
+        _attest(vm.addr(KOL_PK), reach, 1_752, "seed-kol-1-reach");
+        _attest(vm.addr(KOL_PK), followers, 24_000, "seed-kol-1-followers");
+
+        // KOL 2: Ethos 1450, 8,500 followers -> reach 1571 -> BoneyScore 14,863, which sits just
+        // below the 16,000 gate so the reputation check is actually exercised locally.
+        _attest(vm.addr(KOL2_PK), ethos, 1_450, "seed-kol-2-ethos");
+        _attest(vm.addr(KOL2_PK), reach, 1_571, "seed-kol-2-reach");
+        _attest(vm.addr(KOL2_PK), followers, 8_500, "seed-kol-2-followers");
         vm.stopBroadcast();
+    }
+
+    /// @dev Stores one attested value, salting the attestation id with the block number so the
+    ///      permanent replay guard does not block a reseed.
+    function _attest(address subject, bytes32 schema, uint256 value, string memory tag) internal {
+        reputation.storeAttestation(subject, schema, value, keccak256(abi.encode(tag, block.number)));
     }
 
     /// @dev Active campaign with two promoters, attributed users, and crossed tiers.
     function _campaignWithProgress() internal returns (address campaign) {
-        campaign = _create(50_000 ether, 2_500);
+        // Gated at 12,000: both seeded KOLs clear it (14,863 and 19,494), so the gate is real
+        // rather than 0 but still lets this campaign demonstrate two joined promoters. Raising it
+        // above KOL 2's score here would revert their `join()` below and break the seed.
+        campaign = _create(50_000 ether, 12_000);
         _fundAndActivate(campaign, 50_000 ether);
 
         vm.broadcast(KOL_PK);
@@ -151,8 +200,10 @@ contract SeedLocal is Script {
 
     function _pendingCampaign() internal returns (address campaign) {
         // Created but never funded — stays Pending, which is the state the UI must not confuse
-        // with Active.
-        campaign = _create(8_000 ether, 5_000);
+        // with Active. Also carries the BoneyScore gate that actually excludes someone: at 16,000
+        // KOL 1 (19,494) qualifies and KOL 2 (14,863) does not, so `InsufficientReputation` has a
+        // live case in the fixture. Nobody joins this campaign, so the gate cannot break the seed.
+        campaign = _create(8_000 ether, GATED_MIN_REPUTATION);
     }
 
     function _endedCampaign() internal returns (address campaign) {

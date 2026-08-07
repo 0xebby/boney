@@ -108,7 +108,25 @@ describe("canJoin", () => {
   it("blocks below the reputation floor — Solidity: InsufficientReputation", () => {
     const r = canJoin(ctx({reputation: BigInt(999), minReputation: BigInt(1000)}));
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/reputation/i);
+    expect(r.reason).toMatch(/boneyscore/i);
+    // Short of the bar but non-zero: still worth offering a re-attestation, since the score may
+    // simply be stale.
+    expect(r.actionable).toBe("attest");
+  });
+
+  it("tells an unverified wallet to establish a score rather than quoting it a 0", () => {
+    // The registry returns 0 for any wallet it holds no records for, so "your score is 0" would
+    // read as a judgement when it actually means "never attested".
+    const r = canJoin(ctx({reputation: BigInt(0), minReputation: BigInt(16000)}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/verify your ethos profile/i);
+    expect(r.actionable).toBe("attest");
+  });
+
+  it("does not mark status or already-joined refusals as attestable", () => {
+    // No attestation makes an ended campaign joinable; offering the button would be a lie.
+    expect(canJoin(ctx({status: "Ended"})).actionable).toBeUndefined();
+    expect(canJoin(ctx({alreadyJoined: true})).actionable).toBeUndefined();
   });
 
   it("admits a score exactly at the floor — the contract uses <, not <=", () => {

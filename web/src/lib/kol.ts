@@ -65,6 +65,13 @@ export type Eligibility = {
   ok: boolean;
   /** Why not, when `ok` is false. */
   reason?: string;
+  /**
+   * Set when the only thing standing in the way is a reputation score that an attestation could
+   * raise. The UI offers "verify your BoneyScore" instead of a dead button, because an
+   * un-attested wallet reads as score 0 and would otherwise look permanently barred from every
+   * gated campaign. Never set for status or already-joined failures, which no attestation fixes.
+   */
+  actionable?: "attest";
 };
 
 /**
@@ -84,9 +91,16 @@ export function canJoin(ctx: JoinContext): Eligibility {
 
   // minReputation of 0 disables the check entirely — matching the contract's `!= 0` guard.
   if (ctx.minReputation > BigInt(0) && ctx.reputation < ctx.minReputation) {
-    return no(
-      `Your reputation is ${ctx.reputation.toString()}; this campaign requires ${ctx.minReputation.toString()}.`,
-    );
+    // A score of 0 almost always means "never attested" rather than "genuinely disqualified" —
+    // the registry returns 0 for any wallet it has no records for.
+    const unverified = ctx.reputation === BigInt(0);
+    return {
+      ok: false,
+      reason: unverified
+        ? `This campaign requires a BoneyScore of ${ctx.minReputation.toString()}. Verify your Ethos profile to establish yours.`
+        : `Your BoneyScore is ${ctx.reputation.toString()}; this campaign requires ${ctx.minReputation.toString()}.`,
+      actionable: "attest",
+    };
   }
   return {ok: true};
 }

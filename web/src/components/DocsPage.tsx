@@ -39,7 +39,7 @@ export function DocsPage() {
         </p>
         <List
           items={[
-            ["Create", "Define the token, pool, window, KPIs, and minimum promoter reputation."],
+            ["Create", "Define the token, pool, window, KPIs, and minimum promoter BoneyScore."],
             ["Fund", "Transfer the reward pool into the escrow vault."],
             ["Activate", "Open the campaign to promoters. Requires funded escrow."],
             ["End", "Close the campaign. Opens the claim grace window."],
@@ -59,9 +59,23 @@ export function DocsPage() {
           farm another.
         </p>
         <p>
-          Campaigns may set a minimum reputation. Reputation is attested through the protocol&rsquo;s
-          registry, so a campaign can require a track record without the project having to vet
-          anyone by hand.
+          Campaigns may set a minimum <Term>BoneyScore</Term>. The score combines two attested
+          signals: a promoter&rsquo;s Ethos credibility, which reflects vouches and reviews from
+          other people, and their X reach. Trust counts for 70% and reach for 30% — followers are
+          purchasable, vouches are not, but an audience still matters for promotion.
+        </p>
+        <p>
+          Reach is scaled logarithmically rather than counted directly. Follower counts are
+          power-law distributed, so counting them linearly would let a single large account
+          outweigh every genuine mid-tier promoter combined, turning the reach term into a whale
+          detector instead of an audience signal.
+        </p>
+        <p>
+          Verifying reads both figures and records them through the protocol&rsquo;s attestation
+          registry, so a campaign can require a track record without the project vetting anyone by
+          hand. Only the numbers reach the chain — social handles stay off it. A claimed Ethos
+          profile is required: Ethos returns a baseline score for any address it has never seen,
+          and accepting those would let a freshly generated wallet clear a gate it never earned.
         </p>
       </Section>
 
