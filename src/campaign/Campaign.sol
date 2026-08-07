@@ -272,6 +272,17 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @dev Joining is allowed while `Pending` too, so KOLs can prepare links before launch.
+    ///
+    ///      **Sybil resistance**: `AlreadyJoined` stops one wallet from rejoining, but a KOL
+    ///      controlling multiple wallets can join from each. Under LAST_TOUCH the user can re-point
+    ///      attribution across those wallets with newer Touches. Each wallet walks the tier ladder
+    ///      from rung zero (`_settledTiers` and `_progress` are keyed by promoter address), so the
+    ///      bottom rungs can be farmed. Five wallets each taking the user +10 units extract 5,000
+    ///      from the same 50 units of activity, against 3,000 for one honest promoter at 50 (tested
+    ///      in `test/RejoinAttack.t.sol::test_SybilFarmingBottomRung`). `minReputation` is the
+    ///      existing lever — it raises the cost per sybil. A structural fix would require either
+    ///      making lower rungs non-repeatable for the same user across promoters, or keying the
+    ///      ladder to something sybil-resistant.
     function join() external returns (bytes32 promoterId) {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Pending) {
             revert WrongStatus(status);
@@ -380,6 +391,10 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Walks the tier ladder for one `(promoter, kpi)` pair and pays every newly crossed
     ///      tier. State is written before each external transfer (checks-effects-interactions);
     ///      callers are `nonReentrant`.
+    ///      The ladder is per-promoter by design (each KOL earns their own tiers), which also means
+    ///      it is re-walkable by a KOL joining from a second wallet — see the sybil note on
+    ///      `join()`. `_settledTiers` is never cleared, so a given promoter address cannot re-earn
+    ///      a tier; the repetition is across addresses, not within one.
     /// @param promoter Wallet receiving the payouts.
     /// @param promoterId The promoter's campaign-bound id, used for event indexing.
     /// @param kpiIndex Index of the KPI whose ladder is walked.

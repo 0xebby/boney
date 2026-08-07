@@ -36,10 +36,8 @@ contract SeedLocal is Script {
     // public chain. Deployer and project own protocol state — the deployer is the attestor and
     // owner of the verifier, reputation registry, coordinator, and vault; the project owns every
     // seeded campaign — so off anvil they point at a real wallet via env.
-    uint256 constant ANVIL_DEPLOYER_PK =
-        0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-    uint256 constant ANVIL_PROJECT_PK =
-        0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+    uint256 constant ANVIL_DEPLOYER_PK = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+    uint256 constant ANVIL_PROJECT_PK = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
     // The KOL and user accounts default to anvil's, and both are overridable.
     //
     // Users only ever sign — `_storeTouch` relays through the deployer — so they need no gas on
@@ -47,10 +45,8 @@ contract SeedLocal is Script {
     // `join()`, and on a public testnet a well-known key cannot hold gas: sweeper bots drain
     // anything sent to anvil's accounts within seconds, so a top-up is gone before the seed can
     // spend it. Off anvil the runner supplies burner keys derived from the deployer instead.
-    uint256 constant ANVIL_KOL_PK =
-        0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
-    uint256 constant ANVIL_KOL2_PK =
-        0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
+    uint256 constant ANVIL_KOL_PK = 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a;
+    uint256 constant ANVIL_KOL2_PK = 0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6;
     uint256 constant USER_PK = 0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a;
     uint256 constant USER2_PK = 0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba;
 

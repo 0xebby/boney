@@ -1,5 +1,6 @@
 import {KPI_KIND, type CampaignConfig, type KpiSpec, type RewardTier} from "./types";
-import {parseAmount, parseCount, isAddress, type CampaignDraft} from "./validation";
+import {parseAmount, parseCount, isAddress, type CampaignDraft, type EventSourceDraft} from "./validation";
+import {AMOUNT_MODE, encodeEventSource, eventTopic, type AmountMode} from "./kpiSource";
 
 /**
  * Converts a validated `CampaignDraft` into the exact tuple arguments
@@ -80,9 +81,7 @@ export function buildCreateCampaignArgs(
     // rather than being an error.
     target: kpi.target.trim() ? requireCount(kpi.target, `kpis.${i}.target`) : BigInt(0),
     aggregate: kpi.aggregate,
-    // No KPI kind in the MVP consumes verifier params; a custom adapter that needs them would
-    // set this from its own form section.
-    params: "0x",
+    params: encodeKpiParams(kpi.eventSource, `kpis.${i}.eventSource`),
   }));
 
   const tiers = draft.kpis.map((kpi, i) =>
@@ -117,6 +116,47 @@ export function toWireKpis(
     aggregate: k.aggregate,
     params: k.params,
   }));
+}
+
+/**
+ * Encodes a KPI's event source into `KpiSpec.params`, or `"0x"` when it has none.
+ *
+ * An empty `source` is the normal case — every campaign created before event sourcing existed, and
+ * every KPI a project intends to report by hand. It encodes to `"0x"`, which `decodeEventSource`
+ * reads back as "not event-sourced".
+ *
+ * The signature is hashed here rather than stored, because `topics[0]` is the hash and carrying
+ * the string on chain would cost calldata for something no consumer compares against.
+ */
+function encodeKpiParams(src: EventSourceDraft | undefined, path: string): `0x${string}` {
+  if (!src || !src.source.trim()) return "0x";
+
+  if (!isAddress(src.source.trim())) {
+    throw new DraftEncodingError(`${path}.source`, "not a valid address");
+  }
+  const signature = src.signature.trim();
+  if (!signature) {
+    throw new DraftEncodingError(`${path}.signature`, "event signature is required");
+  }
+
+  const actorTopic = Number(src.actorTopic);
+  if (!Number.isInteger(actorTopic) || actorTopic < 1 || actorTopic > 3) {
+    throw new DraftEncodingError(`${path}.actorTopic`, `must be 1..3, got "${src.actorTopic}"`);
+  }
+
+  const amountMode: AmountMode =
+    src.amountMode === "count" ? AMOUNT_MODE.count : AMOUNT_MODE.dataWord0;
+
+  // A blank scale means no scaling, matching how a blank target means 0.
+  const scale = src.scale.trim() ? requireCount(src.scale, `${path}.scale`) : BigInt(1);
+
+  return encodeEventSource({
+    source: src.source.trim() as `0x${string}`,
+    topic0: eventTopic(signature),
+    actorTopic: actorTopic as 1 | 2 | 3,
+    amountMode,
+    scale,
+  });
 }
 
 function normalizeVerifier(raw: string, path: string): `0x${string}` {

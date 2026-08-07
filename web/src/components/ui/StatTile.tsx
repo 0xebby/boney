@@ -32,7 +32,7 @@ export function StatTile({
         <span className="text-xs text-ink-muted">{label}</span>
       </div>
 
-      <span className="text-2xl font-semibold leading-tight text-ink">{value}</span>
+      <span className="font-display text-3xl leading-tight text-ink">{value}</span>
 
       {delta || hint ? (
         <div className="flex items-baseline gap-2">

@@ -46,8 +46,8 @@ export function CampaignsPage() {
     return (
       <Card>
         <EmptyState
-          title="Protocol not deployed on this network"
-          description="Switch to a network with a Boney deployment, or run a local anvil chain and deploy with script/DeployBoney.s.sol."
+          title="Boneyard is not available on this network"
+          description="Switch your wallet to a supported network to see campaigns."
         />
       </Card>
     );
@@ -55,10 +55,42 @@ export function CampaignsPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-lg font-semibold text-ink">Boneyard</h1>
-        <p className="mt-0.5 text-xs text-ink-muted">
-          Escrowed, performance-based campaigns. Rewards release as verified milestones are met.
+      {/*
+        The list page doubles as the landing page, so the name gets hero treatment here rather
+        than the small page-title treatment every other route uses. Lowercase to match the brand
+        mark in the top bar.
+      */}
+      <header className="py-8 text-center sm:py-12">
+        <h1 className="font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
+          boneyard
+        </h1>
+        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-ink-secondary sm:text-base">
+          The marketplace for trustless marketing campaigns.
+        </p>
+
+        {/*
+          Search is promoted out of the filter row and into the hero: on a marketplace landing
+          page it is the primary way in, not one control among several. The status and
+          "joinable" filters stay below, where they scope the table they sit above.
+        */}
+        <div className="mt-6">
+          <label className="sr-only" htmlFor="campaign-search">
+            Search campaigns by id or project address
+          </label>
+          <input
+            id="campaign-search"
+            type="search"
+            value={filters.search}
+            onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
+            placeholder="Search by campaign id or project address…"
+            className="h-11 w-full rounded-lg border border-hairline-strong bg-surface-1 px-4 text-sm text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand"
+          />
+        </div>
+
+        <p className="mt-3 text-xs text-ink-muted">
+          <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
+            How it works
+          </Link>
         </p>
       </header>
 
@@ -95,20 +127,9 @@ export function CampaignsPage() {
         />
       </StatRow>
 
-      {/* One filter row above everything it scopes — never per-card filters. */}
+      {/* One filter row above everything it scopes — never per-card filters. Search lives in the
+          hero above, so this row is status and eligibility only. */}
       <div className="flex flex-wrap items-center gap-2">
-        <label className="sr-only" htmlFor="campaign-search">
-          Search campaigns
-        </label>
-        <input
-          id="campaign-search"
-          type="search"
-          value={filters.search}
-          onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
-          placeholder="Search id or address…"
-          className="h-8 w-56 rounded-md border border-hairline bg-surface-1 px-2.5 text-[13px] text-ink placeholder:text-ink-muted"
-        />
-
         <div className="flex items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
           {STATUS_OPTIONS.map((option) => {
             const active = filters.status === option;
@@ -133,7 +154,7 @@ export function CampaignsPage() {
             type="checkbox"
             checked={filters.joinableOnly}
             onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
-            className="size-3.5 accent-[var(--series-1)]"
+            className="size-3.5 accent-[var(--brand)]"
           />
           Joinable by me
         </label>

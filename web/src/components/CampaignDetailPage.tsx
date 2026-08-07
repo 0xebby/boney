@@ -87,8 +87,8 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
     return (
       <Card>
         <EmptyState
-          title="Protocol not deployed on this network"
-          description="Switch to a network with a Boney deployment, or run a local anvil chain."
+          title="Boneyard is not available on this network"
+          description="Switch your wallet to a supported network to see this campaign."
           action={<BackLink />}
         />
       </Card>
@@ -148,7 +148,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold text-ink">
+            <h1 className="font-display text-2xl text-ink">
               Campaign #{campaignId.toString()}
             </h1>
             <StatusPill status={detail.status} />
@@ -351,6 +351,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
                 decimals={token.decimals}
                 symbol={token.symbol}
                 promoterState={promoterByKpi.get(kpi.index)}
+                chainId={chainId}
               />
             ))}
           </div>

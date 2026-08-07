@@ -4,6 +4,10 @@
  * A static screenshot only proves the first paint. This clicks through the controls a user
  * would actually use and asserts the table responds — the filters are pure functions that are
  * unit-tested, but nothing except a real browser proves they are wired to the UI.
+ *
+ * Set `CHROME_PATH` when Playwright's bundled `headless_shell` cannot start. On this WSL box the
+ * shell build is missing `libnspr4.so` while the full chromium build ships its own copies, so
+ * point CHROME_PATH at `chrome-linux64/chrome` under the `chromium-<rev>` cache directory.
  */
 import {chromium} from "playwright";
 import {mkdirSync} from "node:fs";
@@ -11,7 +15,10 @@ import {mkdirSync} from "node:fs";
 const url = process.argv[2] ?? "http://localhost:3000";
 mkdirSync("screenshots", {recursive: true});
 
-const browser = await chromium.launch({args: ["--no-sandbox"]});
+const browser = await chromium.launch({
+  executablePath: process.env.CHROME_PATH,
+  args: ["--no-sandbox"],
+});
 const page = await browser.newPage({viewport: {width: 1440, height: 900}});
 
 const errors = [];
@@ -35,12 +42,12 @@ await page.goto(url, {waitUntil: "domcontentloaded", timeout: 60_000});
 await rows().first().waitFor({timeout: 45_000});
 
 console.log("interaction checks:");
-check("all campaigns shown", await rows().count(), 4);
+check("all campaigns shown", await rows().count(), 5);
 
 // ── status filter ────────────────────────────────────────────
 await page.getByRole("button", {name: "Active", exact: true}).click();
 await page.waitForTimeout(300);
-check("Active filter", await rows().count(), 2);
+check("Active filter", await rows().count(), 3);
 
 await page.getByRole("button", {name: "Ended", exact: true}).click();
 await page.waitForTimeout(300);
@@ -48,7 +55,7 @@ check("Ended filter", await rows().count(), 1);
 
 await page.getByRole("button", {name: "All", exact: true}).click();
 await page.waitForTimeout(300);
-check("back to All", await rows().count(), 4);
+check("back to All", await rows().count(), 5);
 
 // ── search: numeric query is id-only ────────────────────────
 const search = page.locator("#campaign-search");

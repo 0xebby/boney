@@ -4,7 +4,9 @@ import {Card} from "@/components/ui/Card";
 import {Meter} from "@/components/ui/Meter";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {nextTier, tierProgressRatio, crossedTierCount} from "@/lib/campaign";
-import {formatTokenAmount, compactNumber, formatRatio} from "@/lib/format";
+import {formatTokenAmount, compactNumber, formatRatio, shortAddress} from "@/lib/format";
+import {decodeEventSource, knownSignature, effectiveScale} from "@/lib/kpiSource";
+import {explorerAddressUrl} from "@/lib/chains";
 import {KPI_KIND_LABEL, type RewardTier} from "@/lib/types";
 import type {KpiDetail, PromoterKpiState} from "@/lib/campaignDetail";
 
@@ -23,12 +25,15 @@ export function KpiPanel({
   decimals,
   symbol,
   promoterState,
+  chainId,
 }: {
   kpi: KpiDetail;
   decimals: number;
   symbol: string;
   /** Present only when the connected wallet has joined this campaign. */
   promoterState?: PromoterKpiState;
+  /** Resolves the block explorer for an event source's contract; absent on local chains. */
+  chainId?: number;
 }) {
   const label = KPI_KIND_LABEL[kpi.spec.kind];
   const ladderTotal = kpi.tiers.reduce((sum, t) => sum + t.reward, BigInt(0));
@@ -125,10 +130,61 @@ export function KpiPanel({
         )}
       </div>
 
+      <EventSourceLine params={kpi.spec.params} chainId={chainId} />
+
       <div className="-mx-4 -mb-4 border-t border-hairline">
         <DataTable rows={rows} columns={columns} rowKey={(r) => String(r.index)} />
       </div>
     </Card>
+  );
+}
+
+/**
+ * What this KPI measures, when it says so on chain.
+ *
+ * A KPI with no event source renders nothing — that is every campaign predating this feature, and
+ * every KPI a project reports by hand, so absence is ordinary rather than a missing-data state.
+ * When a source *is* declared, naming it matters: it is the difference between "trust the project's
+ * numbers" and "these came from this contract's logs, go check".
+ */
+function EventSourceLine({
+  params,
+  chainId,
+}: {
+  params: `0x${string}`;
+  chainId?: number;
+}) {
+  const source = decodeEventSource(params);
+  if (!source) return null;
+
+  const signature = knownSignature(source.topic0);
+  const scale = effectiveScale(source);
+  // Undefined on anvil, which has no explorer — the address then renders as plain text.
+  const href = chainId === undefined ? undefined : explorerAddressUrl(chainId, source.source);
+
+  return (
+    <div className="mb-4 rounded border border-hairline bg-surface-2 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wide text-ink-muted">Tracking</p>
+      <p className="mt-0.5 font-mono text-xs text-ink">
+        {signature ?? `${source.topic0.slice(0, 10)}…`}
+      </p>
+      <p className="mt-0.5 text-xs text-ink-muted">
+        on{" "}
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono underline hover:text-ink"
+          >
+            {shortAddress(source.source)}
+          </a>
+        ) : (
+          <span className="font-mono">{shortAddress(source.source)}</span>
+        )}
+        {scale > BigInt(1) ? ` · ${scale.toLocaleString("en-US")} per unit` : null}
+      </p>
+    </div>
   );
 }
 

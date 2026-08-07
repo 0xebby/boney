@@ -153,7 +153,7 @@ export function PromoterPanel({
             }}
             disabled={!joinEligibility.ok || isPending(join.state)}
             title={joinEligibility.reason}
-            className="rounded-md bg-series-1 px-4 py-2 text-sm font-medium text-ink hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isPending(join.state) ? "Joining…" : "Join as promoter"}
           </button>

@@ -7,13 +7,18 @@ import {useAccount, useConnect, useDisconnect} from "wagmi";
 
 /**
  * AppShell — a persistent top bar over a single full-width content column.
- * The bar is a product directory, not a settings menu: Boneyard (list), Create,
- * My Campaigns, KOL, Docs.
+ * The bar is a product directory, not a settings menu: Campaigns (the list), My Campaigns,
+ * KOL, Docs — plus the Create call to action.
+ *
+ * The first item is "Campaigns" rather than "Boneyard" on purpose. The brand mark beside it
+ * already links to `/`, and the list page leads with a `boneyard` hero — three copies of the name
+ * on one screen reads as a stutter, so only the mark and the hero carry it.
+ *
+ * Create is deliberately NOT in this list. It is the primary action of the whole product, so it
+ * sits in the right-hand cluster as a filled button rather than reading as one more peer link.
  */
-
 const NAV = [
-  {href: "/", label: "Boneyard", icon: "▦"},
-  {href: "/create", label: "Create", icon: "＋"},
+  {href: "/", label: "Campaigns", icon: "▦"},
   {href: "/my", label: "My Campaigns", icon: "◈"},
   {href: "/kol", label: "KOL", icon: "◎"},
   {href: "/docs", label: "Docs", icon: "◌"},
@@ -85,7 +90,7 @@ export function AppShell({children}: {children: ReactNode}) {
         aria-current={active ? "page" : undefined}
         className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
           active
-            ? "bg-surface-2 font-medium text-ink"
+            ? "bg-surface-2 font-semibold text-brand"
             : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
         }`}
       >
@@ -98,7 +103,7 @@ export function AppShell({children}: {children: ReactNode}) {
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       {/* Keyboard users should not have to tab the whole nav to reach content. */}
       <a
         href="#content"
@@ -114,9 +119,8 @@ export function AppShell({children}: {children: ReactNode}) {
       <header className="sticky top-0 z-40 border-b border-hairline bg-surface-1">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-2.5 sm:px-6 lg:px-8">
           <Link href="/" className="shrink-0">
-            <span className="text-sm font-bold tracking-tight text-ink">boney</span>
-            <span className="ml-1 hidden text-[10px] uppercase tracking-wider text-ink-muted sm:inline">
-              protocol
+            <span className="font-display text-2xl lowercase leading-none text-brand">
+              boneyard
             </span>
           </Link>
 
@@ -127,18 +131,51 @@ export function AppShell({children}: {children: ReactNode}) {
             {NAV.map(navLink)}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="hidden text-[10px] text-ink-muted lg:inline">
-              v0 · anvil local · not audited
+          <div className="flex shrink-0 items-center gap-2.5">
+            <span className="hidden text-[10px] uppercase tracking-wider text-ink-muted xl:inline">
+              beta
             </span>
+
+            {/*
+              The one filled control in the bar. Brand fill takes dark ink, not the light-yellow
+              body ink — a yellow button with yellow text is unreadable. The label shortens on
+              narrow screens so the CTA never squeezes the nav out of the row.
+            */}
+            <Link
+              href="/create"
+              aria-current={pathname === "/create" ? "page" : undefined}
+              className="flex shrink-0 items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-[13px] font-semibold text-plane transition-opacity hover:opacity-90"
+            >
+              <span aria-hidden className="text-xs">
+                ＋
+              </span>
+              <span className="hidden sm:inline">Create a campaign</span>
+              <span className="sm:hidden">Create</span>
+            </Link>
+
             <WalletButton />
           </div>
         </div>
       </header>
 
-      <main id="content" className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+      <main id="content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
         {children}
       </main>
+
+      {/*
+        The protocol attribution lives here rather than in the bar: the product is the Boneyard,
+        and the machinery underneath it is a footnote that links to where it is explained.
+      */}
+      <footer className="mt-12 border-t border-hairline">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-2 px-4 py-8 sm:px-6 lg:px-8">
+          <p className="text-xs text-ink-muted">
+            Powered by{" "}
+            <Link href="/docs" className="text-ink-secondary transition-colors hover:text-brand">
+              Boney Protocol
+            </Link>
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }

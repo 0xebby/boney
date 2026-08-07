@@ -7,8 +7,10 @@ import {Card, CardHeader} from "@/components/ui/Card";
 import {ErrorState} from "@/components/ui/States";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
-import {validateCampaignDraft, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft} from "@/lib/validation";
+import {useEventSourceProbe} from "@/hooks/useEventSourceProbe";
+import {validateCampaignDraft, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
 import {KPI_KIND, type KpiKind} from "@/lib/types";
+import {AMOUNT_MODE, EVENT_PRESETS} from "@/lib/kpiSource";
 
 export function CreateCampaignPage() {
   const {isConnected} = useAccount();
@@ -116,7 +118,7 @@ export function CreateCampaignPage() {
           <button
             type="button"
             onClick={() => router.push(`/campaign/${campaignId.toString()}`)}
-            className="rounded-md bg-series-1 px-4 py-2 text-sm font-medium text-ink hover:opacity-90"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90"
           >
             View Campaign
           </button>
@@ -128,7 +130,7 @@ export function CreateCampaignPage() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <header>
-        <h1 className="text-lg font-semibold text-ink">Create Campaign</h1>
+        <h1 className="font-display text-2xl text-ink">Create Campaign</h1>
         <p className="mt-1 text-xs text-ink-muted">
           Deploy a performance-based campaign with escrowed rewards
         </p>
@@ -225,7 +227,7 @@ export function CreateCampaignPage() {
             <button
               type="button"
               onClick={addKpi}
-              className="text-xs text-series-1 hover:underline"
+              className="text-xs text-brand hover:underline"
             >
               + Add KPI
             </button>
@@ -290,6 +292,13 @@ export function CreateCampaignPage() {
                   Aggregate-only (no rewards, analytics)
                 </label>
 
+                <EventSourceFields
+                  kpiIndex={i}
+                  value={kpi.eventSource}
+                  onChange={(eventSource) => updateKpi(i, {eventSource})}
+                  issueFor={issueFor}
+                />
+
                 {issueFor(`kpis.${i}.tiers`) ? (
                   <p className="text-xs text-critical">{issueFor(`kpis.${i}.tiers`)}</p>
                 ) : null}
@@ -302,7 +311,7 @@ export function CreateCampaignPage() {
                     <button
                       type="button"
                       onClick={() => addTier(i)}
-                      className="text-xs text-series-1 hover:underline"
+                      className="text-xs text-brand hover:underline"
                     >
                       + Add tier
                     </button>
@@ -342,7 +351,7 @@ export function CreateCampaignPage() {
         <button
           type="submit"
           disabled={isPending(state) || tokenDecimals === undefined}
-          className="rounded-md bg-series-1 px-4 py-2 text-sm font-medium text-ink hover:opacity-90 disabled:opacity-50"
+          className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:opacity-50"
         >
           {state.status === "preparing"
             ? "Awaiting signature..."
@@ -362,6 +371,154 @@ export function CreateCampaignPage() {
       </div>
     </form>
   );
+}
+
+/**
+ * Optional per-KPI event source — which contract and event feed this KPI's progress.
+ *
+ * Collapsed until enabled, because most KPIs do not have one: the field is new, every existing
+ * campaign leaves it empty, and a project reporting by hand never needs it. Showing five inputs by
+ * default would imply they are required.
+ *
+ * Encoded into `KpiSpec.params` at submit time — see `lib/kpiSource.ts` for the wire format.
+ */
+function EventSourceFields({
+  kpiIndex,
+  value,
+  onChange,
+  issueFor,
+}: {
+  kpiIndex: number;
+  value: EventSourceDraft | undefined;
+  onChange: (next: EventSourceDraft | undefined) => void;
+  issueFor: (path: string) => string | undefined;
+}) {
+  const enabled = value !== undefined;
+  const path = `kpis.${kpiIndex}.eventSource`;
+
+  const set = (updates: Partial<EventSourceDraft>) => {
+    onChange({...(value ?? emptyEventSource()), ...updates});
+  };
+
+  // Asks the chain whether this contract exists and emits this event. Advisory only — a project can
+  // still submit while it is loading or reporting an error, because the probe reads the *connected*
+  // chain and a campaign may legitimately target a contract deployed moments later.
+  const probe = useEventSourceProbe({
+    source: value?.source ?? "",
+    signature: value?.signature ?? "",
+  });
+
+  /** Fills every field from a verified preset, so a project need not assemble a topic by hand. */
+  const applyPreset = (id: string) => {
+    const preset = EVENT_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    set({
+      // The ERC-721 preset carries a zero address on purpose — the signature and topic layout are
+      // the reusable part; which collection is being watched is always project-specific.
+      source:
+        preset.source.source === "0x0000000000000000000000000000000000000000"
+          ? (value?.source ?? "")
+          : preset.source.source,
+      signature: preset.signature,
+      actorTopic: String(preset.source.actorTopic),
+      amountMode: preset.source.amountMode === AMOUNT_MODE.count ? "count" : "dataWord0",
+      scale: preset.source.scale.toString(),
+    });
+  };
+
+  return (
+    <div className="rounded border border-hairline bg-surface-2 p-2.5">
+      <label className="flex items-center gap-2 text-xs text-ink-secondary">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => onChange(e.target.checked ? emptyEventSource() : undefined)}
+        />
+        Credit progress from on-chain events
+      </label>
+
+      {!enabled ? (
+        <p className="mt-1 text-xs text-ink-muted">
+          Leave off to report this KPI yourself. Turn on to name a contract and event an indexer
+          reads instead.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-ink-muted">Preset</label>
+            <select
+              defaultValue=""
+              onChange={(e) => applyPreset(e.target.value)}
+              className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
+            >
+              <option value="">Custom…</option>
+              {EVENT_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <Field
+            label="Source contract"
+            value={value.source}
+            onChange={(v) => set({source: v})}
+            error={issueFor(`${path}.source`)}
+          />
+          <Field
+            label="Event signature"
+            value={value.signature}
+            onChange={(v) => set({signature: v})}
+            error={issueFor(`${path}.signature`)}
+            hint="Types only, no names or spaces — the topic is the keccak of this exact string."
+          />
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="mb-1 block text-xs text-ink-muted">Actor topic</label>
+              <select
+                value={value.actorTopic}
+                onChange={(e) => set({actorTopic: e.target.value})}
+                className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
+              >
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-ink-muted">Amount</label>
+              <select
+                value={value.amountMode}
+                onChange={(e) => set({amountMode: e.target.value})}
+                className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
+              >
+                <option value="count">Count events</option>
+                <option value="dataWord0">First data word</option>
+              </select>
+            </div>
+            <Field
+              label="Scale"
+              value={value.scale}
+              onChange={(v) => set({scale: v})}
+              error={issueFor(`${path}.scale`)}
+            />
+          </div>
+
+          <p className="text-xs text-ink-muted">
+            Which indexed topic holds the user&rsquo;s address, and how much each event is worth.
+            Scale divides the raw amount so tier thresholds stay small — 1e15 makes 0.001 of an
+            18-decimal token one unit of progress.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function emptyEventSource(): EventSourceDraft {
+  return {source: "", signature: "", actorTopic: "1", amountMode: "dataWord0", scale: "1"};
 }
 
 function Field({

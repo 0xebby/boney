@@ -14,12 +14,34 @@ import {MAX_KPIS, MAX_TIERS_PER_KPI, type KpiKind} from "./types";
 
 export type TierDraft = {threshold: string; reward: string};
 
+/**
+ * Where a KPI's progress comes from, as form strings.
+ *
+ * Encoded into `KpiSpec.params` by `campaignArgs.ts` — see `kpiSource.ts` for the wire format and
+ * why the encoding lives on chain rather than in an indexer's config file. An empty `source` means
+ * the KPI is not event-sourced, which is every campaign created before this existed.
+ */
+export type EventSourceDraft = {
+  /** Contract whose logs are watched. Empty disables event sourcing for this KPI. */
+  source: string;
+  /** Human-readable event signature, e.g. `Deposit(address,uint256)`. */
+  signature: string;
+  /** Which indexed topic carries the user address, as "1" | "2" | "3". */
+  actorTopic: string;
+  /** "count" or "dataWord0" — see `AMOUNT_MODE`. */
+  amountMode: string;
+  /** Divisor applied before crediting, so tier thresholds stay human numbers. */
+  scale: string;
+};
+
 export type KpiDraft = {
   kind: KpiKind;
   verifier: string;
   target: string;
   aggregate: boolean;
   tiers: TierDraft[];
+  /** Absent on KPIs reported manually by the project. */
+  eventSource?: EventSourceDraft;
 };
 
 export type CampaignDraft = {
@@ -145,6 +167,55 @@ export function validateCampaignDraft(
         path: `kpis.${i}.tiers`,
         message: `A KPI can have at most ${MAX_TIERS_PER_KPI} tiers.`,
       });
+    }
+
+    // ── event source (optional; not a contract rule) ─────────────
+    // The chain never reads this blob — `Campaign` forwards `params` to the verifier and otherwise
+    // ignores it. These checks exist because a malformed source produces a campaign that deploys
+    // fine and then silently indexes nothing.
+    const src = kpi.eventSource;
+    if (src && src.source.trim()) {
+      if (!isAddress(src.source.trim())) {
+        issues.push({path: `kpis.${i}.eventSource.source`, message: "Enter a valid address."});
+      }
+      if (!src.signature.trim()) {
+        issues.push({
+          path: `kpis.${i}.eventSource.signature`,
+          message: "Enter the event signature, e.g. Deposit(address,uint256).",
+        });
+      } else if (!/^[A-Za-z_]\w*\([^)]*\)$/.test(src.signature.trim())) {
+        // The topic hash is keccak of this exact string, so a stray space or a named argument
+        // hashes to something no log will ever carry.
+        issues.push({
+          path: `kpis.${i}.eventSource.signature`,
+          message: "Use types only, no spaces or names: Deposit(address,uint256).",
+        });
+      }
+
+      const topic = Number(src.actorTopic);
+      if (!Number.isInteger(topic) || topic < 1 || topic > 3) {
+        // topics[0] is always the signature, so an actor can never live there.
+        issues.push({
+          path: `kpis.${i}.eventSource.actorTopic`,
+          message: "The actor topic must be 1, 2, or 3.",
+        });
+      }
+
+      if (src.scale.trim() && parseCount(src.scale) === null) {
+        issues.push({path: `kpis.${i}.eventSource.scale`, message: "Enter a whole number."});
+      }
+
+      // TouchWindowVerifier reads params as a bare uint64 and returns lookback 0 unless the blob
+      // is exactly 32 bytes (TouchWindowVerifier.sol:113). An event blob is 160. The result is
+      // fail-safe — strict crediting, never over-crediting — but it is silently not the lookback
+      // that was configured, so say so rather than letting it pass.
+      if (kpi.verifier.trim() && kpi.verifier.trim() !== ZERO_ADDRESS) {
+        issues.push({
+          path: `kpis.${i}.eventSource.source`,
+          message:
+            "A verifier and an event source share the params field. TouchWindowVerifier will read a lookback of 0.",
+        });
+      }
     }
 
     let previous: bigint | null = null;

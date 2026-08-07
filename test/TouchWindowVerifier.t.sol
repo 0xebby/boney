@@ -287,9 +287,7 @@ contract TouchWindowVerifierTest is Test {
 
         vm.prank(project);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                TouchWindowVerifier.FutureAction.selector, future, uint64(block.timestamp)
-            )
+            abi.encodeWithSelector(TouchWindowVerifier.FutureAction.selector, future, uint64(block.timestamp))
         );
         campaign.reportUserAction(0, user, 10, _one(future, 10));
     }
@@ -300,9 +298,7 @@ contract TouchWindowVerifierTest is Test {
         _touch(campaign, id);
 
         vm.prank(project);
-        vm.expectRevert(
-            abi.encodeWithSelector(TouchWindowVerifier.EvidenceExceedsClaim.selector, 11, 10)
-        );
+        vm.expectRevert(abi.encodeWithSelector(TouchWindowVerifier.EvidenceExceedsClaim.selector, 11, 10));
         campaign.reportUserAction(0, user, 10, _one(uint64(block.timestamp), 11));
     }
 
@@ -356,9 +352,7 @@ contract TouchWindowVerifierTest is Test {
     /// @dev A user with no touch at all credits nothing rather than reverting inside the adapter.
     function test_NoTouchCreditsNothing() public view {
         assertEq(
-            verifier.verify(
-                address(campaign), 0, address(0xDEAD), 10, _one(uint64(block.timestamp), 10), ""
-            ),
+            verifier.verify(address(campaign), 0, address(0xDEAD), 10, _one(uint64(block.timestamp), 10), ""),
             0
         );
     }
@@ -378,9 +372,8 @@ contract TouchWindowVerifierTest is Test {
         skip(gap);
         _touch(campaign, id);
 
-        uint256 credited = verifier.verify(
-            address(campaign), 0, user, amount, _one(actedAt, amount), abi.encode(lookback)
-        );
+        uint256 credited =
+            verifier.verify(address(campaign), 0, user, amount, _one(actedAt, amount), abi.encode(lookback));
 
         assertEq(credited, gap <= lookback ? amount : 0);
         assertLe(credited, amount, "a verifier may only discount");

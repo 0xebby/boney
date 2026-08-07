@@ -56,8 +56,8 @@ export function MyCampaignsPage() {
     return (
       <Card>
         <EmptyState
-          title="Protocol not deployed on this network"
-          description="Switch to a network with a Boney deployment, or run a local anvil chain and deploy with script/DeployBoney.s.sol."
+          title="Boneyard is not available on this network"
+          description="Switch your wallet to a supported network to see campaigns."
         />
       </Card>
     );
@@ -150,7 +150,7 @@ export function MyCampaignsPage() {
 function Header() {
   return (
     <header>
-      <h1 className="text-lg font-semibold text-ink">My campaigns</h1>
+      <h1 className="font-display text-2xl text-ink">My campaigns</h1>
       <p className="mt-0.5 text-xs text-ink-muted">
         Campaigns you created. Open one to fund, activate, pause, end, or reclaim unspent escrow.
       </p>
