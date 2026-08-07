@@ -1,6 +1,6 @@
 "use client";
 
-import {useState, useCallback} from "react";
+import {useState, useCallback, useId} from "react";
 import {useRouter} from "next/navigation";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
@@ -130,7 +130,7 @@ export function CreateCampaignPage() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <header>
-        <h1 className="font-display text-2xl text-ink">Create Campaign</h1>
+        <h1 className="font-display text-2xl text-ink">Create a Campaign</h1>
         <p className="mt-1 text-xs text-ink-muted">
           Deploy a performance-based campaign with escrowed rewards
         </p>
@@ -511,6 +511,35 @@ function EventSourceFields({
             Scale divides the raw amount so tier thresholds stay small — 1e15 makes 0.001 of an
             18-decimal token one unit of progress.
           </p>
+
+          {probe.findings.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {probe.findings.map((f, j) => (
+                <div
+                  key={j}
+                  data-probe-severity={f.severity}
+                  role="status"
+                  className={`rounded px-2 py-1.5 text-xs ${
+                    f.severity === "error"
+                      ? "border border-red-300 bg-red-50 text-red-800"
+                      : f.severity === "warn"
+                        ? "border border-amber-200 bg-amber-50 text-amber-800"
+                        : "border border-green-200 bg-green-50 text-green-800"
+                  }`}
+                >
+                  {f.severity === "error" && <span className="font-semibold">Unusable: </span>}
+                  {f.severity === "warn" && <span className="font-semibold">Unverified: </span>}
+                  {f.message}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {probe.isLoading && (
+            <p className="mt-2 text-xs text-ink-muted animate-pulse">
+              Checking the chain for this contract and event…
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -536,19 +565,37 @@ function Field({
   hint?: string;
   type?: "text" | "number";
 }) {
+  // The label has to be *associated* with the input, not merely adjacent to it: a bare <label>
+  // sibling leaves the input nameless to a screen reader, and to anything else querying by label.
+  const id = useId();
+  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+
   return (
     <div>
-      <label className="mb-1 block text-xs text-ink-muted">{label}</label>
+      <label htmlFor={id} className="mb-1 block text-xs text-ink-muted">
+        {label}
+      </label>
       <input
+        id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
         className={`w-full rounded border px-2 py-1.5 text-xs text-ink bg-surface-2 ${
           error ? "border-critical" : "border-hairline"
         }`}
       />
-      {error ? <p className="mt-0.5 text-xs text-critical">{error}</p> : null}
-      {hint && !error ? <p className="mt-0.5 text-xs text-ink-muted">{hint}</p> : null}
+      {error ? (
+        <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
+          {error}
+        </p>
+      ) : null}
+      {hint && !error ? (
+        <p id={`${id}-hint`} className="mt-0.5 text-xs text-ink-muted">
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }
