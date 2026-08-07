@@ -26,3 +26,12 @@ web/.vercel
 # Indexer block cursors — per-machine scan position, not shared state. Losing it costs a rescan,
 # which is a no-op because reports are cumulative.
 .indexer-state.json
+
+# Claude Code worktrees. These are checkouts of *this* repo living inside it, so git records each
+# one as a gitlink (mode 160000) with no matching .gitmodules entry — which makes every
+# `git submodule` command abort with "no submodule mapping found". They are local scratch space
+# and must never be committed; the branches themselves carry the work.
+.claude/worktrees/
+
+# Per-machine tool settings, not shared state.
+.claude/settings.local.json

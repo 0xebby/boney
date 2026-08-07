@@ -24,9 +24,6 @@
  * Meters use their own single-hue amber ramp (validated --ordinal: monotone L, adjacent ΔL ≥
  * 0.06, light end 2.04:1 on surface), so magnitude reads in the brand color without spending a
  * categorical slot.
- *
- * Dark is the only mode. This was a dark-first data terminal already; a yellow-on-black brand has
- * no meaningful light inversion, so the light theme is gone rather than left half-true.
  */
 
 :root {

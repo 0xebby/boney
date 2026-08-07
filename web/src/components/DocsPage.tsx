@@ -114,9 +114,13 @@ export function DocsPage() {
           promoter needs. It holds no keys, runs no backend, and stores nothing about you: every
           number comes from a chain read, and every action is a transaction you sign.
         </p>
-        <p className="text-ink-muted">
-          Running on a testnet and unaudited. Do not point it at funds you care about.
+        <b>
+          <p className="text-ink">
+          In beta (testnet) and unaudited. Do not point it at REAL funds.
         </p>
+
+        </b> 
+        
       </Section>
 
       <div className="flex flex-wrap gap-2 border-t border-hairline pt-6">
@@ -124,7 +128,7 @@ export function DocsPage() {
           href="/"
           className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
         >
-          Browse the boneyard
+        Browse Boneyard
         </Link>
         <Link
           href="/create"
