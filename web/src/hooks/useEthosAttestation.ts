@@ -37,6 +37,8 @@ type AttestResponse = {
   wallet: `0x${string}`;
   ethos: number;
   followers: number;
+  /** Kaito's smart-follower count. Display only — not attested, not scored. */
+  smartFollowers: number;
   reach: number;
   handle: string | null;
   signed: SignedAttestation[];
@@ -46,7 +48,7 @@ export type AttestState =
   | {status: "idle"}
   | {status: "fetching"}
   | {status: "submitting"; done: number; total: number}
-  | {status: "success"; ethos: number; reach: number; followers: number}
+  | {status: "success"; ethos: number; reach: number; followers: number; smartFollowers: number}
   | {status: "error"; message: string};
 
 export function useEthosAttestation() {
@@ -130,6 +132,7 @@ export function useEthosAttestation() {
       ethos: payload.ethos,
       reach: payload.reach,
       followers: payload.followers,
+      smartFollowers: payload.smartFollowers,
     });
     return true;
   }, [address, publicClient, walletClient]);

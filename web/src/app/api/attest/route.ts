@@ -188,6 +188,7 @@ export async function POST(request: NextRequest) {
       wallet: report.wallet,
       ethos: report.ethos,
       followers: report.followers,
+      smartFollowers: report.smartFollowers,
       reach: report.reach,
       handle: report.handle,
       attestor: account.address,

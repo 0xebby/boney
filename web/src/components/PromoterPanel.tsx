@@ -205,6 +205,9 @@ export function PromoterPanel({
                 <p className="text-xs text-ink-muted">
                   Ethos {attestation.state.ethos} · reach {attestation.state.reach} (
                   {attestation.state.followers.toLocaleString()} followers)
+                  {attestation.state.smartFollowers > 0
+                    ? ` · ${attestation.state.smartFollowers.toLocaleString()} smart followers`
+                    : null}
                 </p>
               ) : null}
             </div>
