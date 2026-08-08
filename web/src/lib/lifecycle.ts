@@ -105,7 +105,7 @@ function unpauseAvailability(ctx: LifecycleContext): ActionAvailability {
  *
  * Solidity: `WrongStatus` unless Active or Paused, then `OutsideWindow` if
  * `msg.sender != project && block.timestamp < endTime`. So the project may end early, and anyone
- * may end it once the window has closed — that is what stops a project stalling the claim grace.
+ * may end it once the window has closed — that is what stops a project stalling the settlement grace.
  */
 function endAvailability(ctx: LifecycleContext): ActionAvailability {
   if (ctx.status !== "Active" && ctx.status !== "Paused") {
@@ -150,7 +150,10 @@ function reclaimAvailability(ctx: LifecycleContext): ActionAvailability {
     return blocked("reclaimUnspent", "No unspent escrow remains.");
   }
   if (!isReclaimable(ctx.status, ctx.endedAtSeconds, ctx.nowSeconds, ctx.claimGraceSeconds)) {
-    return blocked("reclaimUnspent", "Promoters can still settle; reclaim unlocks after the claim window.");
+    return blocked(
+      "reclaimUnspent",
+      "Promoters can still settle; reclaim unlocks after the settlement window.",
+    );
   }
   return {action: "reclaimUnspent", available: true};
 }

@@ -4,7 +4,7 @@
  * These are free, community-run endpoints with no SLA, no versioning, and no deprecation notice.
  * They break in a specific and dangerous way: not by erroring, but by answering 200 with a
  * well-formed body carrying a zero. `fetchFollowers` treats that as "no data" and degrades to zero
- * reach, so a KOL silently loses 30% of their BoneyScore and nothing anywhere reports a fault. That
+ * reach, so a promoter silently loses 30% of their BoneyScore and nothing anywhere reports a fault. That
  * is exactly how the retired gomtu proxy failed — it kept returning `followersCount: 0` long enough
  * to become the normal case.
  *

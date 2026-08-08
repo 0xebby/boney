@@ -204,7 +204,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
     },
     {
       key: "utilization",
-      header: "Utilization",
+      header: "Progress",
       sortValue: (c) => utilization(c),
       width: "140px",
       render: (c) => (
@@ -225,7 +225,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
     },
     {
       key: "ends",
-      header: "Ends in",
+      header: "Ends",
       numeric: true,
       sortValue: (c) => c.endTime,
       render: (c) => {

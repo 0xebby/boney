@@ -8,26 +8,26 @@ import {Card} from "@/components/ui/Card";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
-import {trackingLink} from "@/lib/kol";
+import {trackingLink} from "@/lib/promoter";
 import {countPromoters, countDistinctPromoters} from "@/lib/promoters";
 import {formatTokenAmount, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
 /**
- * The public KOL directory — who is promoting what, and the link to reach them through.
+ * The public promoter directory — who is promoting what, and the link to reach them through.
  *
- * This is what `/kol` shows a visitor with no wallet connected. The page used to show a connect
- * wall there, which was the wrong trade for the one visitor type most likely to be new: someone
- * evaluating the marketplace has no reason to connect a wallet before they can see whether anyone
- * is actually using it. Browsing needs no signature, so it should need no wallet.
+ * This is what `/promoters` shows a visitor with no wallet connected. The page used to show a
+ * connect wall there, which was the wrong trade for the one visitor type most likely to be new:
+ * someone evaluating the marketplace has no reason to connect a wallet before they can see whether
+ * anyone is actually using it. Browsing needs no signature, so it should need no wallet.
  *
- * A connected KOL still gets the dashboard — this replaces nothing for them.
+ * A connected promoter still gets the dashboard — this replaces nothing for them.
  *
  * Every tracking link here is public by construction: it is what a promoter shares to be found,
  * and it carries no authority. Following one only offers to sign a Touch, which the visitor's own
  * wallet must approve, so listing links cannot be used to attribute anyone against their will.
  */
-export function KolDirectory({
+export function PromoterDirectory({
   campaigns,
   tokens,
   isLoading,
@@ -56,7 +56,7 @@ export function KolDirectory({
   }, [directory.groups]);
 
   const totalMemberships = countPromoters(groups);
-  const distinctKols = countDistinctPromoters(groups);
+  const distinctPromoters = countDistinctPromoters(groups);
   const busy = isLoading || directory.isLoading;
 
   if (error) {
@@ -72,7 +72,7 @@ export function KolDirectory({
       <StatRow>
         <StatTile
           label="Active promoters"
-          value={busy ? "—" : distinctKols.toLocaleString("en-US")}
+          value={busy ? "—" : distinctPromoters.toLocaleString("en-US")}
           hint="distinct wallets"
         />
         <StatTile

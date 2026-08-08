@@ -185,7 +185,7 @@ export function ProjectActions({
         <p className="mt-2 text-xs text-warning">
           {confirming === "cancel"
             ? "Cancelling is permanent and returns escrow to you. Click again to confirm."
-            : "Ending starts the claim window and cannot be undone. Click again to confirm."}{" "}
+            : "Ending starts the settlement window and cannot be undone. Click again to confirm."}{" "}
           <button
             type="button"
             onClick={() => setConfirming(null)}

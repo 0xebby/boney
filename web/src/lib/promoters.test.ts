@@ -13,13 +13,13 @@ import type {CampaignView} from "./types";
 
 const CAMPAIGN_A = "0xAAaAaA00000000000000000000000000000000aA" as const;
 const CAMPAIGN_B = "0xBbBbBB00000000000000000000000000000000bB" as const;
-const KOL_1 = "0x1111111111111111111111111111111111111111" as const;
-const KOL_2 = "0x2222222222222222222222222222222222222222" as const;
+const PROMOTER_1 = "0x1111111111111111111111111111111111111111" as const;
+const PROMOTER_2 = "0x2222222222222222222222222222222222222222" as const;
 
 function entry(over: Partial<PromoterEntry> = {}): PromoterEntry {
   return {
     campaign: CAMPAIGN_A,
-    promoter: KOL_1,
+    promoter: PROMOTER_1,
     promoterId: "0xdead",
     reputation: BigInt(0),
     blockNumber: BigInt(100),
@@ -31,8 +31,8 @@ function view(over: Partial<CampaignView> = {}): CampaignView {
   return {
     campaignId: BigInt(1),
     campaign: CAMPAIGN_A,
-    project: KOL_2,
-    token: KOL_2,
+    project: PROMOTER_2,
+    token: PROMOTER_2,
     rewardPool: BigInt(0),
     paidOut: BigInt(0),
     startTime: BigInt(0),
@@ -141,8 +141,8 @@ describe("dedupePromoters", () => {
 
   it("matches wallets case-insensitively", () => {
     const out = dedupePromoters([
-      entry({promoter: KOL_1}),
-      entry({promoter: KOL_1.toLowerCase() as `0x${string}`}),
+      entry({promoter: PROMOTER_1}),
+      entry({promoter: PROMOTER_1.toLowerCase() as `0x${string}`}),
     ]);
     expect(out).toHaveLength(1);
   });
@@ -173,11 +173,11 @@ describe("groupByCampaign", () => {
     const groups = groupByCampaign(
       [view()],
       [
-        entry({promoter: KOL_2, blockNumber: BigInt(500)}),
-        entry({promoter: KOL_1, blockNumber: BigInt(100)}),
+        entry({promoter: PROMOTER_2, blockNumber: BigInt(500)}),
+        entry({promoter: PROMOTER_1, blockNumber: BigInt(100)}),
       ],
     );
-    expect(groups[0].promoters.map((p) => p.promoter)).toEqual([KOL_1, KOL_2]);
+    expect(groups[0].promoters.map((p) => p.promoter)).toEqual([PROMOTER_1, PROMOTER_2]);
   });
 
   it("matches campaign addresses case-insensitively", () => {
@@ -198,7 +198,7 @@ describe("counts", () => {
     expect(countPromoters(groups)).toBe(2);
   });
 
-  /** A wallet promoting three campaigns is one KOL, not three — the tile says "KOLs". */
+  /** A wallet promoting three campaigns is one promoter, not three — the tile says "Promoters". */
   it("counts a wallet in two campaigns as one distinct promoter", () => {
     const groups = groupByCampaign(
       [view({campaign: CAMPAIGN_A}), view({campaign: CAMPAIGN_B, campaignId: BigInt(2)})],

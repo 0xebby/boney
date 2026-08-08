@@ -113,7 +113,7 @@ describe("fetchEthosProfile", () => {
 
   /**
    * The regression this suite exists for. A wallet Ethos has never seen 404s, and mapping that to
-   * `ethos_unavailable` told a new KOL the service was broken when the real answer was "go claim a
+   * `ethos_unavailable` told a new promoter the service was broken when the real answer was "go claim a
    * profile" — the single most common outcome for a first-time visitor.
    */
   it("treats a 404 as an unclaimed profile, not an outage", async () => {
@@ -233,7 +233,7 @@ describe("fetchFollowers", () => {
 
   it("degrades to zero when both sources fail", async () => {
     // Reach is the soft half of BoneyScore: an outage in the least reliable dependency in the
-    // system must cost a KOL their reach points, never their ability to join.
+    // system must cost a promoter their reach points, never their ability to join.
     stubFetch(() => ({throws: true}));
     expect(await fetchFollowers("anyone")).toBe(0);
   });
@@ -267,7 +267,7 @@ describe("fetchSmartFollowers", () => {
   /**
    * The bug this separation exists to prevent. Kaito's `follower_count` is not a total follower
    * count — it reads 5,942 for an account with 7.3M followers. The old ladder fell back to it
-   * whenever the primary source failed, so a KOL's reach silently collapsed by three orders of
+   * whenever the primary source failed, so a promoter's reach silently collapsed by three orders of
    * magnitude. Smart followers are now their own signal and never reach `reachFromFollowers`.
    */
   it("never returns Kaito's follower_count", async () => {

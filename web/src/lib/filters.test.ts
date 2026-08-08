@@ -52,7 +52,7 @@ describe("isJoinable", () => {
     expect(isJoinable(gated, BigInt(9_000))).toBe(true);
   });
 
-  it("allows joining a Pending campaign, so KOLs can prepare links pre-launch", () => {
+  it("allows joining a Pending campaign, so promoters can prepare links pre-launch", () => {
     expect(isJoinable({status: "Pending", minReputation: BigInt(0)}, BigInt(0))).toBe(true);
   });
 

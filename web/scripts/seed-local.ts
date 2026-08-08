@@ -40,13 +40,13 @@ const ANVIL_PROJECT_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4
  * from the deployer instead — private, stable across reseeds, and reproducible from the same
  * `.env` without storing another secret on disk.
  */
-const ANVIL_KOL_PKS = [
+const ANVIL_PROMOTER_PKS = [
   "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
   "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
 ];
 /** A `join()` is ~200k gas; on an L2 this is orders of magnitude more than enough. */
-const KOL_TOPUP_WEI = 2_000_000_000_000_000n; // 0.002 ETH
-const KOL_MIN_WEI = 200_000_000_000_000n; // 0.0002 ETH
+const PROMOTER_TOPUP_WEI = 2_000_000_000_000_000n; // 0.002 ETH
+const PROMOTER_MIN_WEI = 200_000_000_000_000n; // 0.0002 ETH
 
 const ANVIL_CHAIN_ID = 31337;
 
@@ -161,19 +161,19 @@ if (missing.length > 0) {
 // Anvil pre-funds every deterministic account; no other chain does. The seeded promoters send
 // their own join(), so without gas the seed dies partway through on an out-of-funds error,
 // after the campaigns have already been created and paid for.
-const kolPks = isAnvil
-  ? ANVIL_KOL_PKS
-  : ANVIL_KOL_PKS.map((_, i) =>
+const promoterPks = isAnvil
+  ? ANVIL_PROMOTER_PKS
+  : ANVIL_PROMOTER_PKS.map((_, i) =>
       // Hashed in-process rather than via `cast keccak`, which reads a leading `0x` as hex bytes
       // and rejects the odd-length string that follows.
       keccak256(toHex(`${deployerPk}:boney-promoter-${i}`)),
     );
 
 if (!isAnvil) {
-  for (const pk of kolPks) {
+  for (const pk of promoterPks) {
     const addr = capture("cast", ["wallet", "address", "--private-key", pk]);
     const balance = BigInt(capture("cast", ["balance", addr, "--rpc-url", rpc]));
-    if (balance >= KOL_MIN_WEI) {
+    if (balance >= PROMOTER_MIN_WEI) {
       process.stdout.write(`\nPromoter ${addr} already funded\n`);
       continue;
     }
@@ -181,7 +181,7 @@ if (!isAnvil) {
       "send",
       addr,
       "--value",
-      KOL_TOPUP_WEI.toString(),
+      PROMOTER_TOPUP_WEI.toString(),
       "--private-key",
       deployerPk,
       "--rpc-url",
@@ -208,8 +208,10 @@ run(
     // own defaults, so the local fixture is exactly what it has always been.
     SEED_DEPLOYER_PK: deployerPk,
     SEED_PROJECT_PK: isAnvil ? ANVIL_PROJECT_PK : deployerPk,
-    SEED_KOL_PK: kolPks[0],
-    SEED_KOL2_PK: kolPks[1],
+    // These two keys stay `SEED_KOL*`: they are read by name in `script/SeedLocal.s.sol`, which is
+    // outside this rename's scope. Renaming them here alone would silently unset them.
+    SEED_KOL_PK: promoterPks[0],
+    SEED_KOL2_PK: promoterPks[1],
     REGISTRY_ADDRESS: addresses.campaignRegistry,
     VAULT_ADDRESS: addresses.escrowVault,
     ATTRIBUTION_ADDRESS: addresses.attributionRegistry,

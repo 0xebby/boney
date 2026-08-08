@@ -146,3 +146,91 @@ export function formatDate(unixSeconds: bigint | number): string {
     year: "numeric",
   });
 }
+
+/** Absolute date *and* time, e.g. "12 Aug 2026, 14:30". For a field being edited to the minute. */
+export function formatDateTime(unixSeconds: bigint | number): string {
+  const t = typeof unixSeconds === "bigint" ? Number(unixSeconds) : unixSeconds;
+  if (!Number.isFinite(t) || t <= 0) return "—";
+  return new Date(t * 1000).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// ── datetime-local interop ───────────────────────────────────────
+
+/**
+ * Unix seconds → the `YYYY-MM-DDTHH:mm` string an `<input type="datetime-local">` requires.
+ *
+ * Built out of the *local* getters rather than `toISOString`, and that distinction is the whole
+ * reason this is a tested function. `toISOString` yields UTC, which the input then displays as
+ * though it were local — so anywhere east or west of Greenwich the field silently shows a time that
+ * is hours off the timestamp it came from, and a project setting a start of "09:00" escrows a
+ * campaign that opens at 04:00. `padStart` matters for the same class of reason: `2026-8-1T9:05`
+ * is not a value the input will accept, and it renders blank instead of erroring.
+ *
+ * Returns "" for a non-finite or non-positive timestamp, which reads as an empty field rather than
+ * "01 Jan 1970".
+ */
+export function toDateTimeLocal(unixSeconds: number): string {
+  if (!Number.isFinite(unixSeconds) || unixSeconds <= 0) return "";
+  const d = new Date(unixSeconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * The inverse: a `datetime-local` value → unix seconds, or 0 when it cannot be read.
+ *
+ * `new Date("2026-08-12T14:30")` — no zone suffix — is parsed as local time by every current
+ * engine, which is exactly what the input means by it. Zero rather than `NaN` on failure, because
+ * the draft field is typed `number` and `NaN` would propagate silently through validation and
+ * arrive at `campaignArgs` as a `BigInt(NaN)` throw at submit time, long after the mistake.
+ */
+export function fromDateTimeLocal(value: string): number {
+  if (!value) return 0;
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? 0 : Math.floor(ms / 1000);
+}
+
+// ── duration interop ─────────────────────────────────────────────
+
+/** Units a duration field offers, largest first. */
+export const DURATION_UNITS = [
+  {id: "days", label: "days", seconds: 86_400},
+  {id: "hours", label: "hours", seconds: 3_600},
+  {id: "minutes", label: "minutes", seconds: 60},
+  {id: "seconds", label: "seconds", seconds: 1},
+] as const;
+
+export type DurationUnit = (typeof DURATION_UNITS)[number]["id"];
+
+/**
+ * Split seconds into the largest unit that divides it exactly.
+ *
+ * Exact division only, so the pair always round-trips: 604800 reads as 7 days, but 604801 reads as
+ * 604801 seconds rather than "7 days" — because showing the rounded form would let a save quietly
+ * rewrite the value the project actually set. A field that lies by one second is worse than one
+ * that shows an awkward number.
+ *
+ * `seconds` is in the list as the exact-representation floor, not because anyone wants to type a
+ * window in seconds. Without it the fallback has to invent a unit for a value no larger unit
+ * divides, and `joinDuration` would then multiply it back up into a different number.
+ */
+export function splitDuration(totalSeconds: number): {value: number; unit: DurationUnit} {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  for (const unit of DURATION_UNITS) {
+    if (s >= unit.seconds && s % unit.seconds === 0) return {value: s / unit.seconds, unit: unit.id};
+  }
+  return {value: s, unit: "seconds"};
+}
+
+/** Recombine a value and unit into seconds. */
+export function joinDuration(value: number, unit: DurationUnit): number {
+  const found = DURATION_UNITS.find((u) => u.id === unit);
+  if (!found || !Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value) * found.seconds;
+}

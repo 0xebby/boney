@@ -11,7 +11,7 @@ import {AttributionRegistryAbi} from "./abis";
  * signer on a live chain — a unit test alone cannot prove domain alignment.
  *
  * Ordering: touches are ordered by their signed `signedAt`, not by relay order. Relayers are
- * adversarial promoters, so whoever transacts last says nothing about what the user meant. A touch
+ * adversarial promoters, so whoever transacts last says nothing about what the referral meant. A touch
  * only lands if `signedAt > stored.signedAt`, so replaying a superseded signature is a no-op and
  * the fix for the stale-signature replay exploit.
  */
@@ -88,12 +88,12 @@ export async function fetchMaxTouchDuration(
 /**
  * Builds a Touch ready to sign.
  *
- * `signedAt` is set to the current block timestamp (or the user's local clock approximation —
+ * `signedAt` is set to the current block timestamp (or the referral's local clock approximation —
  * the contract allows a few seconds of clock skew). `expiresAt` is derived from the campaign's
  * `attributionWindow`, clamped to `maxTouchDuration` to satisfy `TouchTooLong`.
  *
- * @param campaign The campaign the user is engaging with.
- * @param promoterId The KOL's opaque id (from `derivePromoterId`).
+ * @param campaign The campaign the referral is engaging with.
+ * @param promoterId The promoter's opaque id (from `derivePromoterId`).
  * @param attributionWindow The campaign's configured window (seconds).
  * @param maxTouchDuration The registry's cap (seconds).
  * @param now Current timestamp (seconds). Defaults to `Math.floor(Date.now() / 1000)`.
@@ -106,7 +106,7 @@ export function buildTouch(
   now: number = Math.floor(Date.now() / 1000),
 ): Touch {
   const signedAt = BigInt(now);
-  // The campaign's window is what the user expects, but the registry enforces a global cap.
+  // The campaign's window is what the referral expects, but the registry enforces a global cap.
   const horizon = attributionWindow < maxTouchDuration ? attributionWindow : maxTouchDuration;
   const expiresAt = signedAt + horizon;
 
@@ -128,7 +128,7 @@ function no(reason: string): TouchEligibility {
  * Client-side eligibility for `storeTouch`.
  *
  * Mirrors every guard in `AttributionRegistry.storeTouch`. The contract is the authority;
- * this exists so the UI can block or explain before the user signs.
+ * this exists so the UI can block or explain before the referral signs.
  *
  * Does not check signature validity — that is always deferred to the chain.
  */

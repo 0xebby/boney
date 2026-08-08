@@ -12,6 +12,8 @@
     "test:watch": "vitest",
     "abis": "tsx scripts/extract-abis.ts",
     "followers:health": "tsx scripts/follower-health.ts",
+    "ethos:stub": "tsx scripts/ethos-stub.ts",
+    "ethos:stub:dev": "tsx scripts/ethos-stub-dev.ts",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "deployments": "tsx scripts/generate-deployments.ts",
     "seed": "tsx scripts/seed-local.ts",

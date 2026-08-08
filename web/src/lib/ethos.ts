@@ -70,7 +70,7 @@ async function getJson(url: string): Promise<unknown> {
 
 /**
  * Shown for both ways a wallet can lack a usable profile: Ethos 404s the address outright, or
- * returns a record whose `profileId` is null. The distinction is invisible to a KOL — either way
+ * returns a record whose `profileId` is null. The distinction is invisible to a promoter — either way
  * the fix is to go and claim a profile — so both paths give the same instruction.
  */
 const NO_PROFILE_MESSAGE =
@@ -82,7 +82,7 @@ const NO_PROFILE_MESSAGE =
  * There are two distinct ways a wallet fails this, both verified against the live API:
  *
  *  - **404 `User not found`** for an address Ethos has no record of at all. This is the ordinary
- *    case for a new KOL, so it must not surface as an upstream failure — a 404 is Ethos answering
+ *    case for a new promoter, so it must not surface as an upstream failure — a 404 is Ethos answering
  *    correctly, not Ethos being unreachable.
  *  - **HTTP 200 with `profileId: null`** for an address Ethos knows of but nobody has claimed —
  *    typically resolved via ENS or seen in someone else's graph. These still carry a *score*
@@ -93,7 +93,7 @@ const NO_PROFILE_MESSAGE =
  * The address is lowercased first. Ethos validates EIP-55 and rejects a mixed-case address whose
  * checksum does not compute with a 400, while accepting the all-lowercase form of the same
  * address — and `isAddress` above deliberately accepts any hex case. Same reasoning as
- * `derivePromoterId` in `lib/kol`: case carries no meaning in an address, so normalise rather than
+ * `derivePromoterId` in `lib/promoter`: case carries no meaning in an address, so normalise rather than
  * let a hand-typed one fail as though Ethos were down.
  */
 export async function fetchEthosProfile(wallet: string): Promise<EthosProfile> {
@@ -193,12 +193,12 @@ export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
  *
  * Deliberately total: every failure path returns 0 rather than throwing. Reach is the softer half
  * of BoneyScore and these are the least reliable dependency in the system — an outage should cost a
- * KOL their reach points, not their ability to join at all.
+ * promoter their reach points, not their ability to join at all.
  *
  * Walks `FOLLOWER_SOURCES` in order and takes the first positive count. A zero is treated as "no
  * data" and falls through, because every source observed so far reports an unreadable handle as 0
  * while still returning a well-formed body — so a zero cannot be distinguished from a genuinely
- * empty account, and falling through costs one request while trusting it costs the KOL 30% of their
+ * empty account, and falling through costs one request while trusting it costs the promoter 30% of their
  * score.
  */
 export async function fetchFollowers(handle: string): Promise<number> {

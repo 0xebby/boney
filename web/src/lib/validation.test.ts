@@ -8,6 +8,7 @@ import {
   type CampaignDraft,
 } from "./validation";
 import {MAX_TIERS_PER_KPI} from "./types";
+import {MAX_BONEY_SCORE} from "./boneyscore";
 
 const TOKEN = "0x1234567890abcdef1234567890abcdef12345678";
 const NOW = 1_000_000;
@@ -39,6 +40,37 @@ function draft(overrides: Partial<CampaignDraft> = {}): CampaignDraft {
 function paths(d: CampaignDraft): string[] {
   return validateCampaignDraft(d, {tokenDecimals: 18, nowSeconds: NOW}).map((i) => i.path);
 }
+
+describe("minReputation", () => {
+  it("accepts 0, an empty gate, and anything up to the ceiling", () => {
+    expect(paths(draft({minReputation: "0"}))).not.toContain("minReputation");
+    expect(paths(draft({minReputation: ""}))).not.toContain("minReputation");
+    expect(paths(draft({minReputation: "26000"}))).not.toContain("minReputation");
+    expect(paths(draft({minReputation: String(MAX_BONEY_SCORE)}))).not.toContain("minReputation");
+  });
+
+  it("rejects a gate no wallet could ever clear", () => {
+    expect(paths(draft({minReputation: String(MAX_BONEY_SCORE + 1)}))).toContain("minReputation");
+    // The uint256 ceiling deploys fine on chain, which is the whole problem.
+    expect(paths(draft({minReputation: (BigInt(2) ** BigInt(256) - BigInt(1)).toString()}))).toContain(
+      "minReputation",
+    );
+  });
+
+  it("names the ceiling in the message, so the creator knows what to lower it to", () => {
+    const issue = validateCampaignDraft(draft({minReputation: "40000"}), {
+      tokenDecimals: 18,
+      nowSeconds: NOW,
+    }).find((i) => i.path === "minReputation");
+    expect(issue?.message).toContain(MAX_BONEY_SCORE.toLocaleString());
+  });
+
+  it("catches an unparseable gate in the form rather than at encode time", () => {
+    expect(paths(draft({minReputation: "20k"}))).toContain("minReputation");
+    expect(paths(draft({minReputation: "-1"}))).toContain("minReputation");
+    expect(paths(draft({minReputation: "1.5"}))).toContain("minReputation");
+  });
+});
 
 describe("parseAmount", () => {
   it("parses decimals to base units", () => {

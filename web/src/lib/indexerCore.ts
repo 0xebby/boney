@@ -11,8 +11,12 @@ import {AMOUNT_MODE, effectiveScale, type EventSource} from "./kpiSource";
  * from what the chain already recorded. Neither shows up in a smoke test.
  *
  * Every rule here mirrors a guard in `Campaign.reportUserAction` and names it, the same way
- * `kol.ts` mirrors `Campaign.join`. The contract is the boundary; this decides what is worth
+ * `promoter.ts` mirrors `Campaign.join`. The contract is the boundary; this decides what is worth
  * sending.
+ *
+ * Naming note: the contract calls the acting wallet `user` (`reportUserAction`, `userCreditedOf`),
+ * and those ABI strings are load-bearing, so they stay. Everywhere else this codebase calls that
+ * wallet a *referral* — someone who arrived through a promoter's link and signed a Touch.
  */
 
 /** A log reduced to the three fields crediting depends on. */
@@ -24,9 +28,9 @@ export type IndexedLog = {
   timestamp: bigint;
 };
 
-/** One user's accumulated activity for a single KPI. */
+/** One referral's accumulated activity for a single KPI. */
 export type ActorTotal = {
-  user: `0x${string}`;
+  referral: `0x${string}`;
   /** Post-scaling progress across every matched log. */
   amount: bigint;
   /** Per-log contributions, for verifier evidence. Ordered by block. */
@@ -73,11 +77,11 @@ export function rawAmount(log: IndexedLog, mode: EventSource["amountMode"]): big
 }
 
 /**
- * Folds logs into per-user totals.
+ * Folds logs into per-referral totals.
  *
  * Scaling is applied to the *running total*, not to each log, so a hundred sub-scale deposits still
  * add up to credit. Scaling each log first would floor every one of them to zero and silently
- * credit nothing — a KOL's users could act all day and their progress would never move.
+ * credit nothing — a promoter's referrals could act all day and their progress would never move.
  *
  * Logs are sorted by block before folding so `actions` is chronological regardless of the order the
  * RPC returned pages in; `TouchWindowVerifier` compares each action's timestamp against a floor,
@@ -88,18 +92,18 @@ export function aggregateByActor(
   source: EventSource,
 ): Map<string, ActorTotal> {
   const scale = effectiveScale(source);
-  const raw = new Map<string, {user: `0x${string}`; total: bigint; logs: IndexedLog[]}>();
+  const raw = new Map<string, {referral: `0x${string}`; total: bigint; logs: IndexedLog[]}>();
 
   const ordered = [...logs].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : 1));
 
   for (const log of ordered) {
-    const user = actorFromTopic(log, source.actorTopic);
-    if (!user) continue;
+    const referral = actorFromTopic(log, source.actorTopic);
+    if (!referral) continue;
     const amount = rawAmount(log, source.amountMode);
     if (amount === null) continue;
 
-    const key = user.toLowerCase();
-    const entry = raw.get(key) ?? {user, total: BigInt(0), logs: []};
+    const key = referral.toLowerCase();
+    const entry = raw.get(key) ?? {referral, total: BigInt(0), logs: []};
     entry.total += amount;
     entry.logs.push(log);
     raw.set(key, entry);
@@ -108,8 +112,8 @@ export function aggregateByActor(
   const out = new Map<string, ActorTotal>();
   for (const [key, entry] of raw) {
     const scaled = entry.total / scale;
-    // Everything this user did still rounds to nothing. Reporting 0 would be a no-op the campaign
-    // ignores anyway (`delta == 0` returns early), so it is not worth a transaction.
+    // Everything this referral did still rounds to nothing. Reporting 0 would be a no-op the
+    // campaign ignores anyway (`delta == 0` returns early), so it is not worth a transaction.
     if (scaled === BigInt(0)) continue;
 
     // Per-action amounts must sum to the scaled total, or `TouchWindowVerifier` sees evidence that
@@ -120,7 +124,7 @@ export function aggregateByActor(
     const actions = apportion(entry.logs, scaled, scale);
 
     out.set(key, {
-      user: entry.user,
+      referral: entry.referral,
       amount: scaled,
       actions,
       lastBlock: entry.logs[entry.logs.length - 1]!.blockNumber,
@@ -160,17 +164,17 @@ function apportion(
 // ── deciding what to send ────────────────────────────────────────
 
 export type ReportDecision =
-  | {send: true; user: `0x${string}`; newTotal: bigint; actions: ActorTotal["actions"]}
-  | {send: false; user: `0x${string}`; reason: string};
+  | {send: true; referral: `0x${string}`; newTotal: bigint; actions: ActorTotal["actions"]}
+  | {send: false; referral: `0x${string}`; reason: string};
 
 /**
- * Whether a user's totals are worth a `reportUserAction` call.
+ * Whether a referral's totals are worth a `reportUserAction` call.
  *
  * Both refusals mirror named contract behavior:
  *
  *  - No live touch → `NoAttribution(user)` (`Campaign.sol:318`). Unattributed activity has no
  *    payee, and this is the constraint that makes "just index every mint on the contract"
- *    impossible: only users who clicked a tracking link and signed can ever be credited.
+ *    impossible: only wallets that clicked a tracking link and signed can ever be credited.
  *  - Not greater than what is already credited → `Campaign` returns early on `delta == 0`, and a
  *    *lower* total reverts `NonMonotonic`. `newTotal` is cumulative, not a delta, so re-indexing
  *    the same range must be a no-op rather than double-crediting.
@@ -183,18 +187,18 @@ export function decideReport(
   if (!attributed) {
     return {
       send: false,
-      user: total.user,
+      referral: total.referral,
       reason: "no live attribution touch — Campaign would revert NoAttribution",
     };
   }
   if (total.amount <= alreadyCredited) {
     return {
       send: false,
-      user: total.user,
+      referral: total.referral,
       reason: `already credited ${alreadyCredited} of ${total.amount} — nothing new`,
     };
   }
-  return {send: true, user: total.user, newTotal: total.amount, actions: total.actions};
+  return {send: true, referral: total.referral, newTotal: total.amount, actions: total.actions};
 }
 
 /**

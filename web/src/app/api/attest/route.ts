@@ -11,7 +11,7 @@ import {getDeployment, ZERO_ADDRESS, anvil, sepolia, baseSepolia, mainnet} from 
  *
  * The chain cannot make HTTP calls, so BoneyScore's inputs arrive by attestation: this route reads
  * Ethos, computes the normalised reach, and signs one EIP-712 `Attestation` per schema. It never
- * sends a transaction. The KOL's own wallet submits the bundle to
+ * sends a transaction. The promoter's own wallet submits the bundle to
  * `ReputationRegistry.submitAttestation`, which is permissionless precisely so that authority
  * comes from the signature rather than the caller — the signing key stays server-side and the user
  * pays their own gas.
@@ -52,7 +52,7 @@ const ATTESTATION_TYPES = {
  *
  * This bounds the damage but does not eliminate the race, and it is worth being precise about
  * why. The verifier's nonce advances when an attestation is *submitted*, not when it is signed —
- * and submission happens later, from the user's wallet. So two KOLs who both request before
+ * and submission happens later, from the promoter's wallet. So two promoters who both request before
  * either submits will be handed the same starting nonce, and whichever submits second reverts
  * with `InvalidNonce` and has to request again.
  *
