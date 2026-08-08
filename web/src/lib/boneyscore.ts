@@ -1,7 +1,7 @@
 /**
  * BoneyScore — the composite reputation number `Campaign.join()` gates on.
  *
- *   BoneyScore = 7 * ETHOS_SCORE + 3 * X_REACH
+ *   BoneyScore = 7 * ETHOS_SCORE + 3 * REACH
  *
  * Why the inputs are normalised before they reach the chain
  * --------------------------------------------------------
@@ -22,8 +22,8 @@
 
 /** Schema names, hashed to schema ids by `ReputationRegistry.schemaId`. */
 export const SCHEMA_ETHOS = "ETHOS_SCORE";
-export const SCHEMA_REACH = "X_REACH";
-export const SCHEMA_FOLLOWERS = "X_FOLLOWERS";
+export const SCHEMA_REACH = "REACH";
+export const SCHEMA_FOLLOWERS = "FOLLOWERS";
 
 /** On-chain schema weights. Must match `SeedLocal.s.sol`. */
 export const ETHOS_WEIGHT = 7;

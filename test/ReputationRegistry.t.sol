@@ -28,11 +28,11 @@ contract ReputationRegistryTest is Test {
         vm.warp(1_000_000);
 
         vm.startPrank(admin);
-        registry.registerSchema("X_FOLLOWERS", 1);
+        registry.registerSchema("FOLLOWERS", 1);
         registry.registerSchema("KAITO_YAPS", 10);
         vm.stopPrank();
 
-        followersId = registry.schemaId("X_FOLLOWERS");
+        followersId = registry.schemaId("FOLLOWERS");
         yapsId = registry.schemaId("KAITO_YAPS");
     }
 
@@ -89,7 +89,7 @@ contract ReputationRegistryTest is Test {
 
     function test_RegisterSchema() public view {
         (string memory name, uint256 weight, bool exists) = registry.schemaInfo(followersId);
-        assertEq(name, "X_FOLLOWERS");
+        assertEq(name, "FOLLOWERS");
         assertEq(weight, 1);
         assertTrue(exists);
         assertEq(registry.schemaCount(), 2);
@@ -107,7 +107,7 @@ contract ReputationRegistryTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(ReputationRegistry.SchemaAlreadyRegistered.selector, followersId)
         );
-        registry.registerSchema("X_FOLLOWERS", 2);
+        registry.registerSchema("FOLLOWERS", 2);
     }
 
     function test_RegisterSchema_revertsEmptyName() public {
@@ -271,7 +271,7 @@ contract ReputationRegistryTest is Test {
         _submit(kol, followersId, 5_230, 0);
 
         (string memory name,,) = registry.schemaInfo(followersId);
-        assertEq(name, "X_FOLLOWERS", "schema names describe metrics, not identities");
+        assertEq(name, "FOLLOWERS", "schema names describe metrics, not identities");
         assertEq(registry.valueOf(kol, followersId), 5_230);
     }
 
@@ -360,7 +360,7 @@ contract ReputationRegistryTest is Test {
         registry.setSchemaMaxValue(yapsId, 2_800);
         vm.stopPrank();
 
-        assertEq(registry.maxScore(), 10 * 2_800, "unweighted and unbounded X_FOLLOWERS is skipped");
+        assertEq(registry.maxScore(), 10 * 2_800, "unweighted and unbounded FOLLOWERS is skipped");
     }
 
     function test_MaxScore_zeroWhenNothingIsWeighted() public {

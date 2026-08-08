@@ -78,8 +78,8 @@ contract BoneyTest is Test {
         vm.prank(governor);
         coordinator.setCampaignRegistry(address(registry));
         vm.prank(governor);
-        reputation.registerSchema("X_FOLLOWERS", 1);
-        followersSchema = reputation.schemaId("X_FOLLOWERS");
+        reputation.registerSchema("FOLLOWERS", 1);
+        followersSchema = reputation.schemaId("FOLLOWERS");
     }
 
     // ── fixtures ─────────────────────────────────────────────────

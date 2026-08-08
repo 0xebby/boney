@@ -51,7 +51,7 @@ contract SeedLocal is Script {
     uint256 constant USER2_PK = 0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba;
 
     // ── BoneyScore ───────────────────────────────────────────────
-    // BoneyScore = 7*ETHOS_SCORE + 3*X_REACH, both inputs on a 0–2800 scale, so the composite
+    // BoneyScore = 7*ETHOS_SCORE + 3*REACH, both inputs on a 0–2800 scale, so the composite
     // tops out at 28,000. Trust outweighs reach 70/30 because reach is purchasable and Ethos
     // vouches are not. Mirrored in `web/src/lib/boneyscore.ts`; the two must agree.
     uint256 constant ETHOS_WEIGHT = 7;
@@ -65,7 +65,7 @@ contract SeedLocal is Script {
     /// @dev Freshness windows. Credibility is not constant: an Ethos score can crater and followers
     ///      can be lost or bought, so a stored value stops counting once it ages past its window and
     ///      the KOL has to re-attest. Ethos moves slowly and is vouch-backed, so it gets the longer
-    ///      window; reach is more volatile. X_FOLLOWERS is left non-expiring because it scores at
+    ///      window; reach is more volatile. FOLLOWERS is left non-expiring because it scores at
     ///      weight 0 anyway — expiring it would only blank a display figure.
     uint64 constant ETHOS_MAX_AGE = 180 days;
     uint64 constant REACH_MAX_AGE = 90 days;
@@ -78,7 +78,7 @@ contract SeedLocal is Script {
     ///      `Campaign`'s constructor reject a `minReputation` above 28,000. Leave them unset and
     ///      the registry reports an unbounded ceiling and the gate check silently does nothing.
     ///
-    ///      X_FOLLOWERS is deliberately left unbounded: it carries weight 0, so it is excluded from
+    ///      FOLLOWERS is deliberately left unbounded: it carries weight 0, so it is excluded from
     ///      `maxScore` entirely, and a raw follower count has no natural ceiling to invent.
     uint256 constant ETHOS_MAX_VALUE = 2_800;
     uint256 constant REACH_MAX_VALUE = 2_800;
@@ -136,19 +136,19 @@ contract SeedLocal is Script {
     /// @dev Registers the BoneyScore schemas and vouches for both KOLs, so reputation-gated
     ///      campaigns are actually joinable.
     ///
-    ///      BoneyScore = 7*ETHOS_SCORE + 3*X_REACH. Both inputs are on the same 0–2800 scale,
+    ///      BoneyScore = 7*ETHOS_SCORE + 3*REACH. Both inputs are on the same 0–2800 scale,
     ///      which is what makes the 70/30 weighting mean anything: `scoreOf` multiplies value by
     ///      weight and never divides, so a raw follower count (tens of thousands) blended against
     ///      an Ethos score (hundreds to low thousands) would be ~92% followers. The attestor
-    ///      normalises followers off-chain into X_REACH via
+    ///      normalises followers off-chain into REACH via
     ///      `reach = min(2800, floor(400*log10(1+followers)))` — see `web/src/lib/boneyscore.ts`,
     ///      which is the single source of truth for that curve.
     ///
-    ///      X_FOLLOWERS stays registered at weight 0: still attested and readable for display and
+    ///      FOLLOWERS stays registered at weight 0: still attested and readable for display and
     ///      audit, but contributing nothing to the score. Weight 0 retires a schema's contribution
     ///      without erasing its data, so the raw counts already stored remain intact.
     ///
-    ///      ETHOS_SCORE and X_REACH additionally carry freshness windows, so a seeded score decays
+    ///      ETHOS_SCORE and REACH additionally carry freshness windows, so a seeded score decays
     ///      the way a real one does rather than standing forever.
     ///
     ///      Re-runnable against an already-seeded chain, which reseeding onto a live deployment
@@ -158,18 +158,18 @@ contract SeedLocal is Script {
     ///      salted with the block number rather than being fixed strings. Attestations overwrite
     ///      the stored record, so reseeding refreshes the values instead of duplicating them.
     function _seedReputation() internal {
-        bytes32 followers = reputation.schemaId("X_FOLLOWERS");
+        bytes32 followers = reputation.schemaId("FOLLOWERS");
         bytes32 ethos = reputation.schemaId("ETHOS_SCORE");
-        bytes32 reach = reputation.schemaId("X_REACH");
+        bytes32 reach = reputation.schemaId("REACH");
 
         (, uint256 followersWeight, bool followersExists) = reputation.schemaInfo(followers);
         (,, bool ethosExists) = reputation.schemaInfo(ethos);
         (,, bool reachExists) = reputation.schemaInfo(reach);
 
         vm.startBroadcast(DEPLOYER_PK);
-        if (!followersExists) reputation.registerSchema("X_FOLLOWERS", 0);
+        if (!followersExists) reputation.registerSchema("FOLLOWERS", 0);
         if (!ethosExists) reputation.registerSchema("ETHOS_SCORE", ETHOS_WEIGHT);
-        if (!reachExists) reputation.registerSchema("X_REACH", REACH_WEIGHT);
+        if (!reachExists) reputation.registerSchema("REACH", REACH_WEIGHT);
 
         // Retire the legacy follower weight on chains seeded before BoneyScore existed. Guarded so
         // a reseed of an already-migrated chain is a no-op rather than a redundant write.

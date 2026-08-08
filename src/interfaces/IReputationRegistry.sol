@@ -7,7 +7,7 @@ pragma solidity ^0.8.30;
 interface IReputationRegistry {
     /// @notice Emitted when a new metric becomes attestable.
     /// @param schemaId Stable id derived from the name.
-    /// @param name Human-readable name (e.g. "X_FOLLOWERS").
+    /// @param name Human-readable name (e.g. "FOLLOWERS").
     /// @param weight Initial contribution to the composite score.
     event SchemaRegistered(bytes32 indexed schemaId, string name, uint256 weight);
 
@@ -40,7 +40,7 @@ interface IReputationRegistry {
     );
 
     /// @notice Register a reputation schema (a metric that can be attested).
-    /// @param name Stable human-readable name (e.g. "X_FOLLOWERS").
+    /// @param name Stable human-readable name (e.g. "FOLLOWERS").
     /// @param weight How much this schema contributes to the composite score. 0 disables it.
     function registerSchema(string calldata name, uint256 weight) external;
 

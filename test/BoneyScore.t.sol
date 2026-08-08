@@ -9,13 +9,13 @@ import {Campaign} from "../src/campaign/Campaign.sol";
 /**
  * BoneyScore — the composite the campaign join gate reads.
  *
- *     BoneyScore = 7 * ETHOS_SCORE + 3 * X_REACH
+ *     BoneyScore = 7 * ETHOS_SCORE + 3 * REACH
  *
  * `scoreOf` is a weighted sum that multiplies and never divides, and its smallest non-zero weight
  * is 1, so a raw follower count would enter the sum at full magnitude and swamp Ethos (24,000
  * followers against a score of ~2,000 is roughly 92% followers however the weights are set).
  * Normalisation therefore happens off-chain: the attestor maps followers onto the same 0–2800 range
- * Ethos uses and attests *that*, while `X_FOLLOWERS` stays registered at weight 0 so the honest raw
+ * Ethos uses and attests *that*, while `FOLLOWERS` stays registered at weight 0 so the honest raw
  * count remains readable without contributing.
  *
  * These tests pin the arithmetic the off-chain module (`web/src/lib/boneyscore.ts`) assumes, and
@@ -29,7 +29,7 @@ contract BoneyScoreTest is Test {
     address internal admin = address(0xA11CE);
     address internal attestor = address(0xA77E5);
 
-    /// Mirrors `SeedLocal.s.sol`: ETHOS_WEIGHT / REACH_WEIGHT, and X_FOLLOWERS retired at 0.
+    /// Mirrors `SeedLocal.s.sol`: ETHOS_WEIGHT / REACH_WEIGHT, and FOLLOWERS retired at 0.
     uint256 internal constant ETHOS_WEIGHT = 7;
     uint256 internal constant REACH_WEIGHT = 3;
     uint256 internal constant GATED_MIN_REPUTATION = 16_000;
@@ -60,14 +60,14 @@ contract BoneyScoreTest is Test {
 
         vm.startPrank(admin);
         registry.registerSchema("ETHOS_SCORE", ETHOS_WEIGHT);
-        registry.registerSchema("X_REACH", REACH_WEIGHT);
+        registry.registerSchema("REACH", REACH_WEIGHT);
         // Registered so the raw count is still attested and readable, but scored at 0.
-        registry.registerSchema("X_FOLLOWERS", 0);
+        registry.registerSchema("FOLLOWERS", 0);
         vm.stopPrank();
 
         ethosId = registry.schemaId("ETHOS_SCORE");
-        reachId = registry.schemaId("X_REACH");
-        followersId = registry.schemaId("X_FOLLOWERS");
+        reachId = registry.schemaId("REACH");
+        followersId = registry.schemaId("FOLLOWERS");
     }
 
     // ── helpers ──────────────────────────────────────────────────
@@ -132,7 +132,7 @@ contract BoneyScoreTest is Test {
         assertEq(registry.scoreOf(kol1), 28_000);
     }
 
-    // ── X_FOLLOWERS at weight 0 ──────────────────────────────────
+    // ── FOLLOWERS at weight 0 ──────────────────────────────────
 
     /**
      * The load-bearing property: the raw follower count is stored, readable, and contributes

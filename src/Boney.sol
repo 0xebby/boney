@@ -11,8 +11,7 @@ import {IReputationRegistry} from "./interfaces/IReputationRegistry.sol";
 import {IAttributionRegistry} from "./interfaces/IAttributionRegistry.sol";
 import {Types} from "./libraries/Types.sol";
 
-/// @title Boney
-/// @notice Marketplace-facing facade for the Boney accountability protocol.
+/// @title Boney - web3 rewards  accountability protocol.
 /// @dev Deliberately thin and stateless (decision D9). It holds no funds, owns no campaign state,
 ///      and has no privileged role in any module — every call it makes could be made directly.
 ///      Its job is ergonomics: resolve campaign ids to addresses, batch the token approval dance,

@@ -18,8 +18,8 @@ import {getDeployment, ZERO_ADDRESS, anvil, sepolia, baseSepolia, mainnet} from 
  *
  * Three values are signed per request:
  *   ETHOS_SCORE  (weight 7) — raw Ethos score
- *   X_REACH      (weight 3) — log-normalised follower count
- *   X_FOLLOWERS  (weight 0) — raw count, stored for display only
+ *   REACH      (weight 3) — log-normalised follower count
+ *   FOLLOWERS  (weight 0) — raw count, stored for display only
  *
  * Security posture: `ATTESTOR_PRIVATE_KEY` can mint arbitrary reputation, so the route fails
  * closed when it is unset and never echoes it. The signed payload binds the subject, so a

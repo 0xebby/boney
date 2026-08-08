@@ -20,7 +20,7 @@ contract AttestationVerifierTest is Test {
     address internal second;
     address internal rogue;
 
-    bytes32 internal constant SCHEMA = keccak256("X_FOLLOWERS");
+    bytes32 internal constant SCHEMA = keccak256("FOLLOWERS");
 
     function setUp() public {
         attestor = vm.addr(attestorPk);
