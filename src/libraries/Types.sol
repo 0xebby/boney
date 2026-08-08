@@ -20,7 +20,9 @@ library Types {
         Bridge,
         Tvl,
         Volume,
-        ActiveUser
+        ActiveUser,
+        signUps,
+        downloads
     }
 
     /// @notice Campaign lifecycle.
