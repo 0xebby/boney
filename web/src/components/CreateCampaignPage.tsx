@@ -514,6 +514,7 @@ function EventSourceFields({
               >
                 <option value="count">Count events</option>
                 <option value="dataWord0">First data word</option>
+                  <option value="dataWord0">First data word</option>
               </select>
             </div>
             <Field
