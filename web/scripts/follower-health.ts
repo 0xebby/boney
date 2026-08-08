@@ -2,7 +2,8 @@
  * CLI wrapper for the follower-source health check — `pnpm followers:health`.
  *
  * Exits non-zero when no source can still produce a real count, so CI can schedule it and find out
- * that reach has gone dark from a red build rather than from a KOL asking why their score dropped.
+ * that reach has gone dark from a red build rather than from a promoter asking why their score
+ * dropped.
  */
 
 import {checkFollowerSources} from "../src/lib/follower-health";
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
 
   if (!report.healthy) {
     console.error(
-      "\nNo follower source is returning usable data. Reach is degraded to 0 for every KOL.",
+      "\nNo follower source is returning usable data. Reach is degraded to 0 for every promoter.",
     );
     process.exit(1);
   }

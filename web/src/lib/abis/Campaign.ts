@@ -1169,6 +1169,22 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "UnreachableReputation",
+    "inputs": [
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxScore",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "VerifierOvercredit",
     "inputs": [
       {

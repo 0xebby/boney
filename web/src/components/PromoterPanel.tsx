@@ -3,27 +3,28 @@
 import {useState, useMemo} from "react";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
-import {useJoinCampaign, useSettleRewards, isPending, type TxState} from "@/hooks/useWriteCampaign";
+import {useJoinCampaign, isPending, type TxState} from "@/hooks/useWriteCampaign";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useEthosAttestation} from "@/hooks/useEthosAttestation";
-import {
-  canJoin,
-  canSettle,
-  claimWindowRemaining,
-  derivePromoterId,
-  trackingLink,
-} from "@/lib/kol";
-import {settlementPayout, settledRewards} from "@/lib/campaign";
+import {canJoin, derivePromoterId, trackingLink} from "@/lib/promoter";
+import {settledRewards} from "@/lib/campaign";
+import {daysUntilExpiry} from "@/lib/boneyscore";
 import {formatTokenAmount, formatDuration, shortAddress} from "@/lib/format";
 import {KPI_KIND_LABEL} from "@/lib/types";
 import type {CampaignDetail, PromoterState} from "@/lib/campaignDetail";
 
 /**
- * KOL-side panel: join a campaign, get a tracking link, watch progress, and claim.
+ * Promoter-side panel: join a campaign, get a tracking link, and watch what it has paid.
  *
- * Eligibility comes from `lib/kol`, which mirrors `Campaign.join` and `Campaign.settle`. As in
- * the project panel, a blocked action renders with the contract's own reason rather than
- * disappearing — "why can't I claim?" is the question this exists to answer.
+ * Eligibility comes from `lib/promoter`, which mirrors `Campaign.join`. A blocked action renders
+ * with the contract's own reason rather than disappearing — "why can't I join?" is the question
+ * this exists to answer.
+ *
+ * There is deliberately no claim control. `Campaign.reportUserAction` calls `_settle` inline, and
+ * `_settle` calls `escrowVault.release(promoter, pay)` — so crossing a tier *is* the payment, and
+ * the tokens are already in the promoter's wallet by the time progress is readable here. The
+ * permissionless `Campaign.settle` still exists on chain as a recovery path; it is not a UI
+ * affordance, because offering one implies rewards wait to be collected when they never do.
  */
 export function PromoterPanel({
   detail,
@@ -40,15 +41,18 @@ export function PromoterPanel({
 }) {
   const {address, isConnected} = useAccount();
   const join = useJoinCampaign();
-  const settleTx = useSettleRewards();
-  const {reputation, refetch: refetchReputation} = usePromoterReputation(address);
+  const {
+    reputation,
+    hasExpired,
+    expiresAt,
+    refetch: refetchReputation,
+  } = usePromoterReputation(address);
   const attestation = useEthosAttestation();
   const [copied, setCopied] = useState(false);
 
   const joined = Boolean(promoter?.joined);
 
   // Predicted before joining so the panel can show what the link *will* be; once joined, the
-  // chain's own value wins — they must agree, and a live test asserts that.
   const promoterId = useMemo(() => {
     if (promoter?.joined) return promoter.promoterId;
     if (!address) return undefined;
@@ -63,25 +67,20 @@ export function PromoterPanel({
     connected: isConnected,
   });
 
-  // Per-KPI earned and claimable. These are two different questions — "what has this campaign
-  // paid me" vs "what would pressing Claim move" — and on a healthy campaign the second is always
-  // zero, because settlement happens inline when progress is reported. Showing only the claimable
-  // figure made the panel read as if the promoter had earned nothing.
-  const claims = useMemo(() => {
+  // Only inside the notice window; undefined the rest of the time so the panel stays quiet.
+  const expiryNoticeDays = useMemo(
+    () => daysUntilExpiry(expiresAt, nowSeconds),
+    [expiresAt, nowSeconds],
+  );
+
+  // Per-KPI progress and what the contract has marked settled — which is what it has paid.
+  const perKpi = useMemo(() => {
     if (!promoter?.joined) return [];
     return detail.kpis.map((kpi) => {
       const state = promoter.perKpi.find((s) => s.kpiIndex === kpi.index);
       const settled = state?.settledTiers ?? 0;
-      const {payout, shortfall} = settlementPayout(
-        state?.progress ?? BigInt(0),
-        kpi.tiers,
-        settled,
-        detail.remainingPool,
-      );
       return {
         kpi,
-        payout,
-        shortfall,
         progress: state?.progress ?? BigInt(0),
         earned: settledRewards(kpi.tiers, settled),
         settledTiers: settled,
@@ -89,14 +88,12 @@ export function PromoterPanel({
     });
   }, [detail, promoter]);
 
-  const totalClaimable = claims.reduce((sum, c) => sum + c.payout, BigInt(0));
-  const totalEarned = claims.reduce((sum, c) => sum + c.earned, BigInt(0));
-  const windowLeft = claimWindowRemaining(
-    detail.status,
-    Number(detail.endedAt),
-    Number(detail.claimGrace),
-    nowSeconds,
-  );
+  const totalEarned = perKpi.reduce((sum, k) => sum + k.earned, BigInt(0));
+
+  // `settledRewards` sums each crossed tier's full reward, but `Campaign._settle` advances
+  // `_settledTiers` even when escrow could only cover part of a tier (it emits `PoolExhausted` for
+  // the difference). So on a drained pool the figure above is what was owed, not what arrived.
+  const poolDrained = detail.remainingPool === BigInt(0) && totalEarned > BigInt(0);
 
   const link =
     promoterId && typeof window !== "undefined"
@@ -147,6 +144,18 @@ export function PromoterPanel({
               : `Requires a BoneyScore of ${detail.minReputation.toString()}. Yours is ${(reputation ?? BigInt(0)).toString()}.`}
           </p>
 
+          {/*
+            Warn before the score drops, not after. A promoter who qualifies today but expires in a
+            week can refresh now; the same person discovering it at a closed gate cannot.
+          */}
+          {!hasExpired && expiryNoticeDays !== undefined ? (
+            <p className="text-xs text-ink-muted">
+              {expiryNoticeDays === 0
+                ? "Your verification expires today — re-verify to keep your score."
+                : `Your verification expires in ${expiryNoticeDays} ${expiryNoticeDays === 1 ? "day" : "days"}.`}
+            </p>
+          ) : null}
+
           <button
             type="button"
             onClick={async () => {
@@ -165,16 +174,21 @@ export function PromoterPanel({
           ) : null}
 
           {/*
-            A reputation shortfall is the one refusal a KOL can act on without leaving the page:
+            A reputation shortfall is the one refusal a promoter can act on without leaving the page:
             an un-attested wallet scores 0 and would otherwise see a permanently dead button on
-            every gated campaign. Verifying pulls their Ethos score and X reach on chain, after
+            every gated campaign. Verifying pulls their Ethos score and social media reach on chain, after
             which `reputation` refetches and the Join button may light up.
+
+            An expired score is the same refusal with a different cause, so it needs its own copy:
+            the promoter did verify, and telling them to "verify" a second time reads as if the first
+            attempt silently failed.
           */}
           {joinEligibility.actionable === "attest" ? (
             <div className="space-y-2 rounded-md border border-hairline p-3">
               <p className="text-xs text-ink-secondary">
-                BoneyScore combines your Ethos credibility with your X reach. Verifying reads both
-                and records them on chain — it needs a claimed Ethos profile.
+                {hasExpired
+                  ? "Your verification has expired. BoneyScore reflects credibility now, not when you first verified, so scores age out and need refreshing. Re-verifying reads your current Ethos and reach."
+                  : "BoneyScore combines your Ethos credibility with your X reach. Verifying reads both and records them on chain — it needs a claimed Ethos profile."}
               </p>
               <button
                 type="button"
@@ -195,7 +209,9 @@ export function PromoterPanel({
                   ? "Reading Ethos…"
                   : attestation.state.status === "submitting"
                     ? `Recording ${attestation.state.done + 1} of ${attestation.state.total}…`
-                    : "Verify my BoneyScore"}
+                    : hasExpired
+                      ? "Re-verify my BoneyScore"
+                      : "Verify my BoneyScore"}
               </button>
 
               {attestation.state.status === "error" ? (
@@ -246,95 +262,39 @@ export function PromoterPanel({
 
           {/* Earnings summary */}
           <div className="border-t border-hairline pt-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-              {/* Earned leads: on a healthy campaign it is the only nonzero figure, because
-                  reporting progress settles inline. Claimable sits beside it so a promoter can
-                  see that nothing is stuck, rather than reading a lone "0" as "you earned 0". */}
-              <div>
-                <p className="text-xs text-ink-muted">Earned</p>
-                <p className="text-xl font-semibold text-ink">
-                  {formatTokenAmount(totalEarned, token.decimals)}{" "}
-                  <span className="text-sm font-normal text-ink-muted">{token.symbol}</span>
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-ink-muted">Awaiting claim</p>
-                <p className="text-base font-medium text-ink-secondary">
-                  {formatTokenAmount(totalClaimable, token.decimals)}{" "}
-                  <span className="text-xs font-normal text-ink-muted">{token.symbol}</span>
-                </p>
-              </div>
-              {windowLeft !== null ? (
-                <p className={`text-xs ${windowLeft === 0 ? "text-critical" : "text-warning"}`}>
-                  {windowLeft === 0
-                    ? "Claim window closed"
-                    : `Claim window closes in ${formatDuration(windowLeft)}`}
+            <div>
+              <p className="text-xs text-ink-muted">Paid to your wallet</p>
+              <p className="text-xl font-semibold text-ink">
+                {formatTokenAmount(totalEarned, token.decimals)}{" "}
+                <span className="text-sm font-normal text-ink-muted">{token.symbol}</span>
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Rewards are sent to your wallet the moment a tier is crossed. There is nothing to
+                claim.
+              </p>
+              {poolDrained ? (
+                <p className="mt-1 text-xs text-warning">
+                  This campaign&rsquo;s escrow is empty. Any tier crossed after it ran dry paid
+                  less than its full reward.
                 </p>
               ) : null}
             </div>
 
-            {totalEarned > BigInt(0) && totalClaimable === BigInt(0) ? (
-              <p className="mt-2 text-xs text-ink-muted">
-                Paid straight to your wallet as each tier was crossed — no claim needed.
-              </p>
-            ) : null}
-
             <ul className="mt-3 space-y-2">
-              {claims.map(({kpi, payout, shortfall, progress, earned, settledTiers}) => {
-                const eligibility = canSettle({
-                  status: detail.status,
-                  joined,
-                  endedAtSeconds: Number(detail.endedAt),
-                  claimGraceSeconds: Number(detail.claimGrace),
-                  nowSeconds,
-                  payout,
-                });
-
-                return (
-                  <li
-                    key={kpi.index}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-hairline px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-ink">
-                        {KPI_KIND_LABEL[kpi.spec.kind]}
-                      </p>
-                      <p className="text-xs text-ink-muted">
-                        {progress.toLocaleString("en-US")} credited ·{" "}
-                        {settledTiers}/{kpi.tiers.length} tiers ·{" "}
-                        {formatTokenAmount(earned, token.decimals)} {token.symbol} earned
-                        {payout > BigInt(0)
-                          ? ` · ${formatTokenAmount(payout, token.decimals)} ${token.symbol} claimable`
-                          : ""}
-                      </p>
-                      {shortfall > BigInt(0) ? (
-                        <p className="text-xs text-warning">
-                          Pool can only cover part of what you earned.
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!address) return;
-                        await settleTx.settle(detail.address, address, kpi.index);
-                        onDone();
-                      }}
-                      disabled={!eligibility.ok || isPending(settleTx.state)}
-                      title={eligibility.reason}
-                      className="shrink-0 rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {settleTx.settling === kpi.index && isPending(settleTx.state)
-                        ? "Claiming…"
-                        : "Claim"}
-                    </button>
-                  </li>
-                );
-              })}
+              {perKpi.map(({kpi, progress, earned, settledTiers}) => (
+                <li
+                  key={kpi.index}
+                  className="rounded border border-hairline px-3 py-2"
+                >
+                  <p className="text-xs font-medium text-ink">{KPI_KIND_LABEL[kpi.spec.kind]}</p>
+                  <p className="text-xs text-ink-muted">
+                    {progress.toLocaleString("en-US")} credited · {settledTiers}/
+                    {kpi.tiers.length} tiers · {formatTokenAmount(earned, token.decimals)}{" "}
+                    {token.symbol} paid
+                  </p>
+                </li>
+              ))}
             </ul>
-
-            <TxFeedback state={settleTx.state} onReset={settleTx.reset} />
           </div>
         </div>
       )}

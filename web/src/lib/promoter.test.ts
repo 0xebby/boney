@@ -3,24 +3,19 @@ import {
   derivePromoterId,
   hasJoined,
   canJoin,
-  canSettle,
-  claimWindowRemaining,
   trackingLink,
   parseTrackingLink,
   type JoinContext,
-  type SettleContext,
-} from "./kol";
-import {CLAIM_GRACE_SECONDS} from "./types";
+} from "./promoter";
 
 /**
- * KOL guard tests.
+ * Promoter guard tests.
  *
  * Same standard as `lifecycle.test.ts`: the negative cases carry the weight, because an
- * over-permissive mirror renders a button whose only feedback is a reverted transaction the KOL
- * paid gas for. Each test names the Solidity error it stands in for.
+ * over-permissive mirror renders a button whose only feedback is a reverted transaction the
+ * promoter paid gas for. Each test names the Solidity error it stands in for.
  */
 
-const NOW = 1_800_000_000;
 const CAMPAIGN = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const;
 const PROMOTER = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const;
 const ZERO_ID = `0x${"00".repeat(32)}` as const;
@@ -34,7 +29,7 @@ describe("derivePromoterId", () => {
     expect(derivePromoterId(CAMPAIGN, PROMOTER)).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
-  it("differs per campaign, so one KOL's id is not reusable across campaigns", () => {
+  it("differs per campaign, so one promoter's id is not reusable across campaigns", () => {
     const other = "0xcccccccccccccccccccccccccccccccccccccccc" as const;
     expect(derivePromoterId(CAMPAIGN, PROMOTER)).not.toBe(derivePromoterId(other, PROMOTER));
   });
@@ -87,7 +82,7 @@ describe("canJoin", () => {
     expect(canJoin(ctx()).ok).toBe(true);
   });
 
-  it("allows joining a PENDING campaign — KOLs prepare links before launch", () => {
+  it("allows joining a PENDING campaign — promoters prepare links before launch", () => {
     // Campaign.join accepts Active *or* Pending. Restricting to Active would hide a legitimate
     // action the contract permits.
     expect(canJoin(ctx({status: "Pending"})).ok).toBe(true);
@@ -147,83 +142,6 @@ describe("canJoin", () => {
     for (const status of ["Paused", "Ended", "Cancelled"] as const) {
       expect(canJoin(ctx({status})).reason).toBeTruthy();
     }
-  });
-});
-
-describe("canSettle", () => {
-  const ctx = (o: Partial<SettleContext> = {}): SettleContext => ({
-    status: "Active",
-    joined: true,
-    endedAtSeconds: 0,
-    claimGraceSeconds: CLAIM_GRACE_SECONDS,
-    nowSeconds: NOW,
-    payout: BigInt(100),
-    ...o,
-  });
-
-  it("allows claiming on an active campaign with a payout", () => {
-    expect(canSettle(ctx()).ok).toBe(true);
-  });
-
-  it("blocks a non-promoter — Solidity: NotJoined", () => {
-    expect(canSettle(ctx({joined: false})).ok).toBe(false);
-  });
-
-  it("allows claiming on an Ended campaign inside the grace window", () => {
-    const c = ctx({status: "Ended", endedAtSeconds: NOW - 10});
-    expect(canSettle(c).ok).toBe(true);
-  });
-
-  it("blocks once the grace window closes — Solidity: WrongStatus", () => {
-    const endedAt = NOW - CLAIM_GRACE_SECONDS - 1;
-    const c = ctx({status: "Ended", endedAtSeconds: endedAt});
-    expect(canSettle(c).ok).toBe(false);
-    expect(c.nowSeconds > endedAt + CLAIM_GRACE_SECONDS).toBe(true);
-  });
-
-  it("is open on the boundary second — the mirror image of reclaim", () => {
-    // settle reverts only when `block.timestamp > endedAt + CLAIM_GRACE`, while reclaim reverts
-    // while `<=`. The boundary second belongs to the promoter, and the two must never both be
-    // open on the same second.
-    const endedAt = NOW - CLAIM_GRACE_SECONDS;
-    expect(canSettle(ctx({status: "Ended", endedAtSeconds: endedAt})).ok).toBe(true);
-  });
-
-  it("blocks Pending, Paused and Cancelled", () => {
-    for (const status of ["Pending", "Paused", "Cancelled"] as const) {
-      expect(canSettle(ctx({status})).ok, status).toBe(false);
-    }
-  });
-
-  it("blocks a zero payout rather than sending a no-op transaction", () => {
-    const r = canSettle(ctx({payout: BigInt(0)}));
-    expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/nothing is waiting to be claimed/i);
-  });
-});
-
-describe("claimWindowRemaining", () => {
-  it("is null while the campaign is still running — no deadline exists yet", () => {
-    // Distinct from 0, which means "the window has shut". Conflating them would show a KOL an
-    // expired countdown on a live campaign.
-    expect(claimWindowRemaining("Active", 0, CLAIM_GRACE_SECONDS, NOW)).toBeNull();
-    expect(claimWindowRemaining("Pending", 0, CLAIM_GRACE_SECONDS, NOW)).toBeNull();
-  });
-
-  it("counts down from endedAt, not endTime", () => {
-    const endedAt = NOW - 86_400;
-    expect(claimWindowRemaining("Ended", endedAt, CLAIM_GRACE_SECONDS, NOW)).toBe(
-      CLAIM_GRACE_SECONDS - 86_400,
-    );
-  });
-
-  it("is 0 once the window has shut", () => {
-    const endedAt = NOW - CLAIM_GRACE_SECONDS - 100;
-    expect(claimWindowRemaining("Ended", endedAt, CLAIM_GRACE_SECONDS, NOW)).toBe(0);
-  });
-
-  it("is null when endedAt has not been recorded", () => {
-    expect(claimWindowRemaining("Ended", 0, CLAIM_GRACE_SECONDS, NOW)).toBeNull();
   });
 });
 

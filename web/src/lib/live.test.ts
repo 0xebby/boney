@@ -12,16 +12,14 @@ import {
   unsettledRewards,
   isReclaimable,
   settledRewards,
-  settlementPayout,
 } from "./campaign";
 import {
   derivePromoterId,
   hasJoined,
   canJoin,
-  canSettle,
   trackingLink,
   parseTrackingLink,
-} from "./kol";
+} from "./promoter";
 import {DEPLOYMENTS} from "./chains";
 import {ReputationRegistryAbi, IERC20Abi, AttributionRegistryAbi, CampaignAbi} from "./abis";
 import {
@@ -35,8 +33,13 @@ import {formatTokenAmount} from "./format";
 import {availableActions, fundingShortfall} from "./lifecycle";
 import {KPI_KIND, CLAIM_GRACE_SECONDS} from "./types";
 
-/** Anvil account #2 — `KOL_PK` in `script/SeedLocal.s.sol`, the KOL seeded with progress. */
-const SEEDED_KOL = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" as const;
+/**
+ * Anvil account #2 — `KOL_PK` in `script/SeedLocal.s.sol`, the promoter seeded with progress.
+ *
+ * The Solidity seed script still calls this key `KOL_PK`; the constant name here follows the web
+ * app's vocabulary, and the comment carries the mapping.
+ */
+const SEEDED_PROMOTER = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" as const;
 
 /** Anvil account #6 — untouched by the seed, so it has joined nothing and has no reputation. */
 const NEVER_JOINED = "0x976EA74026E726554dB657fA54763abd0C3a0aa9" as const;
@@ -129,8 +132,8 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
   });
 
   /**
-   * Cross-checks the frontend's tier math against what the chain actually paid. The seeded KOL
-   * reached 62 mints on a 10/50/100 ladder, so tiers 0 and 1 are settled.
+   * Cross-checks the frontend's tier math against what the chain actually paid. The seeded
+   * promoter reached 62 mints on a 10/50/100 ladder, so tiers 0 and 1 are settled.
    */
   it("tier math matches the chain's actual payout", async () => {
     const views = await fetchBrowseCampaigns(client, BigInt(0), BigInt(100));
@@ -145,7 +148,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
       {threshold: BigInt(100), reward: pool / BigInt(5)},
     ];
 
-    // KOL 1 at 62 → tiers 0+1; KOL 2 at 14 → tier 0 only.
+    // Promoter 1 at 62 → tiers 0+1; promoter 2 at 14 → tier 0 only.
     const expected =
       claimableRewards(BigInt(62), tiers) + claimableRewards(BigInt(14), tiers);
 
@@ -243,13 +246,13 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
       expect(withProgress, "no seeded campaign has progress").toBeDefined();
 
       const detail = await fetchCampaignDetail(client, withProgress!.campaign);
-      const state = await fetchPromoterState(client, withProgress!.campaign, SEEDED_KOL,
+      const state = await fetchPromoterState(client, withProgress!.campaign, SEEDED_PROMOTER,
         detail.kpis.length);
 
-      expect(state.joined, "seeded KOL has not joined").toBe(true);
+      expect(state.joined, "seeded promoter has not joined").toBe(true);
       expect(state.perKpi.length).toBe(detail.kpis.length);
 
-      // The seeded KOL was settled, so nothing should remain owed on a crossed tier.
+      // The seeded promoter was settled, so nothing should remain owed on a crossed tier.
       for (const s of state.perKpi) {
         const kpi = detail.kpis[s.kpiIndex];
         expect(s.settledTiers).toBe(crossedTierCount(s.progress, kpi.tiers));
@@ -359,7 +362,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
   });
 
   /**
-   * Phase 7 (KOL flows) against the real chain.
+   * Phase 7 (promoter flows) against the real chain.
    *
    * The promoter id is the reason this has to be live. `derivePromoterId` recomputes, in
    * TypeScript, a hash the contract builds as `keccak256(abi.encode(address(this), msg.sender))`.
@@ -367,7 +370,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
    * padding wrong and the UI still renders a perfectly convincing tracking link, one that no
    * touch will ever match. Nothing but the chain can tell the two apart.
    */
-  describe("KOL flows", () => {
+  describe("promoter flows", () => {
     async function campaignWithProgress() {
       const views = await fetchBrowseCampaigns(client, BigInt(0), BigInt(100));
       const view = views.find((v) => v.paidOut > BigInt(0));
@@ -378,11 +381,11 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
     it("derivePromoterId reproduces the id the contract stored", async () => {
       const view = await campaignWithProgress();
       const detail = await fetchCampaignDetail(client, view.campaign);
-      const state = await fetchPromoterState(client, view.campaign, SEEDED_KOL,
+      const state = await fetchPromoterState(client, view.campaign, SEEDED_PROMOTER,
         detail.kpis.length);
 
       expect(state.joined).toBe(true);
-      expect(derivePromoterId(view.campaign, SEEDED_KOL)).toBe(state.promoterId);
+      expect(derivePromoterId(view.campaign, SEEDED_PROMOTER)).toBe(state.promoterId);
       expect(hasJoined(state.promoterId)).toBe(true);
     });
 
@@ -390,7 +393,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
       const views = await fetchBrowseCampaigns(client, BigInt(0), BigInt(100));
       expect(views.length).toBeGreaterThanOrEqual(2);
 
-      const ids = views.map((v) => derivePromoterId(v.campaign, SEEDED_KOL));
+      const ids = views.map((v) => derivePromoterId(v.campaign, SEEDED_PROMOTER));
       expect(new Set(ids).size).toBe(ids.length);
     });
 
@@ -408,7 +411,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
     it("builds a tracking link that round-trips to the on-chain id", async () => {
       const view = await campaignWithProgress();
       const detail = await fetchCampaignDetail(client, view.campaign);
-      const state = await fetchPromoterState(client, view.campaign, SEEDED_KOL,
+      const state = await fetchPromoterState(client, view.campaign, SEEDED_PROMOTER,
         detail.kpis.length);
 
       const link = trackingLink("https://boney.example", view.campaign, state.promoterId);
@@ -449,11 +452,11 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
     });
 
     /**
-     * 7.2 — earned vs claimable. These are two different questions, and conflating them is what
+     * 7.2 — earned vs unsettled. These are two different questions, and conflating them is what
      * made the panel read as if a promoter had earned nothing: settlement happens *inline* when
-     * progress is reported, so a healthy promoter's claimable is legitimately zero while their
-     * earned figure is large. The chain settles the argument — a KOL's token balance is what
-     * they were actually paid.
+     * progress is reported, so a healthy promoter has nothing outstanding while their earned figure
+     * is large. The chain settles the argument — a promoter's token balance is what they were
+     * actually paid.
      */
     it("earned reconciles with what the chain actually paid the promoter", async () => {
       const views = await fetchBrowseCampaigns(client, BigInt(0), BigInt(100));
@@ -463,7 +466,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
 
       for (const view of views) {
         const detail = await fetchCampaignDetail(client, view.campaign);
-        const state = await fetchPromoterState(client, view.campaign, SEEDED_KOL,
+        const state = await fetchPromoterState(client, view.campaign, SEEDED_PROMOTER,
           detail.kpis.length);
         if (!state.joined) continue;
 
@@ -476,49 +479,33 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
         }
       }
 
-      expect(token, "seeded KOL has joined nothing").toBeDefined();
+      expect(token, "seeded promoter has joined nothing").toBeDefined();
       expect(earnedAcrossCampaigns).toBeGreaterThan(BigInt(0));
 
       const balance = await client.readContract({
         address: token!,
         abi: IERC20Abi,
         functionName: "balanceOf",
-        args: [SEEDED_KOL],
+        args: [SEEDED_PROMOTER],
       });
 
       expect(balance).toBe(earnedAcrossCampaigns);
     });
 
-    it("claimable is zero for a settled promoter, and canSettle says why", async () => {
+    /**
+     * The invariant that justifies having no claim control at all: `reportUserAction` calls
+     * `_settle` inline, so on a live campaign every crossed tier is already paid. If this ever
+     * fails, the panel's "unsettled" anomaly row is what surfaces it.
+     */
+    it("leaves nothing unsettled — inline settlement pays every crossed tier", async () => {
       const view = await campaignWithProgress();
       const detail = await fetchCampaignDetail(client, view.campaign);
-      const state = await fetchPromoterState(client, view.campaign, SEEDED_KOL,
+      const state = await fetchPromoterState(client, view.campaign, SEEDED_PROMOTER,
         detail.kpis.length);
 
       for (const s of state.perKpi) {
         const kpi = detail.kpis[s.kpiIndex];
-        const {payout, shortfall} = settlementPayout(
-          s.progress,
-          kpi.tiers,
-          s.settledTiers,
-          detail.escrowBalance,
-        );
-
-        // Inline settlement means a healthy promoter has nothing pending.
-        expect(payout).toBe(BigInt(0));
-        expect(shortfall).toBe(BigInt(0));
-
-        const eligibility = canSettle({
-          status: detail.status,
-          joined: true,
-          payout,
-          endedAtSeconds: Number(detail.endedAt),
-          claimGraceSeconds: Number(detail.claimGrace),
-          nowSeconds: Math.floor(Date.now() / 1000),
-        });
-
-        expect(eligibility.ok).toBe(false);
-        expect(eligibility.reason).toMatch(/nothing is waiting to be claimed/i);
+        expect(unsettledRewards(s.progress, kpi.tiers, s.settledTiers)).toBe(BigInt(0));
       }
     });
   });
@@ -594,7 +581,7 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
       ]);
 
       // Look up a promoter id the seed registered.
-      const state = await fetchPromoterState(client, campaign, SEEDED_KOL, campaigns[0].kpiCount);
+      const state = await fetchPromoterState(client, campaign, SEEDED_PROMOTER, campaigns[0].kpiCount);
       expect(state.joined).toBe(true);
 
       // Build the touch exactly as the UI would.

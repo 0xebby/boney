@@ -4,11 +4,14 @@ import Link from "next/link";
 import {usePathname} from "next/navigation";
 import type {ReactNode} from "react";
 import {useAccount, useConnect, useDisconnect} from "wagmi";
+import {RankBadge} from "@/components/ui/RankBadge";
+import {usePromoterReputation} from "@/hooks/usePromoterReputation";
+import {rankOf} from "@/lib/ranks";
 
 /**
  * AppShell — a persistent top bar over a single full-width content column.
  * The bar is a product directory, not a settings menu: Campaigns (the list), My Campaigns,
- * KOL, Docs — plus the Create call to action.
+ * Promoters, Docs — plus the Create call to action.
  *
  * The first item is "Campaigns" rather than "Boneyard" on purpose. The brand mark beside it
  * already links to `/`, and the list page leads with a `boneyard` hero — three copies of the name
@@ -20,7 +23,8 @@ import {useAccount, useConnect, useDisconnect} from "wagmi";
 const NAV = [
   {href: "/", label: "Campaigns", icon: "▦"},
   {href: "/my", label: "My Campaigns", icon: "◈"},
-  {href: "/kol", label: "KOL", icon: "◎"},
+  {href: "/discover", label: "Discover", icon: "◍"},
+  {href: "/promoters", label: "Promoters", icon: "◎"},
   {href: "/docs", label: "Docs", icon: "◌"},
 ] as const;
 
@@ -75,6 +79,49 @@ function WalletButton() {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The connected wallet's BoneyScore rank, shown beside the wallet button.
+ *
+ * There is no separate "verified" flag to read, and none is needed: `scoreOf` returns 0 for a
+ * wallet the registry has never seen, and `rankOf(0)` is `Drifter` — "no attestation on record".
+ * The default state therefore falls out of the same read as every other rank, which is what keeps
+ * the badge honest. A wallet that has never verified and one whose registry read is still in flight
+ * are different things though, so this renders nothing until the query settles rather than
+ * flashing `Drifter` at someone who is actually a Samurai.
+ *
+ * Muted tone throughout. `RankBadge`'s yellow is a caution aimed at a project vetting a stranger's
+ * row; pointed at your own wallet it reads as a fault, when the actual message is "verify to get a
+ * score" — which the tooltip says in the first person instead.
+ *
+ * Not a link, deliberately. Verification lives in `PromoterPanel`, behind a joinable campaign, so
+ * there is no global route to send anyone to; linking to `/promoters` would imply you can verify
+ * there. Until a standalone verify flow exists this stays an indicator.
+ */
+function WalletRank() {
+  const {address, isConnected} = useAccount();
+  const {reputation, hasExpired, isLoading} = usePromoterReputation(address);
+
+  if (!isConnected || isLoading || reputation === undefined) return null;
+
+  const score = Number(reputation);
+  const rank = rankOf(score);
+
+  // `scoreOf` drops values past their `maxAge`, so an expired wallet decays toward Drifter. Saying
+  // "not verified" there would be wrong — they did verify, it just aged out.
+  const detail = hasExpired
+    ? `Your BoneyScore verification has expired — re-verify to restore it. Rank ${rank.name}.`
+    : score > 0
+      ? `Your BoneyScore is ${score.toLocaleString("en-US")}. Rank ${rank.name}.`
+      : "Not verified yet — verify your BoneyScore on any campaign to read your Ethos score and X reach on chain.";
+
+  return (
+    <span className="flex shrink-0 items-center" title={detail}>
+      <RankBadge rank={rank} tone="muted" />
+      <span className="sr-only">{detail}</span>
+    </span>
   );
 }
 
@@ -153,6 +200,7 @@ export function AppShell({children}: {children: ReactNode}) {
               <span className="sm:hidden">Create</span>
             </Link>
 
+            <WalletRank />
             <WalletButton />
           </div>
         </div>
@@ -169,7 +217,7 @@ export function AppShell({children}: {children: ReactNode}) {
       <footer className="mt-12 border-t border-hairline">
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-2 px-4 py-8 sm:px-6 lg:px-8">
           <p className="text-xs text-ink-muted">
-            Powered by{" "}
+            Powered by the{" "}
             <Link href="/docs" className="text-ink-secondary transition-colors hover:text-brand">
               Boney Protocol
             </Link>

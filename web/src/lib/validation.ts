@@ -1,4 +1,5 @@
 import {MAX_KPIS, MAX_TIERS_PER_KPI, type KpiKind} from "./types";
+import {MAX_BONEY_SCORE} from "./boneyscore";
 
 /**
  * Client-side mirrors of `Campaign`'s constructor validation.
@@ -9,7 +10,16 @@ import {MAX_KPIS, MAX_TIERS_PER_KPI, type KpiKind} from "./types";
  *
  * Corresponding Solidity errors: NoKpis, TooManyKpis, TierLengthMismatch, EmptyTiers,
  * TooManyTiers, TiersNotAscending, ZeroTierReward, CustomKpiNeedsVerifier, ZeroRewardPool,
- * InvalidWindow.
+ * InvalidWindow, UnreachableReputation.
+ *
+ * One rule here has no Solidity counterpart: the event-source checks, flagged where they appear.
+ * The chain never reads that blob, so a malformed source deploys fine and then indexes nothing.
+ *
+ * The `minReputation` ceiling used to be in that category and no longer is — `Campaign`'s
+ * constructor rejects an unreachable gate itself, which is what covers campaigns created outside
+ * this form. The version here differs in one way worth knowing: the contract computes the ceiling
+ * from live schema configuration, while this file derives it from the seeded weights. See the note
+ * at that check.
  */
 
 export type TierDraft = {threshold: string; reward: string};
@@ -26,7 +36,7 @@ export type EventSourceDraft = {
   source: string;
   /** Human-readable event signature, e.g. `Deposit(address,uint256)`. */
   signature: string;
-  /** Which indexed topic carries the user address, as "1" | "2" | "3". */
+  /** Which indexed topic carries the referral's address, as "1" | "2" | "3". */
   actorTopic: string;
   /** "count" or "dataWord0" — see `AMOUNT_MODE`. */
   amountMode: string;
@@ -130,6 +140,37 @@ export function validateCampaignDraft(
       path: "attributionWindow",
       message: "Attribution window must be greater than zero.",
     });
+  }
+
+  // ── eligibility gate ──────────────────────────────────────────
+  // Solidity: UnreachableReputation. A gate above the highest attainable BoneyScore produces a
+  // campaign that deploys cleanly, accepts funding, renders as Active and can never be joined by
+  // anyone — and `minReputation` is immutable, so there is no correcting it after the fact. The
+  // constructor now rejects this outright, which is what protects campaigns created by a script or
+  // a direct contract call; this check exists so the form catches it before the user pays gas.
+  //
+  // The ceiling is a property of the registered schemas rather than a constant of the protocol:
+  // the contract derives it from live schema weights and per-schema value caps
+  // (`ReputationRegistry.maxScore`), and `MAX_BONEY_SCORE` here is the same arithmetic against the
+  // seeded configuration — ETHOS_WEIGHT * 2800 + REACH_WEIGHT * 2800. The two agree today (asserted
+  // on chain in Campaign.t.sol), but governance can re-weight or add a schema without redeploying
+  // the frontend, so treat the contract as authoritative and this as a fast local approximation.
+  // If they ever disagree, the constructor is the one that decides.
+  const minReputationRaw = draft.minReputation.trim();
+  if (minReputationRaw) {
+    const minReputation = parseCount(minReputationRaw);
+    if (minReputation === null) {
+      // Otherwise this surfaces much later as a DraftEncodingError from `campaignArgs`, which is
+      // thrown at submit time and not attached to any field.
+      issues.push({path: "minReputation", message: "Enter a whole number."});
+    } else if (minReputation > BigInt(MAX_BONEY_SCORE)) {
+      issues.push({
+        path: "minReputation",
+        message:
+          `No wallet can score above ${MAX_BONEY_SCORE.toLocaleString()}, so nobody could ever join ` +
+          `this campaign. BoneyScore is 7 × Ethos + 3 × reach, and both inputs cap at 2,800.`,
+      });
+    }
   }
 
   // ── KPIs ──────────────────────────────────────────────────────

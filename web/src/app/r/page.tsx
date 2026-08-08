@@ -16,10 +16,10 @@ import type {PublicClient} from "viem";
 /**
  * `/r` — tracking-link landing page.
  *
- * A user clicking a KOL's link arrives here with `?c=campaign&p=promoterId`. This page signs the
+ * A referral clicking a promoter's link arrives here with `?c=campaign&p=promoterId`. This page signs the
  * Touch, relays it to the registry, and redirects to the campaign detail page. If the signature
- * lands, future actions on that campaign will credit the KOL until the touch expires or another
- * KOL signs a fresher one.
+ * lands, future actions on that campaign will credit the promoter until the touch expires or another
+ * promoter signs a fresher one.
  */
 function AttributionPageContent() {
   const searchParams = useSearchParams();
@@ -40,7 +40,7 @@ function AttributionPageContent() {
       // The tracking link carries an address, but `/campaign/[id]` is keyed by the registry's
       // numeric id and rejects anything else. The registry has no address→id lookup, so the id
       // is recovered from the browse list — without it a confirmed attribution would redirect
-      // the user straight into an "Invalid campaign" page.
+      // the referral straight into an "Invalid campaign" page.
       const [detail, views] = await Promise.all([
         fetchCampaignDetail(client as PublicClient, campaign),
         fetchBrowseCampaigns(client as PublicClient, BigInt(0), BigInt(1000)),
@@ -76,8 +76,7 @@ function AttributionPageContent() {
       <Card>
         <EmptyState
           title="Invalid tracking link"
-          description="This link is missing required parameters. Ask the promoter for a fresh link."
-        />
+          description="This link is missing required parameters. Ask the promoter for a fresh link."        />
       </Card>
     );
   }

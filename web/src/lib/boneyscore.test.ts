@@ -1,6 +1,10 @@
 import {describe, it, expect} from "vitest";
 import {
   reachFromFollowers,
+  followersForReach,
+  daysUntilExpiry,
+  combineFreshness,
+  EXPIRY_NOTICE_DAYS,
   boneyScore,
   ethosLevel,
   explainScore,
@@ -15,7 +19,7 @@ import {
  *
  * The weights and the reach curve are consensus-critical in the weak sense that the attestor signs
  * values computed here and `Campaign.join()` gates on the sum. If this drifts from
- * `SeedLocal.s.sol`'s ETHOS_WEIGHT/REACH_WEIGHT, a KOL sees one score in the UI and is rejected on
+ * `SeedLocal.s.sol`'s ETHOS_WEIGHT/REACH_WEIGHT, a promoter sees one score in the UI and is rejected on
  * another. The fixed points below are the same ones documented in `plan.md`.
  */
 
@@ -73,7 +77,7 @@ describe("boneyScore", () => {
     expect(REACH_WEIGHT).toBe(3);
   });
 
-  it("matches the seeded KOL fixtures", () => {
+  it("matches the seeded promoter fixtures", () => {
     // These exact totals are asserted on chain by the seed script and the Foundry test.
     expect(boneyScore({ethos: 2_034, reach: 1_752})).toBe(19_494);
     expect(boneyScore({ethos: 1_450, reach: 1_571})).toBe(14_863);
@@ -88,7 +92,7 @@ describe("boneyScore", () => {
     expect(MAX_BONEY_SCORE).toBe(28_000);
   });
 
-  it("still scores a KOL whose follower lookup failed, on Ethos alone", () => {
+  it("still scores a promoter whose follower lookup failed, on Ethos alone", () => {
     // Decision 3 in plan.md: reach degrades to 0 rather than blocking attestation.
     expect(boneyScore({ethos: 2_034, reach: 0})).toBe(14_238);
   });
@@ -116,5 +120,111 @@ describe("explainScore", () => {
     expect(out.reachPoints).toBe(5_256);
     expect(out.ethosPoints + out.reachPoints).toBe(out.total);
     expect(out.level).toBe("exemplary");
+  });
+});
+
+describe("daysUntilExpiry", () => {
+  const now = 1_800_000_000;
+  const day = 86_400;
+
+  it("stays quiet outside the notice window", () => {
+    // A score good for another four months is not news. Warning that early trains people to
+    // ignore the banner, so it must read as nothing at all.
+    expect(daysUntilExpiry(now + 120 * day, now)).toBeUndefined();
+    expect(daysUntilExpiry(now + (EXPIRY_NOTICE_DAYS + 1) * day, now)).toBeUndefined();
+  });
+
+  it("speaks up on the window boundary", () => {
+    expect(daysUntilExpiry(now + EXPIRY_NOTICE_DAYS * day, now)).toBe(EXPIRY_NOTICE_DAYS);
+  });
+
+  it("counts down whole days, rounding toward the nearer deadline", () => {
+    // 3.9 days left reads as 3, not 4: a promoter told "4 days" on the last afternoon would be misled.
+    expect(daysUntilExpiry(now + Math.floor(3.9 * day), now)).toBe(3);
+    expect(daysUntilExpiry(now + day, now)).toBe(1);
+  });
+
+  it("reports 0 on the final day rather than going quiet", () => {
+    expect(daysUntilExpiry(now + 60, now)).toBe(0);
+  });
+
+  it("treats already-expired as not a countdown", () => {
+    // `hasExpired` carries that case with different copy; a countdown of 0 would collide with the
+    // genuine last-day warning.
+    expect(daysUntilExpiry(now - day, now)).toBeUndefined();
+    expect(daysUntilExpiry(now, now)).toBeUndefined();
+  });
+
+  it("treats a never-expiring schema as silent", () => {
+    // 0 is the registry's sentinel for "no window", not a timestamp in 1970.
+    expect(daysUntilExpiry(0, now)).toBeUndefined();
+    expect(daysUntilExpiry(undefined, now)).toBeUndefined();
+  });
+});
+
+describe("combineFreshness", () => {
+  const fresh = {fresh: true, expiresAt: 2_000, updatedAt: 1_000};
+  const expired = {fresh: false, expiresAt: 1_500, updatedAt: 1_000};
+  const neverAttested = {fresh: false, expiresAt: 0, updatedAt: 0};
+
+  /**
+   * The regression. `isValueFresh` and `expiresAtOf` were added to the registry after the first
+   * deployments, so an older one reverts them and every part arrives null. That must read as "this
+   * registry has no opinion", not as "expired" — prompting a re-verify against a registry that
+   * cannot expire anything would send a promoter in a loop.
+   */
+  it("reports no support when the registry cannot answer at all", () => {
+    expect(combineFreshness([null, null])).toEqual({
+      hasExpired: false,
+      freshnessSupported: false,
+    });
+  });
+
+  it("treats an empty part list the same way", () => {
+    expect(combineFreshness([]).freshnessSupported).toBe(false);
+  });
+
+  it("works off whichever schemas did answer", () => {
+    // A partial answer is still an answer; one unreadable schema must not blind the other.
+    const out = combineFreshness([expired, null]);
+    expect(out.freshnessSupported).toBe(true);
+    expect(out.hasExpired).toBe(true);
+  });
+
+  it("flags an expired attestation", () => {
+    expect(combineFreshness([fresh, expired]).hasExpired).toBe(true);
+  });
+
+  it("does not flag a wallet that simply never attested", () => {
+    // A never-attested record reads stale too, but the instruction is "verify", not "re-verify".
+    expect(combineFreshness([neverAttested]).hasExpired).toBe(false);
+  });
+
+  it("warns on the soonest expiry across schemas", () => {
+    // Reach expires on a shorter window than Ethos, so it is the one that needs the warning.
+    const out = combineFreshness([
+      {fresh: true, expiresAt: 9_000, updatedAt: 1_000},
+      {fresh: true, expiresAt: 3_000, updatedAt: 1_000},
+    ]);
+    expect(out.expiresAt).toBe(3_000);
+  });
+
+  it("has no expiry date when every schema is non-expiring", () => {
+    // maxAge 0 is the registry's sentinel for "never expires", surfaced as 0 from expiresAtOf.
+    const out = combineFreshness([{fresh: true, expiresAt: 0, updatedAt: 1_000}]);
+    expect(out.freshnessSupported).toBe(true);
+    expect(out.expiresAt).toBeUndefined();
+    expect(out.hasExpired).toBe(false);
+  });
+});
+
+describe("followersForReach", () => {
+  it("round-trips against reachFromFollowers", () => {
+    // The two are inverses, and the discovery page uses this one to state a rank's follower floor.
+    // If they drift, a rank's advertised threshold stops matching who actually lands in it.
+    for (const followers of [1_000, 8_500, 24_000, 250_000, 7_300_000]) {
+      const reach = reachFromFollowers(followers);
+      expect(reachFromFollowers(followersForReach(reach))).toBe(reach);
+    }
   });
 });

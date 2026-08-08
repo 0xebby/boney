@@ -30,6 +30,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     error AlreadyJoined();
     error NotJoined();
     error InsufficientReputation(uint256 score, uint256 required);
+    error UnreachableReputation(uint256 required, uint256 maxScore);
     error UnknownKpi(uint256 kpiIndex);
     error AggregateKpi(uint256 kpiIndex);
     error NotAggregateKpi(uint256 kpiIndex);
@@ -162,6 +163,27 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (cfg.rewardPool == 0) revert ZeroRewardPool();
         if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
         if (cfg.attributionWindow == 0) revert InvalidWindow();
+
+        // Reject a gate no wallet could ever clear. `minReputation` is immutable and `join()` is
+        // the only thing that reads it, so an unreachable value produces a campaign that deploys
+        // cleanly, accepts escrow, reports Active, and silently admits nobody for its whole life —
+        // with no way to correct it short of redeploying and re-funding.
+        //
+        // Read from the registry rather than hard-coded: the ceiling is a product of the
+        // registered schemas and their weights, both of which governance can move, so a constant
+        // here would be wrong the first time anything is re-weighted.
+        //
+        // `try` because `maxScore` postdates the first deployments. A registry that predates it
+        // reverts on the call, and treating that as "no constraint" keeps campaign creation
+        // working against an older registry instead of bricking it protocol-wide. The comparison
+        // is deliberately outside the `try` block so a genuine `UnreachableReputation` revert
+        // cannot be swallowed by the `catch`.
+        uint256 cap = type(uint256).max;
+        try IReputationRegistry(reputationRegistry_).maxScore() returns (uint256 reported) {
+            cap = reported;
+        } catch {}
+        if (cfg.minReputation > cap) revert UnreachableReputation(cfg.minReputation, cap);
+
         if (kpis_.length == 0) revert NoKpis();
         if (kpis_.length > MAX_KPIS) revert TooManyKpis(kpis_.length, MAX_KPIS);
         if (kpis_.length != tiers_.length) revert TierLengthMismatch();
@@ -406,18 +428,18 @@ contract Campaign is ICampaign, ReentrancyGuard {
         while (next < ladder.length && progress >= ladder[next].threshold) {
             uint256 reward = ladder[next].reward;
             uint256 remaining = rewardPool - paidOut;
-            uint256 pay = reward > remaining ? remaining : reward;
+            uint256 tierPay = reward > remaining ? remaining : reward;
 
             // Mark the tier settled even when the pool cannot cover it: the ladder must keep
             // advancing, and the shortfall is surfaced via `PoolExhausted`.
             _settledTiers[promoter][kpiIndex] = next + 1;
 
-            if (pay != 0) {
-                paidOut += pay;
-                escrowVault.release(promoter, pay);
+            if (tierPay != 0) {
+                paidOut += tierPay;
+                escrowVault.release(promoter, tierPay);
             }
-            emit TierSettled(promoterId, promoter, kpiIndex, next, pay);
-            if (pay < reward) emit PoolExhausted(reward - pay);
+            emit TierSettled(promoterId, promoter, kpiIndex, next, tierPay);
+            if (tierPay < reward) emit PoolExhausted(reward - tierPay);
 
             unchecked {
                 ++next;

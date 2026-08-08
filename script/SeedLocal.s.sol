@@ -62,6 +62,27 @@ contract SeedLocal is Script {
     ///      in the local fixture and a regression in `join()` would pass unnoticed.
     uint256 constant GATED_MIN_REPUTATION = 16_000;
 
+    /// @dev Freshness windows. Credibility is not constant: an Ethos score can crater and followers
+    ///      can be lost or bought, so a stored value stops counting once it ages past its window and
+    ///      the KOL has to re-attest. Ethos moves slowly and is vouch-backed, so it gets the longer
+    ///      window; reach is more volatile. X_FOLLOWERS is left non-expiring because it scores at
+    ///      weight 0 anyway — expiring it would only blank a display figure.
+    uint64 constant ETHOS_MAX_AGE = 180 days;
+    uint64 constant REACH_MAX_AGE = 90 days;
+
+    /// @dev Value ceilings for the two scoring schemas. Both inputs live on Ethos's 0–2800 scale —
+    ///      reach is normalised onto it by `reachFromFollowers` precisely so the 70/30 weighting
+    ///      means something — which makes the composite maximum 7*2800 + 3*2800 = 28,000.
+    ///
+    ///      These are what make `ReputationRegistry.maxScore` answerable, and therefore what lets
+    ///      `Campaign`'s constructor reject a `minReputation` above 28,000. Leave them unset and
+    ///      the registry reports an unbounded ceiling and the gate check silently does nothing.
+    ///
+    ///      X_FOLLOWERS is deliberately left unbounded: it carries weight 0, so it is excluded from
+    ///      `maxScore` entirely, and a raw follower count has no natural ceiling to invent.
+    uint256 constant ETHOS_MAX_VALUE = 2_800;
+    uint256 constant REACH_MAX_VALUE = 2_800;
+
     // Resolved in `run()`. Storage rather than locals for the same stack-depth reason as the
     // module references below.
     uint256 DEPLOYER_PK;
@@ -127,6 +148,9 @@ contract SeedLocal is Script {
     ///      audit, but contributing nothing to the score. Weight 0 retires a schema's contribution
     ///      without erasing its data, so the raw counts already stored remain intact.
     ///
+    ///      ETHOS_SCORE and X_REACH additionally carry freshness windows, so a seeded score decays
+    ///      the way a real one does rather than standing forever.
+    ///
     ///      Re-runnable against an already-seeded chain, which reseeding onto a live deployment
     ///      requires. Two separate replay guards have to be respected: `registerSchema` reverts
     ///      with `SchemaAlreadyRegistered`, so it is skipped when `schemaInfo` reports the schema
@@ -150,6 +174,27 @@ contract SeedLocal is Script {
         // Retire the legacy follower weight on chains seeded before BoneyScore existed. Guarded so
         // a reseed of an already-migrated chain is a no-op rather than a redundant write.
         if (followersExists && followersWeight != 0) reputation.setSchemaWeight(followers, 0);
+
+        // Freshness windows. Schemas register non-expiring, so these are set explicitly on every
+        // run — that also migrates a chain seeded before the freshness gate existed. Idempotent:
+        // setting the same window twice is a redundant write, not a revert.
+        if (reputation.schemaMaxAge(ethos) != ETHOS_MAX_AGE) {
+            reputation.setSchemaMaxAge(ethos, ETHOS_MAX_AGE);
+        }
+        if (reputation.schemaMaxAge(reach) != REACH_MAX_AGE) {
+            reputation.setSchemaMaxAge(reach, REACH_MAX_AGE);
+        }
+
+        // Value ceilings, set on every run for the same migration reason as the windows above.
+        // These must land before the attestations below, since `storeAttestation` now enforces
+        // them — and before any campaign is created, since `Campaign`'s constructor reads
+        // `maxScore` to reject an unreachable `minReputation`.
+        if (reputation.schemaMaxValue(ethos) != ETHOS_MAX_VALUE) {
+            reputation.setSchemaMaxValue(ethos, ETHOS_MAX_VALUE);
+        }
+        if (reputation.schemaMaxValue(reach) != REACH_MAX_VALUE) {
+            reputation.setSchemaMaxValue(reach, REACH_MAX_VALUE);
+        }
 
         // KOL 1: Ethos 2034 ("exemplary"), 24,000 followers -> reach 1752 -> BoneyScore 19,494.
         _attest(vm.addr(KOL_PK), ethos, 2_034, "seed-kol-1-ethos");

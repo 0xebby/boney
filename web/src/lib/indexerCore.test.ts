@@ -104,7 +104,7 @@ describe("aggregateByActor", () => {
 
   /**
    * The bug this pins: scaling each log before summing floors every sub-scale deposit to zero, so
-   * a user making many small deposits accrues nothing. Scaling the running total instead means
+   * a referral making many small deposits accrues nothing. Scaling the running total instead means
    * they add up.
    */
   it("scales the running total, not each log", () => {
@@ -116,7 +116,7 @@ describe("aggregateByActor", () => {
     expect(aggregateByActor(logs, source()).get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
   });
 
-  it("drops a user whose total still rounds to nothing", () => {
+  it("drops a referral whose total still rounds to nothing", () => {
     // Below scale with nothing to add to — reporting 0 is a no-op the campaign ignores anyway.
     const totals = aggregateByActor([depositLog(ALICE, BigInt(1e14), BigInt(10))], source());
     expect(totals.has(ALICE.toLowerCase())).toBe(false);
@@ -185,7 +185,7 @@ describe("aggregateByActor", () => {
 
 describe("decideReport", () => {
   const total = {
-    user: ALICE,
+    referral: ALICE,
     amount: BigInt(5),
     actions: [{timestamp: BigInt(1_000), amount: BigInt(5)}],
     lastBlock: BigInt(10),
@@ -193,9 +193,9 @@ describe("decideReport", () => {
 
   /**
    * The constraint that makes "index every mint and credit them all" impossible: storeTouch needs
-   * the user's own signature, so a stranger's activity can never be credited.
+   * the referral's own signature, so a stranger's activity can never be credited.
    */
-  it("refuses an unattributed user — Campaign would revert NoAttribution", () => {
+  it("refuses an unattributed referral — Campaign would revert NoAttribution", () => {
     const decision = decideReport(total, false, BigInt(0));
     expect(decision.send).toBe(false);
     expect(decision.send === false && decision.reason).toMatch(/NoAttribution/);

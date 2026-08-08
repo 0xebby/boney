@@ -34,6 +34,9 @@ contract BoneyScoreTest is Test {
     uint256 internal constant REACH_WEIGHT = 3;
     uint256 internal constant GATED_MIN_REPUTATION = 16_000;
 
+    /// The freshness window the freshness tests exercise. Mirrors `SeedLocal.s.sol`.
+    uint64 internal constant ETHOS_MAX_AGE = 180 days;
+
     /// The seeded KOLs. KOL 1 clears the gate, KOL 2 does not — see `_seedReputation`.
     uint256 internal constant KOL1_ETHOS = 2034;
     uint256 internal constant KOL1_FOLLOWERS = 24_000;
@@ -169,6 +172,76 @@ contract BoneyScoreTest is Test {
         assertEq(registry.valueOf(kol1, followersId), KOL1_FOLLOWERS);
     }
 
+    // ── freshness ────────────────────────────────────────────────
+
+    /**
+     * Credibility is not constant, so a BoneyScore is only as good as the date on it. KOL 1 clears
+     * a 16,000 gate on 7*2034 + 3*1752 = 19,494, but 14,238 of that is Ethos. Once the Ethos
+     * attestation ages out, the composite falls to reach alone (5,256) and the gate closes — the
+     * same conclusion as `test_ReachAloneCannotClearTheGate`, reached by expiry rather than refusal.
+     */
+    function test_ExpiredEthos_closesAGateItPreviouslyCleared() public {
+        vm.prank(admin);
+        registry.setSchemaMaxAge(ethosId, ETHOS_MAX_AGE);
+        _seed(kol1, KOL1_ETHOS, KOL1_FOLLOWERS, KOL1_REACH);
+
+        assertTrue(registry.qualifies(kol1, GATED_MIN_REPUTATION), "fresh: clears the gate");
+
+        skip(ETHOS_MAX_AGE + 1);
+
+        assertEq(registry.scoreOf(kol1), REACH_WEIGHT * KOL1_REACH, "only reach survives");
+        assertFalse(registry.qualifies(kol1, GATED_MIN_REPUTATION), "expired: gate closes");
+        assertEq(registry.valueOf(kol1, ethosId), KOL1_ETHOS, "the old figure is still readable");
+        assertFalse(registry.isValueFresh(kol1, ethosId), "but it is flagged stale");
+    }
+
+    /// Re-attesting at a *lower* Ethos keeps the gate shut. Refreshing is not a way to reinstate an
+    /// old score; it republishes whatever the metric says today.
+    function test_Reattesting_atALowerEthos_keepsTheGateShut() public {
+        vm.prank(admin);
+        registry.setSchemaMaxAge(ethosId, ETHOS_MAX_AGE);
+        _seed(kol1, KOL1_ETHOS, KOL1_FOLLOWERS, KOL1_REACH);
+        skip(ETHOS_MAX_AGE + 1);
+
+        _store(kol1, ethosId, 400); // credibility cratered while the record sat there
+
+        assertTrue(registry.isValueFresh(kol1, ethosId), "fresh again");
+        assertEq(registry.scoreOf(kol1), _expected(400, KOL1_REACH));
+        assertFalse(registry.qualifies(kol1, GATED_MIN_REPUTATION), "fresh but no longer enough");
+    }
+
+    /// Windows are per-schema: reach can age out on its own cadence without touching Ethos.
+    function test_SchemaWindows_areIndependent() public {
+        vm.startPrank(admin);
+        registry.setSchemaMaxAge(ethosId, 180 days);
+        registry.setSchemaMaxAge(reachId, 30 days);
+        vm.stopPrank();
+
+        _seed(kol1, KOL1_ETHOS, KOL1_FOLLOWERS, KOL1_REACH);
+        skip(31 days);
+
+        assertEq(registry.scoreOf(kol1), ETHOS_WEIGHT * KOL1_ETHOS, "reach expired, Ethos did not");
+        assertTrue(registry.isValueFresh(kol1, ethosId));
+        assertFalse(registry.isValueFresh(kol1, reachId));
+    }
+
+    /// The whole 0–28,000 range decays to 0, so no wallet keeps a residual score on expiry alone.
+    function testFuzz_EverySchemaExpired_scoresZero(uint256 ethos, uint256 reach) public {
+        ethos = bound(ethos, 0, 2800);
+        reach = bound(reach, 0, 2800);
+
+        vm.startPrank(admin);
+        registry.setSchemaMaxAge(ethosId, ETHOS_MAX_AGE);
+        registry.setSchemaMaxAge(reachId, ETHOS_MAX_AGE);
+        vm.stopPrank();
+
+        _seed(kol1, ethos, KOL1_FOLLOWERS, reach);
+        skip(ETHOS_MAX_AGE + 1);
+
+        assertEq(registry.scoreOf(kol1), 0);
+        assertFalse(registry.qualifies(kol1, GATED_MIN_REPUTATION));
+    }
+
     // ── the off-chain contract ───────────────────────────────────
 
     /**
@@ -179,11 +252,9 @@ contract BoneyScoreTest is Test {
      *
      * Bounded to the attestable range: both values are normalised to 0–2800 before signing.
      */
-    function testFuzz_ScoreOf_matchesOffChainFormula(
-        uint256 ethos,
-        uint256 reach,
-        uint256 followers
-    ) public {
+    function testFuzz_ScoreOf_matchesOffChainFormula(uint256 ethos, uint256 reach, uint256 followers)
+        public
+    {
         ethos = bound(ethos, 0, 2800);
         reach = bound(reach, 0, 2800);
         followers = bound(followers, 0, 100_000_000);

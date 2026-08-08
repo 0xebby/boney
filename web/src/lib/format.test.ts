@@ -7,6 +7,10 @@ import {
   formatDuration,
   formatTimeUntil,
   toAmountInput,
+  toDateTimeLocal,
+  fromDateTimeLocal,
+  splitDuration,
+  joinDuration,
 } from "./format";
 import {parseAmount} from "./validation";
 
@@ -195,5 +199,75 @@ describe("formatTimeUntil", () => {
 
   it("accepts bigint timestamps from the chain", () => {
     expect(formatTimeUntil(BigInt(now + 3_600), now)).toBe("1h");
+  });
+});
+
+describe("datetime-local interop", () => {
+  /**
+   * The round trip is the contract the create form depends on: whatever the picker shows must parse
+   * back to the second it came from. Timestamps are built from local parts here rather than
+   * hardcoded, so the suite passes in any TZ — a UTC-only assertion would have hidden exactly the
+   * `toISOString` bug these helpers exist to avoid.
+   */
+  it("round-trips a timestamp through the input format", () => {
+    const local = new Date(2026, 7, 12, 14, 30, 0, 0);
+    const unix = Math.floor(local.getTime() / 1000);
+
+    expect(toDateTimeLocal(unix)).toBe("2026-08-12T14:30");
+    expect(fromDateTimeLocal(toDateTimeLocal(unix))).toBe(unix);
+  });
+
+  it("zero-pads single-digit months, days, hours and minutes", () => {
+    const local = new Date(2026, 0, 5, 9, 5, 0, 0);
+    // Unpadded ("2026-1-5T9:5") is not a value the input accepts — it renders blank.
+    expect(toDateTimeLocal(Math.floor(local.getTime() / 1000))).toBe("2026-01-05T09:05");
+  });
+
+  it("drops the seconds component rather than rejecting it", () => {
+    const local = new Date(2026, 7, 12, 14, 30, 45, 0);
+    const unix = Math.floor(local.getTime() / 1000);
+    // The input has minute granularity, so a re-read floors to the minute. Losing :45 is expected;
+    // shifting the hour would not be.
+    expect(fromDateTimeLocal(toDateTimeLocal(unix))).toBe(unix - 45);
+  });
+
+  it("shows an empty field instead of the epoch for unset values", () => {
+    expect(toDateTimeLocal(0)).toBe("");
+    expect(toDateTimeLocal(-1)).toBe("");
+    expect(toDateTimeLocal(Number.NaN)).toBe("");
+  });
+
+  it("returns 0 rather than NaN for unparseable input", () => {
+    // NaN would survive validation and only throw later, inside BigInt() at submit.
+    expect(fromDateTimeLocal("")).toBe(0);
+    expect(fromDateTimeLocal("not a date")).toBe(0);
+  });
+});
+
+describe("splitDuration / joinDuration", () => {
+  it("picks the largest unit that divides exactly", () => {
+    expect(splitDuration(86_400 * 7)).toEqual({value: 7, unit: "days"});
+    expect(splitDuration(3_600 * 5)).toEqual({value: 5, unit: "hours"});
+    expect(splitDuration(60 * 45)).toEqual({value: 45, unit: "minutes"});
+  });
+
+  it("falls back to seconds rather than rounding a value no larger unit divides", () => {
+    // 604801 as "7 days" would let a save rewrite the window the project set.
+    expect(splitDuration(604_801)).toEqual({value: 604_801, unit: "seconds"});
+    expect(splitDuration(90)).toEqual({value: 90, unit: "seconds"});
+  });
+
+  it("round-trips every split back to the original seconds", () => {
+    for (const s of [0, 1, 59, 60, 90, 3_600, 5_400, 86_400, 604_800, 604_801, 2_592_000]) {
+      const {value, unit} = splitDuration(s);
+      expect(joinDuration(value, unit)).toBe(s);
+    }
+  });
+
+  it("clamps negatives and truncates fractional input", () => {
+    expect(splitDuration(-100)).toEqual({value: 0, unit: "seconds"});
+    expect(joinDuration(-1, "days")).toBe(0);
+    expect(joinDuration(1.9, "hours")).toBe(3_600);
+    expect(joinDuration(Number.NaN, "days")).toBe(0);
   });
 });

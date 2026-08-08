@@ -14,7 +14,7 @@
  * Two properties worth stating plainly:
  *
  *  - **It cannot credit strangers.** `reportUserAction` reverts `NoAttribution` without a live
- *    touch, and a touch needs the user's own EIP-712 signature. Indexing all traffic on a contract
+ *    touch, and a touch needs the referral's own EIP-712 signature. Indexing all traffic on a contract
  *    and crediting it is not a thing this can do, by construction.
  *  - **Reports are cumulative and idempotent.** `newTotal` is a running total, not a delta, and a
  *    re-run over the same range decides to send nothing. Losing the cursor file costs a rescan,
@@ -272,13 +272,13 @@ async function main(): Promise<void> {
             address: attributionRegistry,
             abi: AttributionRegistryAbi,
             functionName: "activePromoter",
-            args: [view.campaign, total.user],
+            args: [view.campaign, total.referral],
           }),
           publicClient.readContract({
             address: view.campaign,
             abi: CampaignAbi,
             functionName: "userCreditedOf",
-            args: [total.user, BigInt(kpiIndex)],
+            args: [total.referral, BigInt(kpiIndex)],
           }),
         ]);
 
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
 
         const decision = decideReport(total, attributed, alreadyCredited as bigint);
         if (!decision.send) {
-          console.log(`  · ${total.user}: ${decision.reason}`);
+          console.log(`  · ${total.referral}: ${decision.reason}`);
           skipped++;
           continue;
         }
@@ -300,7 +300,7 @@ async function main(): Promise<void> {
             : encodeActions(decision.actions);
 
         if (dryRun || !wallet || !account) {
-          console.log(`  · ${total.user}: would report ${decision.newTotal} (dry run)`);
+          console.log(`  · ${total.referral}: would report ${decision.newTotal} (dry run)`);
           continue;
         }
 
@@ -308,14 +308,14 @@ async function main(): Promise<void> {
           address: view.campaign,
           abi: CampaignAbi,
           functionName: "reportUserAction",
-          args: [BigInt(kpiIndex), total.user, decision.newTotal, evidence],
+          args: [BigInt(kpiIndex), total.referral, decision.newTotal, evidence],
           chain: publicClient.chain,
           account,
         });
         const receipt = await publicClient.waitForTransactionReceipt({hash});
 
         console.log(
-          `  · ${total.user}: reported ${decision.newTotal} — ${hash} (${receipt.status})`,
+          `  · ${total.referral}: reported ${decision.newTotal} — ${hash} (${receipt.status})`,
         );
         reported++;
       }

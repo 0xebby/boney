@@ -12,7 +12,7 @@ export function isLive(status: CampaignView["status"]): boolean {
 }
 
 /**
- * Whether the claim grace window has passed and the project can reclaim unspent funds.
+ * Whether the settlement grace window has passed and the project can reclaim unspent funds.
  *
  * `endedAt` is when `end()` was actually called, which is NOT `endTime`: a project can leave a
  * campaign un-ended long past its scheduled window, and `Campaign.reclaimUnspent` measures the
@@ -163,7 +163,8 @@ export function settlementPayout(
  * Rewards the contract has already marked settled for this promoter — what they have been paid.
  *
  * The counterpart to `unsettledRewards`: that is what `settle` *would* pay, this is what settling
- * already did. Together they are the "earned vs claimable" split the promoter dashboard shows.
+ * already did. Because settlement is inline, this is the figure the promoter dashboard shows as
+ * "earned" — there is no claimable balance for it to sit against.
  *
  * Caveat this deliberately keeps rather than hides: `Campaign._settle` advances `_settledTiers`
  * even when the pool could only cover part of a tier, so a tier settled during a `PoolExhausted`

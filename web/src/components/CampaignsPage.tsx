@@ -10,12 +10,33 @@ import {StatusPill} from "@/components/ui/StatusPill";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
-import {filterCampaigns, summarize, EMPTY_FILTERS, type CampaignFilters} from "@/lib/filters";
+import {
+  filterCampaigns,
+  summarize,
+  EMPTY_FILTERS,
+  type CampaignFilters,
+  type StatusFilter,
+} from "@/lib/filters";
 import {utilization} from "@/lib/campaign";
 import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
-import {CAMPAIGN_STATUS, type CampaignView} from "@/lib/types";
+import type {CampaignView} from "@/lib/types";
 
-const STATUS_OPTIONS = ["all", ...CAMPAIGN_STATUS] as const;
+/**
+ * Filter order, most-asked-for first: a visitor scanning the marketplace wants what is running
+ * now, so Active leads and the rest follow the lifecycle.
+ *
+ * Spelled out rather than spread from `CAMPAIGN_STATUS`, because that array mirrors the Solidity
+ * enum and its indices are load-bearing (`statusFromIndex`) — it cannot be reordered to suit the
+ * UI. `satisfies` keeps the two from drifting apart on spelling; this list must name every status.
+ */
+const STATUS_OPTIONS = [
+  "all",
+  "Active",
+  "Pending",
+  "Paused",
+  "Ended",
+  "Cancelled",
+] as const satisfies readonly StatusFilter[];
 
 export function CampaignsPage() {
   const {campaigns, tokens, isLoading, isRefreshing, error, refetch, deployed} = useCampaigns();
@@ -65,7 +86,7 @@ export function CampaignsPage() {
           boneyard
         </h1>
         <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-ink-secondary sm:text-base">
-          The marketplace for trustless marketing campaigns.
+          The marketplace for verifiable Web3 growth.
         </p>
 
         {/*
@@ -75,19 +96,28 @@ export function CampaignsPage() {
         */}
         <div className="mt-6">
           <label className="sr-only" htmlFor="campaign-search">
-            Search campaigns by id or project address
+            Search campaigns, projects, or campaign IDs
           </label>
           <input
             id="campaign-search"
             type="search"
             value={filters.search}
             onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
-            placeholder="Search by campaign id or project address…"
+            placeholder="Search campaigns, projects, or campaign IDs…"
             className="h-11 w-full rounded-lg border border-hairline-strong bg-surface-1 px-4 text-sm text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand"
           />
         </div>
 
-        <p className="mt-3 text-xs text-ink-muted">
+        {/*
+          The "Create a campaign" button itself lives in the top bar, which has no room for a
+          subtitle — so its supporting line sits here instead, where the landing page can afford
+          to spell out what a project is actually signing up for.
+        */}
+        <p className="mt-5 text-xs text-ink-secondary">
+          Set your KPIs. Fund the escrow. Pay for verified results.
+        </p>
+
+        <p className="mt-2 text-xs text-ink-muted">
           <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
             How it works
           </Link>
@@ -96,12 +126,12 @@ export function CampaignsPage() {
 
       <StatRow>
         <StatTile
-          label="Campaigns"
-          value={summary.count.toLocaleString("en-US")}
-          hint={`${summary.activeCount} active`}
+          label="Active campaigns"
+          value={summary.activeCount.toLocaleString("en-US")}
+          hint={`of ${summary.count.toLocaleString("en-US")} shown`}
         />
         <StatTile
-          label="Total escrowed"
+          label="Total rewards"
           value={
             singleToken
               ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
@@ -111,7 +141,7 @@ export function CampaignsPage() {
           accent="var(--series-1)"
         />
         <StatTile
-          label="Paid to promoters"
+          label="Rewards earned"
           value={
             singleToken
               ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
@@ -192,7 +222,7 @@ export function CampaignsPage() {
                       href="/create"
                       className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
                     >
-                      Create campaign
+                      Create a campaign
                     </Link>
                   ) : null
                 }
@@ -258,7 +288,7 @@ function buildColumns(
     },
     {
       key: "utilization",
-      header: "Utilization",
+      header: "Progress",
       sortValue: (c) => utilization(c),
       width: "140px",
       render: (c) => (
@@ -279,7 +309,7 @@ function buildColumns(
     },
     {
       key: "minRep",
-      header: "Min. rep",
+      header: "Min. rep.",
       numeric: true,
       hideOnMobile: true,
       sortValue: (c) => c.minReputation,
@@ -292,7 +322,7 @@ function buildColumns(
     },
     {
       key: "ends",
-      header: "Ends in",
+      header: "Ends",
       numeric: true,
       sortValue: (c) => c.endTime,
       render: (c) => {

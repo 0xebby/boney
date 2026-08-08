@@ -3,21 +3,82 @@
 import {useCallback, useState} from "react";
 import {useAccount, usePublicClient, useWalletClient} from "wagmi";
 import type {PublicClient} from "viem";
-import {ReputationRegistryAbi} from "@/lib/abis";
+import {ReputationRegistryAbi, AttestationVerifierAbi} from "@/lib/abis";
 import {getDeployment} from "@/lib/chains";
 
 /**
  * Fetch signed attestations for the connected wallet and submit them on chain.
  *
  * The split of duties is deliberate: the server holds the attestor key and only ever *signs*,
- * while the KOL's own wallet sends the transaction. `ReputationRegistry.submitAttestation` is
+ * while the promoter's own wallet sends the transaction. `ReputationRegistry.submitAttestation` is
  * permissionless for exactly this reason — authority comes from the signature, not the caller — so
  * the key never needs gas, never needs to be a hot wallet on chain, and a leaked response is
  * useless for any wallet other than the subject it was signed for.
  *
  * Submissions are sequential and order-sensitive: the verifier consumes one nonce per signature,
  * so sending them concurrently would revert all but the first.
+ *
+ * Sequential is necessary but not sufficient. `waitForTransactionReceipt` proves *one* node saw the
+ * previous submission; the next `simulateContract` may be routed to a replica that has not caught
+ * up, which reads the pre-submission nonce and reverts the whole batch with `InvalidNonce` even
+ * though every signature was correct. Base's public endpoint is load-balanced and rate-limited, so
+ * this is routine rather than exotic. `waitForNonce` closes the window by polling the verifier until
+ * the attestor's nonce actually reflects the previous submission.
  */
+
+/**
+ * Registry ABI plus the verifier's, purely so reverts decode into names.
+ *
+ * `submitAttestation` lives on the registry but delegates to `AttestationVerifier`, and most of the
+ * ways it fails — `InvalidNonce`, `NotAnAttestor`, `AttestationExpired`, `InvalidSignature` — are
+ * declared there. viem decodes a revert against the ABI it was handed, so with the registry ABI
+ * alone those surface as a raw selector ("Unable to decode signature 0x1d8af046") and the user is
+ * told to go look it up on a fourbyte directory. Concatenating the two costs nothing at runtime and
+ * turns every one of them into a readable error.
+ */
+const SUBMIT_ABI = [...ReputationRegistryAbi, ...AttestationVerifierAbi] as const;
+
+/** How long to wait for a lagging RPC replica to catch up before giving up on a submission. */
+const NONCE_SYNC_TIMEOUT_MS = 30_000;
+const NONCE_POLL_INTERVAL_MS = 1_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Block until the verifier reports `expected` as the attestor's next nonce.
+ *
+ * Returns rather than throwing on timeout: the nonce read is an optimisation, and a node that
+ * cannot answer it in time should not be the reason a valid signature never gets submitted. The
+ * submission is attempted anyway and the contract remains the authority on whether it is valid.
+ *
+ * A nonce *above* `expected` also ends the wait — that means this signature has already been
+ * consumed, and no amount of further polling will bring it back. The submission then fails with
+ * the contract's own error, which is the accurate thing to show.
+ */
+async function waitForNonce(
+  client: PublicClient,
+  verifier: `0x${string}`,
+  attestor: `0x${string}`,
+  expected: bigint,
+): Promise<void> {
+  const deadline = Date.now() + NONCE_SYNC_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const onChain = (await client.readContract({
+        address: verifier,
+        abi: AttestationVerifierAbi,
+        functionName: "nonces",
+        args: [attestor],
+      })) as bigint;
+      if (onChain >= expected) return;
+    } catch {
+      // A failed read is itself a symptom of the rate limiting this loop exists to ride out.
+      // Keep polling until the deadline rather than failing the submission on one bad response.
+    }
+    await sleep(NONCE_POLL_INTERVAL_MS);
+  }
+}
 
 type SignedAttestation = {
   schema: string;
@@ -109,10 +170,21 @@ export function useEthosAttestation() {
       };
 
       try {
+        // Make sure the node about to simulate this call has observed the previous submission.
+        // Skipped for the first attestation, which depends on nothing before it.
+        if (i > 0) {
+          await waitForNonce(
+            publicClient as PublicClient,
+            deployment.attestationVerifier,
+            struct.attestor,
+            struct.nonce,
+          );
+        }
+
         const {request} = await (publicClient as PublicClient).simulateContract({
           account: walletClient.account,
           address: deployment.reputationRegistry,
-          abi: ReputationRegistryAbi,
+          abi: SUBMIT_ABI,
           functionName: "submitAttestation",
           args: [struct.subject, struct.schemaId, struct.value, [struct], [signature]],
         });

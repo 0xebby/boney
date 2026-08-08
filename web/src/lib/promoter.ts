@@ -2,13 +2,18 @@ import {keccak256, encodeAbiParameters} from "viem";
 import type {CampaignStatus} from "./types";
 
 /**
- * KOL-side domain logic — join eligibility, promoter identity, settlement eligibility, and the
- * tracking link a promoter shares.
+ * Promoter-side domain logic — join eligibility, promoter identity, and the tracking link a
+ * promoter shares.
  *
  * Pure and React-free (F6). As with `lifecycle.ts`, every rule here mirrors a guard in
  * `Campaign.sol` and names it, because a mirror that drifts either offers a button that reverts
  * or hides one the contract would have allowed. The contract is the security boundary; this
  * decides what to render and why.
+ *
+ * There is no settlement eligibility here, and that is deliberate. `Campaign.reportUserAction`
+ * calls `_settle` inline, which releases escrow straight to the promoter's wallet — so there is no
+ * state in which a promoter has earned a tier and still needs to ask for it. Mirroring
+ * `Campaign.settle` would only describe a claim step the protocol does not have.
  */
 
 // ── promoter identity ────────────────────────────────────────────
@@ -17,7 +22,7 @@ import type {CampaignStatus} from "./types";
  * The promoter id `join()` will assign — derivable *before* joining.
  *
  * Mirrors `Campaign.join`: `keccak256(abi.encode(address(this), msg.sender))`. Computing it
- * client-side lets the UI show a KOL their tracking link the moment they connect, and lets a
+ * client-side lets the UI show a promoter their tracking link the moment they connect, and lets a
  * live test assert the frontend and the chain agree rather than trusting one of them.
  *
  * `abi.encode` of two static types is a plain 64-byte concatenation of left-padded words, which
@@ -78,8 +83,8 @@ export type Eligibility = {
  * `join()` — Solidity: `WrongStatus` unless Active **or Pending**, `AlreadyJoined`, and
  * `InsufficientReputation` when `minReputation != 0 && score < minReputation`.
  *
- * Pending is deliberately joinable: KOLs can prepare tracking links before a campaign launches.
- * A UI that only offered Join on Active campaigns would hide a legitimate action.
+ * Pending is deliberately joinable: promoters can prepare tracking links before a campaign
+ * launches. A UI that only offered Join on Active campaigns would hide a legitimate action.
  */
 export function canJoin(ctx: JoinContext): Eligibility {
   if (!ctx.connected) return no("Connect a wallet to join this campaign.");
@@ -105,76 +110,13 @@ export function canJoin(ctx: JoinContext): Eligibility {
   return {ok: true};
 }
 
-// ── settle ───────────────────────────────────────────────────────
-
-export type SettleContext = {
-  status: CampaignStatus;
-  joined: boolean;
-  /** When `end()` ran; 0 while open. */
-  endedAtSeconds: number;
-  claimGraceSeconds: number;
-  nowSeconds: number;
-  /** What `settle` would actually pay right now, already capped by the pool. */
-  payout: bigint;
-};
-
-/**
- * `settle(promoter, kpiIndex)` — Solidity: `NotJoined`, then `WrongStatus` unless Active, or
- * Ended *within* the claim grace.
- *
- * Note the window is the mirror image of `reclaimUnspent`'s: promoters may settle while
- * `block.timestamp <= endedAt + CLAIM_GRACE`, and the project may reclaim only after. The two
- * cannot both be open, which is the point of the grace period.
- *
- * `settle` is not restricted to the promoter — anyone may call it on a promoter's behalf, since
- * it can only move funds to the promoter. The UI still only offers it to the promoter.
- */
-export function canSettle(ctx: SettleContext): Eligibility {
-  if (!ctx.joined) return no("Join this campaign before claiming rewards.");
-
-  if (ctx.status === "Ended") {
-    if (ctx.nowSeconds > ctx.endedAtSeconds + ctx.claimGraceSeconds) {
-      return no("The claim window has closed; unspent escrow has returned to the project.");
-    }
-  } else if (ctx.status !== "Active") {
-    return no(`Rewards can only be claimed while a campaign is active (currently ${ctx.status.toLowerCase()}).`);
-  }
-
-  if (ctx.payout === BigInt(0)) {
-    // Deliberately not "cross a reward tier first". `Campaign.reportUserAction` calls `_settle`
-    // inline, so crossing a tier *is* what pays a promoter — by the time progress is on chain the
-    // ladder has already been walked and `_settledTiers` advanced. Telling a KOL to cross a tier
-    // to unlock a claim describes a protocol this is not, and sends them looking for a button that
-    // will never light up. Manual `settle` is a permissionless safety valve, not the payment path.
-    return no("Rewards are paid automatically when you cross a tier — nothing is waiting to be claimed.");
-  }
-  return {ok: true};
-}
-
-/**
- * Seconds left to settle before the claim window shuts, or null when it is not running.
- *
- * Returns null (rather than 0) while a campaign is still Active, because there is no deadline
- * yet — conflating "no deadline" with "deadline passed" would show a KOL a false countdown.
- */
-export function claimWindowRemaining(
-  status: CampaignStatus,
-  endedAtSeconds: number,
-  claimGraceSeconds: number,
-  nowSeconds: number,
-): number | null {
-  if (status !== "Ended" || endedAtSeconds <= 0) return null;
-  const closesAt = endedAtSeconds + claimGraceSeconds;
-  return nowSeconds > closesAt ? 0 : closesAt - nowSeconds;
-}
-
 // ── tracking link ────────────────────────────────────────────────
 
 /**
  * The link a promoter shares.
  *
  * Carries the two fields a `Touch` is built from — `campaign` and `promoterId` — because the
- * attribution registry accepts a user-signed touch only when its `promoterId` is registered to
+ * attribution registry accepts a referral-signed touch only when its `promoterId` is registered to
  * that campaign. `expiresAt` is deliberately *not* in the link: it is set when the touch is
  * signed, from the campaign's own `attributionWindow`, so baking a timestamp into a shared URL
  * would only create a link that silently stops working.

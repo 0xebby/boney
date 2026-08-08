@@ -12,12 +12,7 @@ import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {KpiPanel} from "@/components/KpiPanel";
 import {ProjectActions} from "@/components/ProjectActions";
 import {PromoterPanel} from "@/components/PromoterPanel";
-import {
-  utilization,
-  isReclaimable,
-  reclaimAvailableIn,
-  unsettledRewards,
-} from "@/lib/campaign";
+import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
 import {
   formatTokenAmount,
   formatPercent,
@@ -41,9 +36,9 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
   /**
    * Refetch after any write.
    *
-   * Both halves are needed: joining and claiming change per-promoter state, which lives in a
-   * separate query from the campaign record. Refreshing only the campaign would leave a KOL
-   * looking at a stale "not joined" panel right after they joined.
+   * Both halves are needed: joining changes per-promoter state, which lives in a separate query
+   * from the campaign record. Refreshing only the campaign would leave a promoter looking at a
+   * stale "not joined" panel right after they joined.
    */
   const refetchAll = useCallback(() => {
     refetch();
@@ -55,21 +50,6 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
     if (promoter?.joined) for (const s of promoter.perKpi) map.set(s.kpiIndex, s);
     return map;
   }, [promoter]);
-
-  // What `settle` would pay across every KPI right now. The pool cap is applied to the total
-  // rather than per KPI because the contract draws every ladder from the same escrow balance.
-  const owed = useMemo(() => {
-    if (!detail || !promoter?.joined) return null;
-
-    let earned = BigInt(0);
-    for (const kpi of detail.kpis) {
-      const state = promoterByKpi.get(kpi.index);
-      if (state) earned += unsettledRewards(state.progress, kpi.tiers, state.settledTiers);
-    }
-
-    const payout = earned > detail.remainingPool ? detail.remainingPool : earned;
-    return {earned, payout, shortfall: earned - payout};
-  }, [detail, promoter, promoterByKpi]);
 
   if (campaignId === undefined) {
     return (
@@ -234,12 +214,12 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         </Card>
 
         <Card>
-          <CardHeader title="Escrow return" subtitle="Unspent funds after the claim window" />
+          <CardHeader title="Escrow return" subtitle="Unspent funds after the settlement window" />
           {detail.status === "Ended" || detail.status === "Cancelled" ? (
             <div className="space-y-2 text-xs">
               {reclaimOpen ? (
                 <p className="text-good">
-                  The claim window has closed. The project can reclaim{" "}
+                  The settlement window has closed. The project can reclaim{" "}
                   {formatTokenAmount(detail.remainingPool, token.decimals, {compact: true})}{" "}
                   {token.symbol}.
                 </p>
@@ -263,7 +243,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
                 </p>
               )}
               <p className="text-ink-muted">
-                Grace period: {formatDuration(Number(detail.claimGrace))} from when the campaign
+                Settlement grace: {formatDuration(Number(detail.claimGrace))} from when the campaign
                 was ended.
               </p>
             </div>
@@ -285,7 +265,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         nowSeconds={now}
       />
 
-      {/* 7.1 / 7.2 — join, tracking link, progress, claim */}
+      {/* 7.1 / 7.2 — join, tracking link, progress */}
       <PromoterPanel
         detail={detail}
         promoter={promoter}
@@ -311,29 +291,6 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
             <p className="text-xs text-ink-muted">Showing combined progress across promoters</p>
           )}
         </div>
-
-        {owed && owed.earned > BigInt(0) ? (
-          <Card>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs text-ink-muted">Your unsettled rewards</p>
-                <p className="text-xl font-semibold text-ink">
-                  {formatTokenAmount(owed.payout, token.decimals)}{" "}
-                  <span className="text-sm font-normal text-ink-muted">{token.symbol}</span>
-                </p>
-              </div>
-              {owed.shortfall > BigInt(0) ? (
-                <p className="max-w-sm text-xs text-warning">
-                  You have earned{" "}
-                  {formatTokenAmount(owed.earned, token.decimals, {compact: true})}{" "}
-                  {token.symbol}, but the pool only holds{" "}
-                  {formatTokenAmount(detail.remainingPool, token.decimals, {compact: true})}.
-                  Settlement pays what escrow can cover.
-                </p>
-              ) : null}
-            </div>
-          </Card>
-        ) : null}
 
         {detail.kpis.length === 0 ? (
           <Card>

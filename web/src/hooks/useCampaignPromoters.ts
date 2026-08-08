@@ -33,7 +33,7 @@ export type PromoterDirectory = {
 };
 
 /**
- * Every promoter who has joined any of `campaigns`, for the public KOL directory.
+ * Every promoter who has joined any of `campaigns`, for the public promoter directory.
  *
  * This reads logs rather than contract state because there is nothing else to read. A `Campaign`
  * records membership as `_promoterIdOf[wallet]` and exposes only point lookups — `promoterIdOf`,

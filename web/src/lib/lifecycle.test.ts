@@ -112,7 +112,7 @@ describe("end", () => {
 
   it("is the one action a non-project caller can take — once the window closes", () => {
     // Campaign.end() is deliberately not onlyProject: anyone may end it past endTime so a
-    // project cannot stall the claim grace window by leaving a finished campaign in limbo.
+    // project cannot stall the settlement grace window by leaving a finished campaign in limbo.
     const closed = ctx({status: "Active", isProject: false, endTime: NOW - 1});
     expect(availableActions(closed)).toContain("end");
   });
@@ -160,7 +160,7 @@ describe("reclaimUnspent", () => {
       remainingPool: BigInt(500),
     });
     expect(availableActions(justEnded)).not.toContain("reclaimUnspent");
-    expect(reasonFor(justEnded, "reclaimUnspent")).toMatch(/claim window/i);
+    expect(reasonFor(justEnded, "reclaimUnspent")).toMatch(/settlement window/i);
   });
 
   it("opens strictly after endedAt + grace, not on the boundary second", () => {
@@ -254,7 +254,7 @@ describe("availability shape", () => {
   });
 
   it("offers a non-project viewer nothing but end-after-window", () => {
-    // The read-only case: a KOL browsing someone else's campaign gets no project actions at all,
+    // The read-only case: a promoter browsing someone else's campaign gets no project actions at all,
     // so the Project Dashboard panel hides itself rather than rendering six disabled buttons.
     const viewer = ctx({status: "Active", isProject: false, endTime: NOW + 3600});
     expect(availableActions(viewer)).toEqual([]);

@@ -124,6 +124,18 @@ contract CampaignTest is Test {
         tiers[0][2] = Types.RewardTier({threshold: 100, reward: 5_000 ether});
     }
 
+    /// @dev Registers the two scoring schemas with real weights and ceilings, so `maxScore` is
+    ///      answerable. Mirrors SeedLocal: 7*2800 + 3*2800 = 28,000.
+    function _boundReputationSchemas() internal returns (uint256 cap) {
+        vm.startPrank(admin);
+        reputation.registerSchema("ETHOS_SCORE", 7);
+        reputation.registerSchema("X_REACH", 3);
+        reputation.setSchemaMaxValue(reputation.schemaId("ETHOS_SCORE"), 2_800);
+        reputation.setSchemaMaxValue(reputation.schemaId("X_REACH"), 2_800);
+        vm.stopPrank();
+        return reputation.maxScore();
+    }
+
     function _createCampaign(uint256 minReputation) internal returns (Campaign) {
         vm.prank(project);
         (, address addr) =
@@ -379,6 +391,15 @@ contract CampaignTest is Test {
     // ── reputation gate ──────────────────────────────────────────
 
     function test_Join_revertsBelowMinReputation() public {
+        // The gate has to be *reachable* for this test to be about the wallet rather than the
+        // config: `Campaign`'s constructor rejects a `minReputation` above `maxScore`, and a
+        // registry with no weighted schema has a maximum score of 0. Registering a bounded schema
+        // puts 5,000 within reach; `kol` simply has nothing attested against it.
+        vm.startPrank(admin);
+        reputation.registerSchema("X_FOLLOWERS", 1);
+        reputation.setSchemaMaxValue(reputation.schemaId("X_FOLLOWERS"), 10_000);
+        vm.stopPrank();
+
         Campaign gated = _createCampaign(5_000);
         _activate(gated);
 
@@ -399,6 +420,57 @@ contract CampaignTest is Test {
         vm.prank(kol);
         gated.join();
         assertTrue(gated.promoterIdOf(kol) != bytes32(0));
+    }
+
+    // ── unreachable eligibility gate ─────────────────────────────
+
+    /// @dev A gate above the maximum attainable score produces a campaign that deploys, escrows,
+    ///      reports Active and admits nobody — permanently, since config is immutable. Rejected at
+    ///      construction because that is the last moment it can be fixed.
+    function test_Create_revertsUnreachableMinReputation() public {
+        uint256 cap = _boundReputationSchemas();
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(Campaign.UnreachableReputation.selector, cap + 1, cap));
+        registry.createCampaign(_defaultConfig(cap + 1), _defaultKpis(), _defaultTiers());
+    }
+
+    function test_Create_acceptsMinReputationExactlyAtCap() public {
+        uint256 cap = _boundReputationSchemas();
+
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(_defaultConfig(cap), _defaultKpis(), _defaultTiers());
+        assertEq(Campaign(addr).minReputation(), cap, "the ceiling itself is a legal gate");
+    }
+
+    /// @dev An unbounded registry cannot say what is unreachable, so it must not block creation.
+    function test_Create_allowsAnyGateWhenRegistryIsUnbounded() public {
+        // A *weighted* schema with no ceiling is what makes the maximum unknowable. Note this is a
+        // different state from the empty registry `setUp` leaves behind, which reports 0 because
+        // nothing is attainable at all.
+        vm.prank(admin);
+        reputation.registerSchema("ETHOS_SCORE", 7);
+
+        assertEq(reputation.maxScore(), type(uint256).max, "weighted and unbounded");
+
+        vm.prank(project);
+        (, address addr) =
+            registry.createCampaign(_defaultConfig(type(uint256).max), _defaultKpis(), _defaultTiers());
+        assertEq(Campaign(addr).minReputation(), type(uint256).max);
+    }
+
+    function test_Create_allowsOpenCampaignRegardlessOfCap() public {
+        _boundReputationSchemas();
+        vm.startPrank(admin);
+        reputation.setSchemaWeight(reputation.schemaId("ETHOS_SCORE"), 0);
+        reputation.setSchemaWeight(reputation.schemaId("X_REACH"), 0);
+        vm.stopPrank();
+
+        assertEq(reputation.maxScore(), 0, "nothing is weighted, so nothing is attainable");
+
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(_defaultConfig(0), _defaultKpis(), _defaultTiers());
+        assertEq(Campaign(addr).minReputation(), 0, "an ungated campaign is always creatable");
     }
 
     // ── reporting & attribution ──────────────────────────────────

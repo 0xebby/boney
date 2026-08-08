@@ -45,7 +45,7 @@ export const MAX_BONEY_SCORE = ETHOS_WEIGHT * MAX_ETHOS + REACH_WEIGHT * MAX_ETH
  * Normalise a follower count onto the 0–2800 reach scale.
  *
  * Log rather than linear because follower counts are power-law distributed: linearly, a single
- * account with 10M followers outweighs a thousand genuine mid-tier KOLs combined, which makes the
+ * account with 10M followers outweighs a thousand genuine mid-tier promoters combined, which makes the
  * reach term a whale detector instead of an audience signal. On a log curve the gap between 1k and
  * 10k followers is the same as between 100k and 1M — which is how reach actually behaves.
  *
@@ -54,6 +54,90 @@ export const MAX_BONEY_SCORE = ETHOS_WEIGHT * MAX_ETHOS + REACH_WEIGHT * MAX_ETH
 export function reachFromFollowers(followers: number): number {
   if (!Number.isFinite(followers) || followers <= 0) return 0;
   return Math.min(MAX_ETHOS, Math.floor(REACH_SLOPE * Math.log10(1 + followers)));
+}
+
+/**
+ * Smallest follower count whose reach is at least `reach`.
+ *
+ * Used to answer "what audience would that take?" when explaining a score threshold. The guarantee
+ * is `reachFromFollowers(followersForReach(r)) >= r`, and no smaller count satisfies it — not exact
+ * equality, because follower counts are integers and the curve is steep near zero: 0 followers give
+ * a reach of 0 and 1 follower gives 120, so no audience has a reach of 100 at all. Asking for one
+ * returns the 1 follower that clears it.
+ *
+ * Returns `Infinity` above the ceiling — no audience reaches a reach of 2801, and callers should
+ * render that as unattainable rather than as a very large number.
+ */
+export function followersForReach(reach: number): number {
+  if (!Number.isFinite(reach) || reach <= 0) return 0;
+  if (reach > MAX_ETHOS) return Infinity;
+  return Math.ceil(Math.pow(10, reach / REACH_SLOPE) - 1);
+}
+
+/**
+ * Days until an attestation expires, or undefined when there is nothing worth saying.
+ *
+ * Returns undefined outside the notice window so the panel stays quiet until the warning is
+ * actionable — a score that expires in four months is not news, and a permanent banner trains
+ * people to ignore it. Already-expired reads as undefined too: that is a different message, and
+ * the caller has `hasExpired` for it.
+ */
+export const EXPIRY_NOTICE_DAYS = 14;
+
+export function daysUntilExpiry(
+  expiresAt: number | undefined,
+  nowSeconds: number,
+): number | undefined {
+  if (expiresAt === undefined || expiresAt <= 0) return undefined;
+  const remaining = expiresAt - nowSeconds;
+  if (remaining <= 0) return undefined;
+  const days = Math.floor(remaining / 86_400);
+  return days <= EXPIRY_NOTICE_DAYS ? days : undefined;
+}
+
+/**
+ * One schema's freshness as the registry reports it, or null when it cannot answer.
+ *
+ * Null is not "fresh" and not "expired" — it means the question is unanswerable, which is why it
+ * is a distinct state rather than a boolean with a default.
+ */
+export type SchemaFreshness = {fresh: boolean; expiresAt: number; updatedAt: number} | null;
+
+/** What the panel needs in order to decide between silence, a countdown, and a re-verify prompt. */
+export type CombinedFreshness = {
+  hasExpired: boolean;
+  expiresAt?: number;
+  freshnessSupported: boolean;
+};
+
+/**
+ * Fold per-schema freshness into one verdict.
+ *
+ * Split out of `usePromoterReputation` so the interesting cases are testable without a chain or a
+ * React renderer, per the convention that logic lives in `lib/` and hooks stay thin.
+ *
+ * The case that matters is every part being null: `isValueFresh` and `expiresAtOf` were added to
+ * `ReputationRegistry` after the first deployments, so an older registry reverts them. That must
+ * report `freshnessSupported: false` and *not* `hasExpired: true` — a registry with no opinion on
+ * staleness is not evidence of staleness, and telling someone to re-verify against a registry that
+ * cannot expire anything would send them in a loop.
+ */
+export function combineFreshness(parts: readonly SchemaFreshness[]): CombinedFreshness {
+  const known = parts.filter((p): p is NonNullable<SchemaFreshness> => p !== null);
+  if (known.length === 0) return {hasExpired: false, freshnessSupported: false};
+
+  // A never-attested record also reads stale, so `updatedAt` separates "gone stale" from "never
+  // there". Only the former is worth a re-verify prompt.
+  const hasExpired = known.some((p) => p.updatedAt > 0 && !p.fresh);
+
+  // Soonest expiry is the one worth warning about; zero means that schema never expires.
+  const expiries = known.map((p) => p.expiresAt).filter((e) => e > 0);
+
+  return {
+    hasExpired,
+    expiresAt: expiries.length > 0 ? Math.min(...expiries) : undefined,
+    freshnessSupported: true,
+  };
 }
 
 /** The two attested components of a BoneyScore. */
@@ -102,7 +186,7 @@ export function ethosLevel(ethos: number): string {
 /**
  * Human-readable breakdown of how a BoneyScore was reached, for the join panel.
  *
- * Showing the split matters because a KOL rejected by a gate needs to know *which* half is short —
+ * Showing the split matters because a promoter rejected by a gate needs to know *which* half is short —
  * "get vouched on Ethos" and "grow your audience" are very different instructions.
  */
 export function explainScore(parts: ScoreParts): {

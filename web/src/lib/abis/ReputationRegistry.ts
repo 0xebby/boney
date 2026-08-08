@@ -33,6 +33,30 @@ export const ReputationRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "expiresAtOf",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "id",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "isSchemaEnabled",
     "inputs": [
       {
@@ -46,6 +70,43 @@ export const ReputationRegistryAbi = [
         "name": "",
         "type": "bool",
         "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isValueFresh",
+    "inputs": [
+      {
+        "name": "wallet",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "id",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maxScore",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -194,6 +255,44 @@ export const ReputationRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "schemaMaxAge",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "schemaMaxValue",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "schemaRegistrar",
     "inputs": [],
     "outputs": [
@@ -223,6 +322,42 @@ export const ReputationRegistryAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setSchemaMaxAge",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "maxAge",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setSchemaMaxValue",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "maxValue",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -491,6 +626,44 @@ export const ReputationRegistryAbi = [
   },
   {
     "type": "event",
+    "name": "SchemaMaxAgeSet",
+    "inputs": [
+      {
+        "name": "schemaId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "maxAge",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SchemaMaxValueSet",
+    "inputs": [
+      {
+        "name": "schemaId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "maxValue",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "SchemaRegistered",
     "inputs": [
       {
@@ -628,6 +801,27 @@ export const ReputationRegistryAbi = [
         "name": "schemaId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ValueExceedsMax",
+    "inputs": [
+      {
+        "name": "schemaId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "maxValue",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },

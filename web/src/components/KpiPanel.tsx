@@ -189,8 +189,13 @@ function EventSourceLine({
 }
 
 /**
- * Ladder row state. "Crossed" and "settled" are different facts: a promoter can cross a
- * threshold and still be owed the payout until someone calls `settle`.
+ * Ladder row state.
+ *
+ * "Crossed" and "settled" remain distinct facts on chain, but they are written in the same
+ * transaction: `Campaign.reportUserAction` credits progress and then calls `_settle`, which pays
+ * and advances `_settledTiers`. So a crossed-but-unsettled row is not a reward waiting to be
+ * claimed — it means settlement did not complete, which is worth showing rather than smoothing
+ * over. The permissionless `Campaign.settle` is the recovery path.
  */
 function LadderState({row, hasPromoter}: {row: LadderRow; hasPromoter: boolean}) {
   if (!row.crossed) {
@@ -202,5 +207,5 @@ function LadderState({row, hasPromoter}: {row: LadderRow; hasPromoter: boolean})
   if (row.settled) {
     return <span className="text-xs text-ink-secondary">Paid</span>;
   }
-  return <span className="text-xs font-medium text-good">Claimable</span>;
+  return <span className="text-xs font-medium text-warning">Unsettled</span>;
 }

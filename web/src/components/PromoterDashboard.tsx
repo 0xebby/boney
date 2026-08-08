@@ -11,8 +11,8 @@ import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
-import {KolDirectory} from "@/components/KolDirectory";
-import {trackingLink} from "@/lib/kol";
+import {PromoterDirectory} from "@/components/PromoterDirectory";
+import {trackingLink} from "@/lib/promoter";
 import {formatTokenAmount, formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
@@ -23,18 +23,18 @@ type JoinedRow = {
 };
 
 /**
- * `/kol` — promoter dashboard.
+ * `/promoters` — promoter dashboard.
  *
- * Shows campaigns the connected wallet has joined, plus their tracking links. This is the KOL's
- * landing page: earned rewards, active campaigns, and links to share. A "Join more" button routes
- * to the marketplace with the "Joinable by me" filter already set.
+ * Shows campaigns the connected wallet has joined, plus their tracking links. This is the
+ * promoter's landing page: active campaigns and links to share. A "Join more" button routes to the
+ * marketplace with the "Joinable by me" filter already set.
  *
- * The dashboard does not compute `earned` or `claimable` — that requires one campaign-detail read
- * per membership to retrieve tier ladders and progress, which is better done on the detail page
- * where the full breakdown is useful. The summary here shows pool, status, and time remaining,
+ * The dashboard does not total what each membership has paid — that requires one campaign-detail
+ * read per membership to retrieve tier ladders and progress, which is better done on the detail
+ * page where the full breakdown is useful. The summary here shows pool, status, and time remaining,
  * which are already present in the `CampaignView` the marketplace fetched.
  */
-export function KolPage() {
+export function PromoterDashboard() {
   const {isConnected} = useAccount();
   const {campaigns, tokens, isLoading, error, refetch, deployed} = useCampaigns();
   const joinedQuery = useJoinedCampaigns(campaigns);
@@ -72,7 +72,7 @@ export function KolPage() {
     return (
       <div className="space-y-5">
         <Header connected={false} />
-        <KolDirectory
+        <PromoterDirectory
           campaigns={campaigns}
           tokens={tokens}
           isLoading={isLoading}
@@ -143,11 +143,11 @@ function Header({connected = true}: {connected?: boolean}) {
   return (
     <header>
       <h1 className="font-display text-2xl text-ink">
-        {connected ? "KOL dashboard" : "KOLs"}
+        {connected ? "Promoter dashboard" : "Promoters"}
       </h1>
       <p className="mt-0.5 text-xs text-ink-muted">
         {connected
-          ? "Campaigns you joined. Open one to see progress, claim rewards, and copy your tracking link."
+          ? "Campaigns you joined. Open one to see progress, what it has paid you, and your tracking link."
           : "Promoters active on each campaign, and the links they share. Connect a wallet to join and get your own."}
       </p>
     </header>

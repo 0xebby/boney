@@ -319,13 +319,13 @@ export function useCampaignLifecycle() {
   };
 }
 
-// ── promoter (KOL) ───────────────────────────────────────────────
+// ── promoter ─────────────────────────────────────────────────────
 
 /**
  * `Campaign.join()` — called on the campaign directly, never through the facade.
  *
  * The campaign records `msg.sender` as the promoter, so a facade-relayed join would register the
- * facade instead of the KOL. `Boney` documents this and deliberately exposes only
+ * facade instead of the promoter. `Boney` documents this and deliberately exposes only
  * `campaignJoinTarget` to resolve the address.
  *
  * The new promoter id is decoded from the receipt rather than recomputed, so what the UI shows
@@ -374,61 +374,24 @@ export function useJoinCampaign() {
   return {state, join, reset, promoterId};
 }
 
-/**
- * `Campaign.settle(promoter, kpiIndex)` — pays out crossed-but-unsettled tiers for one KPI.
+/*
+ * There is deliberately no `useSettleRewards`.
  *
- * Settlement is per KPI, not per campaign: the contract has no "settle everything" entry point,
- * so claiming across several KPIs means several transactions. They are issued in sequence rather
- * than in parallel — each one moves the same escrow balance, so a later call's simulation must
- * see the earlier one's effect or it can be built against a pool that is already spent.
+ * `Campaign.settle` exists and is permissionless, but it is not a payment path: `_settle` runs
+ * inline at the end of `reportUserAction`, releasing escrow to the promoter's wallet in the same
+ * transaction that credits progress. A settle hook would only ever back a button that pays zero.
+ * Recovering a genuinely unsettled tier is an operator action, not a promoter-facing one.
  */
-export function useSettleRewards() {
-  const {publicClient, walletClient} = useWriteContext();
-  const {state, setState, reset, run} = useTx();
-  const [settling, setSettling] = useState<number | null>(null);
-
-  const settle = useCallback(
-    async (campaign: `0x${string}`, promoter: `0x${string}`, kpiIndex: number) => {
-      if (!publicClient || !walletClient) {
-        setState({status: "error", message: "Connect a wallet to claim rewards."});
-        return;
-      }
-
-      const account = walletClient.account;
-      setSettling(kpiIndex);
-
-      await run(
-        async () => {
-          const {request} = await publicClient.simulateContract({
-            account,
-            address: campaign,
-            abi: CampaignAbi,
-            functionName: "settle",
-            args: [promoter, BigInt(kpiIndex)],
-          });
-          return walletClient.writeContract(request);
-        },
-        undefined,
-        publicClient,
-      );
-
-      setSettling(null);
-    },
-    [publicClient, walletClient, run, setState],
-  );
-
-  return {state, settle, reset, settling};
-}
 
 // ── attribution ──────────────────────────────────────────────────
 
 /**
- * `AttributionRegistry.storeTouch` — the user signs a Touch, anyone relays it.
+ * `AttributionRegistry.storeTouch` — the referral signs a Touch, anyone relays it.
  *
- * Two transactions' worth of work in one call, but only one of them costs gas: the *user* signs
+ * Two transactions' worth of work in one call, but only one of them costs gas: the *referral* signs
  * an EIP-712 Touch off-chain, and whoever is connected relays it. That split is the whole point
- * of the design — a KOL can pay the gas to attribute a user who never transacts, and a promoter
- * cannot attribute a wallet it has no signature from.
+ * of the design — a promoter can pay the gas to attribute a referral who never transacts, and a
+ * promoter cannot attribute a wallet it has no signature from.
  *
  * `signedAt` comes from the connected chain's latest block, not `Date.now()`. A browser clock
  * running fast produces a touch the contract rejects outright (`TouchNotYetValid`), and one
@@ -475,7 +438,7 @@ export function useStoreTouch() {
             Number(block.timestamp),
           );
 
-          // The user signs; the connected wallet relays. They are usually the same account here,
+          // The referral signs; the connected wallet relays. They are usually the same account here,
           // but the contract does not require it and neither does this.
           const signature = await walletClient.signTypedData({
             account,

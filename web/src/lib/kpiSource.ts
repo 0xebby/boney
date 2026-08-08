@@ -18,7 +18,7 @@ import {isAddress as isViemAddress} from "viem/utils";
  * campaign declare *which contract and which event* it measures, rather than leaving the answer in
  * an off-chain config file that nothing on chain can be checked against.
  *
- * Pure and React-free (decision F6), like `kol.ts` and `filters.ts`, so the encoding is unit-tested
+ * Pure and React-free (decision F6), like `promoter.ts` and `filters.ts`, so the encoding is unit-tested
  * without a chain or a wallet. Getting this wrong is a silent-corruption risk in the same class as
  * `campaignArgs.ts`: a campaign encodes successfully, deploys, and then credits progress from the
  * wrong contract's events.
@@ -44,7 +44,7 @@ export type EventSource = {
   /** `keccak256` of the event signature — `log.topics[0]`. */
   topic0: `0x${string}`;
   /**
-   * Which indexed topic carries the end user's address.
+   * Which indexed topic carries the referral's address.
    *
    * 1-based over `topics`, because `topics[0]` is always the signature: an actor at `topics[0]`
    * is not a thing that can exist. An event whose actor is not indexed cannot be sourced this
@@ -385,7 +385,7 @@ export async function probeEventSource(
       {severity: "ok", message: `Contract found and emitting ${signature}.`},
     ];
 
-    // An actor topic the event does not carry can never resolve to a user, so the indexer would
+    // An actor topic the event does not carry can never resolve to a referral, so the indexer would
     // skip every log (`indexerCore.ts:actorFromTopic` returns null). Worth naming here because the
     // sample log is the only place the real topic count is visible before launch.
     findings.push(...actorTopicFindings(sample.topics.length));
@@ -416,7 +416,7 @@ export function actorTopicFindings(topicCount: number, actorTopic?: number): Pro
       {
         severity: "error",
         message:
-          "This event indexes no arguments, so no topic carries the user address. It cannot be event-sourced.",
+          "This event indexes no arguments, so no topic carries the referral's address. It cannot be event-sourced.",
       },
     ];
   }
