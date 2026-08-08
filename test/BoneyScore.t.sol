@@ -2,9 +2,23 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
+import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
 import {Campaign} from "../src/campaign/Campaign.sol";
+import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
+import {EscrowVault} from "../src/escrow/EscrowVault.sol";
+import {Types} from "../src/libraries/Types.sol";
+
+/// @dev The gate tests never move this token; a campaign simply cannot be built without one.
+contract GateMockToken is ERC20 {
+    constructor() ERC20("Mock", "MOCK") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
 
 /**
  * BoneyScore — the composite the campaign join gate reads.
@@ -21,6 +35,10 @@ import {Campaign} from "../src/campaign/Campaign.sol";
  * These tests pin the arithmetic the off-chain module (`web/src/lib/boneyscore.ts`) assumes, and
  * the weight-0 behaviour the whole scheme rests on. They are the on-chain half of the same
  * contract the Vitest suite checks from the other side.
+ *
+ * The final section then drives `Campaign.join()` itself, because the arithmetic being right is a
+ * weaker claim than the gate enforcing it: `qualifies()` is a view nothing is obliged to consult,
+ * while `join()` is what decides whether a promoter exists at all.
  */
 contract BoneyScoreTest is Test {
     AttestationVerifier internal verifier;
@@ -53,6 +71,20 @@ contract BoneyScoreTest is Test {
     bytes32 internal reachId;
     bytes32 internal followersId;
 
+    /// Campaign stack, built only so the join gate can be exercised against a real `Campaign`.
+    GateMockToken internal token;
+    EscrowVault internal vault;
+    CampaignRegistry internal campaignRegistry;
+    AttributionRegistry internal attribution;
+
+    address internal project = address(0xC0DE);
+    address internal oracle = address(0x0BAC);
+    uint256 internal constant POOL = 10_000 ether;
+
+    /// Mirrors `SeedLocal.s.sol`: both scoring inputs live on Ethos's 0–2800 scale.
+    uint256 internal constant SCHEMA_MAX_VALUE = 2_800;
+    uint256 internal constant MAX_BONEY_SCORE = 28_000;
+
     function setUp() public {
         verifier = new AttestationVerifier(admin, attestor);
         registry = new ReputationRegistry(admin, address(verifier));
@@ -68,6 +100,13 @@ contract BoneyScoreTest is Test {
         ethosId = registry.schemaId("ETHOS_SCORE");
         reachId = registry.schemaId("REACH");
         followersId = registry.schemaId("FOLLOWERS");
+
+        token = new GateMockToken();
+        vault = new EscrowVault(address(this));
+        attribution = new AttributionRegistry(30 days);
+        campaignRegistry =
+            new CampaignRegistry(address(vault), address(registry), address(attribution), oracle);
+        vault.setRegistrar(address(campaignRegistry));
     }
 
     // ── helpers ──────────────────────────────────────────────────
@@ -86,6 +125,67 @@ contract BoneyScoreTest is Test {
 
     function _expected(uint256 ethos, uint256 reach) internal pure returns (uint256) {
         return ETHOS_WEIGHT * ethos + REACH_WEIGHT * reach;
+    }
+
+    // ── campaign fixtures ────────────────────────────────────────
+
+    /// Applies SeedLocal's value ceilings, which is what makes `maxScore()` answerable at 28,000.
+    /// Idempotent, so helpers may call it without coordinating.
+    function _capSchemasLikeSeed() internal {
+        vm.startPrank(admin);
+        registry.setSchemaMaxValue(ethosId, SCHEMA_MAX_VALUE);
+        registry.setSchemaMaxValue(reachId, SCHEMA_MAX_VALUE);
+        vm.stopPrank();
+    }
+
+    /// Times are read from the clock at call time, so a campaign created after a `skip()` still
+    /// opens a live window.
+    function _gateConfig(uint256 minReputation) internal view returns (Types.CampaignConfig memory) {
+        return Types.CampaignConfig({
+            project: project,
+            token: address(token),
+            rewardPool: POOL,
+            startTime: uint64(block.timestamp),
+            endTime: uint64(block.timestamp + 30 days),
+            attributionWindow: 7 days,
+            minReputation: minReputation
+        });
+    }
+
+    function _kpis() internal pure returns (Types.KpiSpec[] memory k) {
+        k = new Types.KpiSpec[](1);
+        k[0] = Types.KpiSpec({
+            kind: Types.KpiKind.Mint,
+            verifier: address(0),
+            target: 100,
+            aggregate: false,
+            params: ""
+        });
+    }
+
+    function _tiers() internal pure returns (Types.RewardTier[][] memory t) {
+        t = new Types.RewardTier[][](1);
+        t[0] = new Types.RewardTier[](1);
+        t[0][0] = Types.RewardTier({threshold: 10, reward: 1_000 ether});
+    }
+
+    function _gatedCampaign(uint256 minReputation) internal returns (Campaign) {
+        _capSchemasLikeSeed();
+        vm.prank(project);
+        (, address addr) = campaignRegistry.createCampaign(_gateConfig(minReputation), _kpis(), _tiers());
+        return Campaign(addr);
+    }
+
+    /// `join()` also admits a Pending campaign, but the gate is worth proving in the state
+    /// promoters actually meet it in.
+    function _activeGatedCampaign(uint256 minReputation) internal returns (Campaign c) {
+        c = _gatedCampaign(minReputation);
+        token.mint(project, POOL);
+        vm.startPrank(project);
+        token.approve(address(vault), POOL);
+        vault.deposit(address(c), POOL);
+        c.activate();
+        vm.stopPrank();
     }
 
     // ── the formula ──────────────────────────────────────────────
@@ -272,5 +372,187 @@ contract BoneyScoreTest is Test {
         _store(kol1, followersId, followers);
 
         assertEq(registry.scoreOf(kol1), _expected(KOL1_ETHOS, KOL1_REACH));
+    }
+
+    // ── the gate ─────────────────────────────────────────────────
+
+    /**
+     * Everything above ends at `scoreOf` and `qualifies`. Neither is the gate: `qualifies` is a view
+     * that nothing is obliged to consult, and a campaign could read reputation any way it liked.
+     * `Campaign.join()` (`Campaign.sol:315`) is what actually decides whether a promoter exists, so
+     * these drive it directly and assert on `InsufficientReputation`'s arguments — which carry the
+     * computed BoneyScore, making the revert itself a statement about the formula.
+     */
+
+    /// KOL 1's 19,494 clears a 16,000 gate, at the contract rather than beside it.
+    function test_Join_atSeededScore_clearsTheGate() public {
+        _seed(kol1, KOL1_ETHOS, KOL1_FOLLOWERS, KOL1_REACH);
+        Campaign gated = _activeGatedCampaign(GATED_MIN_REPUTATION);
+
+        vm.prank(kol1);
+        bytes32 promoterId = gated.join();
+
+        assertTrue(promoterId != bytes32(0), "19,494 clears a 16,000 gate");
+        assertEq(gated.promoterOf(promoterId), kol1);
+        assertEq(gated.promoterIdOf(kol1), promoterId);
+    }
+
+    /// The other half of `test_SeededScores_straddleTheGate`, proven where it matters. The revert
+    /// carries 14,863 — the same figure `test_ScoreOf_matchesSeededFigures` pins.
+    function test_Join_belowSeededScore_revertsInsufficientReputation() public {
+        _seed(kol2, KOL2_ETHOS, KOL2_FOLLOWERS, KOL2_REACH);
+        Campaign gated = _activeGatedCampaign(GATED_MIN_REPUTATION);
+
+        vm.prank(kol2);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Campaign.InsufficientReputation.selector, 14_863, GATED_MIN_REPUTATION
+            )
+        );
+        gated.join();
+    }
+
+    /// An unattested wallet is refused with a score of 0 rather than an opaque failure, which is
+    /// what lets the join panel offer "verify" instead of "denied".
+    function test_Join_unattestedWallet_revertsWithZeroScore() public {
+        Campaign gated = _activeGatedCampaign(GATED_MIN_REPUTATION);
+
+        vm.prank(fresh);
+        vm.expectRevert(
+            abi.encodeWithSelector(Campaign.InsufficientReputation.selector, 0, GATED_MIN_REPUTATION)
+        );
+        gated.join();
+    }
+
+    /// Reach is capped at 2800, so at weight 3 it tops out at 8,400 — a wallet with a refused Ethos
+    /// profile cannot reach a 16,000 gate however large its audience.
+    function test_Join_reachAlone_revertsAtTheGate() public {
+        _store(kol1, reachId, SCHEMA_MAX_VALUE);
+        Campaign gated = _activeGatedCampaign(GATED_MIN_REPUTATION);
+
+        vm.prank(kol1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Campaign.InsufficientReputation.selector,
+                REACH_WEIGHT * SCHEMA_MAX_VALUE,
+                GATED_MIN_REPUTATION
+            )
+        );
+        gated.join();
+    }
+
+    /**
+     * The weight-0 property where it is load-bearing. A wallet one point short of the gate, with
+     * fifty million followers attested against it, is still refused — so the un-normalised count
+     * cannot buy entry even though it is stored and readable.
+     */
+    function test_Join_followersCannotOpenTheGate() public {
+        _store(kol1, ethosId, KOL1_ETHOS);
+        _store(kol1, reachId, KOL1_REACH);
+        _store(kol1, followersId, 50_000_000);
+
+        uint256 score = _expected(KOL1_ETHOS, KOL1_REACH);
+        Campaign gated = _activeGatedCampaign(score + 1);
+
+        vm.prank(kol1);
+        vm.expectRevert(
+            abi.encodeWithSelector(Campaign.InsufficientReputation.selector, score, score + 1)
+        );
+        gated.join();
+
+        assertEq(registry.valueOf(kol1, followersId), 50_000_000, "stored, readable, and inert");
+    }
+
+    /**
+     * `test_ExpiredEthos_closesAGateItPreviouslyCleared` reaches this conclusion through
+     * `qualifies`. This reaches it through `join()`: the same wallet is admitted while the Ethos
+     * attestation is fresh and refused once it ages out, with the revert reporting reach alone.
+     *
+     * Two campaigns because `AlreadyJoined` is permanent — the second is deployed after the skip so
+     * its own window is live, which also shows the gate is re-read per campaign rather than
+     * snapshotted at first join.
+     */
+    function test_Join_expiredEthos_closesTheGateAtTheContract() public {
+        vm.prank(admin);
+        registry.setSchemaMaxAge(ethosId, ETHOS_MAX_AGE);
+        _seed(kol1, KOL1_ETHOS, KOL1_FOLLOWERS, KOL1_REACH);
+
+        Campaign whileFresh = _activeGatedCampaign(GATED_MIN_REPUTATION);
+        vm.prank(kol1);
+        assertTrue(whileFresh.join() != bytes32(0), "fresh: admitted");
+
+        skip(ETHOS_MAX_AGE + 1);
+
+        Campaign afterExpiry = _activeGatedCampaign(GATED_MIN_REPUTATION);
+        vm.prank(kol1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Campaign.InsufficientReputation.selector,
+                REACH_WEIGHT * KOL1_REACH,
+                GATED_MIN_REPUTATION
+            )
+        );
+        afterExpiry.join();
+    }
+
+    // ── the ceiling ──────────────────────────────────────────────
+
+    /**
+     * The BoneyScore maximum and the largest legal gate are the same number. `Campaign`'s
+     * constructor rejects `minReputation > maxScore()` (`Campaign.sol:185`), and with SeedLocal's
+     * 0–2800 ceilings on both scoring schemas that bound is exactly the documented 28,000 — so a
+     * drift in the weights or the caps breaks campaign *creation*, not merely display.
+     */
+    function test_Create_gateAboveBoneyScoreCeiling_reverts() public {
+        _capSchemasLikeSeed();
+        assertEq(registry.maxScore(), MAX_BONEY_SCORE, "7*2800 + 3*2800");
+
+        vm.prank(project);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Campaign.UnreachableReputation.selector, MAX_BONEY_SCORE + 1, MAX_BONEY_SCORE
+            )
+        );
+        campaignRegistry.createCampaign(_gateConfig(MAX_BONEY_SCORE + 1), _kpis(), _tiers());
+    }
+
+    /// The ceiling itself is a legal gate — clearable only by a wallet maxed on both inputs.
+    function test_Create_gateExactlyAtBoneyScoreCeiling_isLegal() public {
+        Campaign atCap = _activeGatedCampaign(MAX_BONEY_SCORE);
+        assertEq(atCap.minReputation(), MAX_BONEY_SCORE);
+
+        _seed(kol1, SCHEMA_MAX_VALUE, KOL1_FOLLOWERS, SCHEMA_MAX_VALUE);
+        vm.prank(kol1);
+        assertTrue(atCap.join() != bytes32(0), "a perfect score clears the highest legal gate");
+    }
+
+    // ── the off-chain contract, at the gate ──────────────────────
+
+    /**
+     * The strongest form of the claim `testFuzz_ScoreOf_matchesOffChainFormula` makes. That one
+     * proves the two formulas agree; this proves the agreement reaches the decision the user sees:
+     * `join()` succeeds exactly when the locally-computed BoneyScore reaches the gate. If these ever
+     * diverge the frontend offers a Join button that reverts, or hides one the contract allows.
+     */
+    function testFuzz_JoinGate_agreesWithTheOffChainFormula(uint256 ethos, uint256 reach) public {
+        ethos = bound(ethos, 0, SCHEMA_MAX_VALUE);
+        reach = bound(reach, 0, SCHEMA_MAX_VALUE);
+
+        _seed(kol1, ethos, KOL1_FOLLOWERS, reach);
+        uint256 predicted = _expected(ethos, reach);
+        Campaign gated = _activeGatedCampaign(GATED_MIN_REPUTATION);
+
+        if (predicted >= GATED_MIN_REPUTATION) {
+            vm.prank(kol1);
+            assertTrue(gated.join() != bytes32(0), "predicted clear, contract admitted");
+        } else {
+            vm.prank(kol1);
+            vm.expectRevert(
+                abi.encodeWithSelector(
+                    Campaign.InsufficientReputation.selector, predicted, GATED_MIN_REPUTATION
+                )
+            );
+            gated.join();
+        }
     }
 }
