@@ -129,9 +129,9 @@ contract CampaignTest is Test {
     function _boundReputationSchemas() internal returns (uint256 cap) {
         vm.startPrank(admin);
         reputation.registerSchema("ETHOS_SCORE", 7);
-        reputation.registerSchema("X_REACH", 3);
+        reputation.registerSchema("REACH", 3);
         reputation.setSchemaMaxValue(reputation.schemaId("ETHOS_SCORE"), 2_800);
-        reputation.setSchemaMaxValue(reputation.schemaId("X_REACH"), 2_800);
+        reputation.setSchemaMaxValue(reputation.schemaId("REACH"), 2_800);
         vm.stopPrank();
         return reputation.maxScore();
     }
@@ -396,8 +396,8 @@ contract CampaignTest is Test {
         // registry with no weighted schema has a maximum score of 0. Registering a bounded schema
         // puts 5,000 within reach; `kol` simply has nothing attested against it.
         vm.startPrank(admin);
-        reputation.registerSchema("X_FOLLOWERS", 1);
-        reputation.setSchemaMaxValue(reputation.schemaId("X_FOLLOWERS"), 10_000);
+        reputation.registerSchema("FOLLOWERS", 1);
+        reputation.setSchemaMaxValue(reputation.schemaId("FOLLOWERS"), 10_000);
         vm.stopPrank();
 
         Campaign gated = _createCampaign(5_000);
@@ -410,8 +410,8 @@ contract CampaignTest is Test {
 
     function test_Join_succeedsWithReputation() public {
         vm.startPrank(admin);
-        reputation.registerSchema("X_FOLLOWERS", 1);
-        reputation.storeAttestation(kol, reputation.schemaId("X_FOLLOWERS"), 6_000, keccak256("a1"));
+        reputation.registerSchema("FOLLOWERS", 1);
+        reputation.storeAttestation(kol, reputation.schemaId("FOLLOWERS"), 6_000, keccak256("a1"));
         vm.stopPrank();
 
         Campaign gated = _createCampaign(5_000);
@@ -463,7 +463,7 @@ contract CampaignTest is Test {
         _boundReputationSchemas();
         vm.startPrank(admin);
         reputation.setSchemaWeight(reputation.schemaId("ETHOS_SCORE"), 0);
-        reputation.setSchemaWeight(reputation.schemaId("X_REACH"), 0);
+        reputation.setSchemaWeight(reputation.schemaId("REACH"), 0);
         vm.stopPrank();
 
         assertEq(reputation.maxScore(), 0, "nothing is weighted, so nothing is attainable");

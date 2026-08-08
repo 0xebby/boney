@@ -185,8 +185,10 @@ export function DocsPage() {
 
       <Section title="What this Interface is">
         <p>
-          A read-heavy front over the deployed contracts, plus the write paths a project or
-          promoter needs. It holds no keys, runs no backend, and stores nothing about you: every
+          Boneyard is the Marketplace-facing facade for the Boney accountability protocol.
+          It represents the front over the deployed contracts, plus the write paths a project or
+          promoter needs. 
+          Boneyard It holds no keys, runs no backend, and stores nothing about you: every
           number comes from a chain read, and every action is a transaction you sign.
         </p>
         <b>

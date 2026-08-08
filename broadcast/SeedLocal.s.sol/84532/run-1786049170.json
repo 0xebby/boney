@@ -47,7 +47,7 @@
       "contractAddress": "0x3672c20063343fb474116365c696df3958c76681",
       "function": "registerSchema(string,uint256)",
       "arguments": [
-        "X_FOLLOWERS",
+        "FOLLOWERS",
         "1"
       ],
       "transaction": {

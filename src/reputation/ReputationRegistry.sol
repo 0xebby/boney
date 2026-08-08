@@ -45,7 +45,7 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     uint256 public constant MAX_SCHEMAS = 64;
 
     /// @notice A registered metric that can be attested against.
-    /// @param name Stable human-readable name (e.g. "X_FOLLOWERS").
+    /// @param name Stable human-readable name (e.g. "FOLLOWERS").
     /// @param weight Contribution to the composite score; 0 disables the schema without erasing
     ///        data already attested against it.
     /// @param maxAge Seconds an attested value stays countable. 0 means it never expires.
@@ -172,7 +172,7 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     ///      everything.
     ///
     ///      Unweighted schemas are skipped: they contribute nothing to `scoreOf`, so an unbounded
-    ///      display-only metric like X_FOLLOWERS must not poison the ceiling for everyone else.
+    ///      display-only metric like FOLLOWERS must not poison the ceiling for everyone else.
     function maxScore() external view returns (uint256 max) {
         uint256 len = _schemaIds.length;
         for (uint256 i; i < len; ++i) {
