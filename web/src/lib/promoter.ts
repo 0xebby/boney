@@ -2,18 +2,13 @@ import {keccak256, encodeAbiParameters} from "viem";
 import type {CampaignStatus} from "./types";
 
 /**
- * Promoter-side domain logic — join eligibility, promoter identity, and the tracking link a
- * promoter shares.
+ * Promoter-side domain logic — join eligibility, settlement eligibility, promoter identity, and
+ * the tracking link a promoter shares.
  *
  * Pure and React-free (F6). As with `lifecycle.ts`, every rule here mirrors a guard in
  * `Campaign.sol` and names it, because a mirror that drifts either offers a button that reverts
  * or hides one the contract would have allowed. The contract is the security boundary; this
  * decides what to render and why.
- *
- * There is no settlement eligibility here, and that is deliberate. `Campaign.reportUserAction`
- * calls `_settle` inline, which releases escrow straight to the promoter's wallet — so there is no
- * state in which a promoter has earned a tier and still needs to ask for it. Mirroring
- * `Campaign.settle` would only describe a claim step the protocol does not have.
  */
 
 // ── promoter identity ────────────────────────────────────────────
@@ -107,6 +102,69 @@ export function canJoin(ctx: JoinContext): Eligibility {
       actionable: "attest",
     };
   }
+  return {ok: true};
+}
+
+// ── settle ───────────────────────────────────────────────────────
+
+export type SettleContext = {
+  status: CampaignStatus;
+  /** `_promoterIdOf[promoter] != 0` on chain. */
+  joined: boolean;
+  /**
+   * What `settle` would actually transfer right now — `settlementPayout(...).payout` from
+   * `lib/campaign`, i.e. the crossed-but-unsettled tiers capped by what escrow can still cover.
+   *
+   * Not a contract guard: `Campaign.settle` succeeds and pays nothing when the ladder has no
+   * unsettled rung. That is the case worth refusing hardest, because it is the only refusal the
+   * chain will not make on the promoter's behalf — they would pay gas for a transfer of zero.
+   */
+  owed: bigint;
+  /** When `end()` ran; grace is measured from here, not `endTime`. */
+  endedAtSeconds: number;
+  claimGraceSeconds: number;
+  nowSeconds: number;
+  /** No wallet connected — not a contract rule, but nothing can be signed. */
+  connected: boolean;
+};
+
+/**
+ * `settle()` — Solidity: `UnknownKpi`, then `NotJoined`, then a status check that admits **Active**
+ * outright and **Ended** only while `block.timestamp <= endedAt + CLAIM_GRACE`.
+ *
+ * Note what this is *not*. `Campaign.reportUserAction` calls `_settle` inline, and `_progress` is
+ * written in exactly one place — the line above that call — so on the happy path a crossed tier is
+ * paid in the same transaction that credits it, and `owed` is zero. This mirror exists for the
+ * state the contract still allows for: a rung marked crossed but not settled, which
+ * `KpiPanel`'s ladder already surfaces as "Unsettled" and which nothing else can clear. Gating on
+ * `owed` keeps the button out of the way the rest of the time rather than offering a claim step
+ * the protocol does not have.
+ *
+ * Permissionless by design — `settle` takes the promoter as an argument and pays *that* address,
+ * so `connected` here means "someone can sign", not "the promoter is connected".
+ *
+ * The grace boundary is deliberately inclusive: the contract reverts on
+ * `block.timestamp > endedAt + CLAIM_GRACE`, so the boundary second itself is still open. That
+ * makes this the exact complement of `isReclaimable` in `lib/campaign`, which opens on the same
+ * second — settlement and reclaim can never both be available, and never both be closed.
+ */
+export function canSettle(ctx: SettleContext): Eligibility {
+  if (!ctx.connected) return no("Connect a wallet to settle these rewards.");
+  if (!ctx.joined) return no("This wallet has not joined the campaign, so it has earned nothing.");
+
+  if (ctx.status === "Ended") {
+    if (ctx.nowSeconds > ctx.endedAtSeconds + ctx.claimGraceSeconds) {
+      return no("The settlement window has closed; unspent escrow has returned to the project.");
+    }
+  } else if (ctx.status !== "Active") {
+    return no(
+      `Rewards can only be settled while a campaign is active or within its settlement window (currently ${ctx.status.toLowerCase()}).`,
+    );
+  }
+
+  // Not a revert — `settle` would simply walk a ladder with nothing left to pay and transfer zero.
+  if (ctx.owed <= BigInt(0)) return no("Everything you have earned has already been paid out.");
+
   return {ok: true};
 }
 

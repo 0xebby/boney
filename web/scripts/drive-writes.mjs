@@ -126,7 +126,7 @@ const fundInput = page.locator("#fund-amount");
 const hasFundForm = await fundInput.count();
 
 if (hasFundForm) {
-  await page.getByRole("button", {name: /Fill shortfall/}).click();
+  await page.getByRole("button", { name: /Fund Campaign Reward Pool/ }).click();
   const filled = await fundInput.inputValue();
   check("shortfall autofilled", filled !== "" && filled !== "0", filled);
 

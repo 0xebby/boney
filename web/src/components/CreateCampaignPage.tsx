@@ -152,7 +152,7 @@ export function CreateCampaignPage() {
 
       {state.status === "error" ? (
         <Card>
-          <ErrorState message={state.message} onRetry={reset} />
+          <ErrorState message={state.message} detail={state.detail} onRetry={reset} />
         </Card>
       ) : null}
 

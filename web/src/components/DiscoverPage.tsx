@@ -3,13 +3,17 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
+import {usePromoterScoreParts, MAX_SPLIT_WALLETS} from "@/hooks/usePromoterScoreParts";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {RankBadge} from "@/components/ui/RankBadge";
+import {TrustReachBar} from "@/components/ui/TrustReachBar";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {shortAddress} from "@/lib/format";
-import {PURE_REACH_CEILING, type Rank} from "@/lib/ranks";
+import {projectName} from "@/lib/projects";
+import {scoreSplit, type ScoreParts} from "@/lib/boneyscore";
+import {type Rank} from "@/lib/ranks";
 import {
   collectPromoters,
   filterPromoters,
@@ -104,6 +108,19 @@ export function DiscoverPage({
         />
       </StatRow>
 
+      {/*
+        Say what trust/reach reading costs up front, before the user has scrolled to the table.
+        Without this a project browsing a large directory would only notice dashes at row 60 once
+        they are already three screenfuls in — far worse than saying at the top "here's what gets
+        read, narrow the filter to move the line".
+      */}
+      {!busy && summary.count > MAX_SPLIT_WALLETS ? (
+        <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
+          Trust/reach split shown for the first {MAX_SPLIT_WALLETS} promoters. Narrow the rank
+          filter to include others.
+        </p>
+      ) : null}
+
       <Card padded={false}>
         <CardHeader title="Filters" subtitle="Pick a campaign, then narrow by rank" />
         <div className="space-y-3 p-4">
@@ -120,7 +137,8 @@ export function DiscoverPage({
               <option value={ALL_CAMPAIGNS}>All campaigns</option>
               {withPromoters.map((g) => (
                 <option key={g.view.campaign} value={g.view.campaign}>
-                  Campaign #{g.view.campaignId.toString()} — {g.promoters.length} promoter
+                  Campaign #{g.view.campaignId.toString()} · {projectName(g.view)} —{" "}
+                  {g.promoters.length} promoter
                   {g.promoters.length === 1 ? "" : "s"}
                 </option>
               ))}
@@ -255,6 +273,9 @@ function PromoterTable({
   const statusOf = (address: string) =>
     campaigns.find((c) => c.campaign.toLowerCase() === address.toLowerCase())?.status;
 
+  const wallets = useMemo(() => rows.map((r) => r.entry.promoter), [rows]);
+  const {parts, skipped, isLoading: partsLoading} = usePromoterScoreParts(wallets);
+
   return (
     <Card padded={false}>
       <div className="overflow-x-auto">
@@ -270,6 +291,16 @@ function PromoterTable({
               <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-ink-muted">
                 BoneyScore
                 <span className="sr-only"> at join</span>
+              </th>
+              {/*
+                Headed "now" because it is read live from the registry while the column beside it
+                is the join-time snapshot. Two epochs in one row is a real hazard — a project could
+                otherwise read the split as the breakdown *of* the score next to it, which it is
+                not — so the difference is labelled in the header rather than left to the docs.
+              */}
+              <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-ink-muted">
+                Trust / Reach
+                <span className="ml-1 font-normal text-ink-muted/70">now</span>
               </th>
               <th
                 scope="col"
@@ -300,6 +331,12 @@ function PromoterTable({
                   <td className="tnum px-3 py-2.5 text-right text-ink">
                     {row.scoreAtJoin.toLocaleString("en-US")}
                   </td>
+                  <td className="px-3 py-2.5 text-right">
+                    <SplitCell
+                      parts={parts.get(row.entry.promoter.toLowerCase())}
+                      loading={partsLoading}
+                    />
+                  </td>
                   <td className="hidden px-3 py-2.5 md:table-cell">
                     {id === undefined ? (
                       <span className="text-ink-muted">—</span>
@@ -324,8 +361,61 @@ function PromoterTable({
           </tbody>
         </table>
       </div>
+
+      {/*
+        Say what was not read. A truncated scan that looks complete is the failure mode this page
+        already guards against elsewhere, and the split column has its own cap on top of the log
+        scan's — so a table of 80 promoters showing dashes below row 60 needs to explain itself
+        rather than read as 20 promoters with no attestations.
+      */}
+      {skipped > 0 ? (
+        <p className="border-t border-hairline px-3 py-2 text-xs text-ink-muted">
+          Trust/reach read for the first {MAX_SPLIT_WALLETS} promoters; {skipped} not read. Narrow
+          the rank filter to include them.
+        </p>
+      ) : null}
     </Card>
   );
+}
+
+/**
+ * One promoter's trust/reach split, or an honest account of why there isn't one.
+ *
+ * Three outcomes that must not be collapsed into each other:
+ *
+ *  - **No data.** The read failed, was rate-limited, or fell past `MAX_SPLIT_WALLETS`. Renders an
+ *    em dash. Showing 0/100 here would be a fabrication, and this page's audience is a project
+ *    deciding who to pay.
+ *  - **Attested, zero.** The registry answered, and the wallet genuinely has nothing on record —
+ *    which is a real finding, and a different one from "we could not look". A promoter who joined
+ *    with a score and now reads zero has had their attestations expire.
+ *  - **A real split.** Rendered as percentages plus the bar.
+ *
+ * The zero case is worth its own copy because the discover table sorts on `scoreAtJoin`: a wallet
+ * that joined at 19,494 and reads 0 today sits at the top of the table with nothing behind it, and
+ * that gap is exactly what a project needs to see.
+ */
+function SplitCell({parts, loading}: {parts?: ScoreParts; loading: boolean}) {
+  if (parts === undefined) {
+    return loading ? (
+      <span className="text-xs text-ink-muted">…</span>
+    ) : (
+      <span className="text-xs text-ink-muted" title="Score parts could not be read for this wallet">
+        —
+      </span>
+    );
+  }
+
+  const split = scoreSplit(parts);
+  if (split.total === 0) {
+    return (
+      <span className="text-xs text-warning" title="No attested values on record for this wallet">
+        unattested
+      </span>
+    );
+  }
+
+  return <TrustReachBar trustPct={split.trustPct} reachPct={split.reachPct} />;
 }
 
 /**

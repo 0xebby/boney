@@ -3,10 +3,12 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaigns, useReputation, type TokenMeta} from "@/hooks/useCampaigns";
+import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
+import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
@@ -18,6 +20,7 @@ import {
   type StatusFilter,
 } from "@/lib/filters";
 import {utilization} from "@/lib/campaign";
+import { projectName, hasProjectName } from "@/lib/projects";
 import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
@@ -43,6 +46,23 @@ export function CampaignsPage() {
   const {reputation} = useReputation();
   const [filters, setFilters] = useState<CampaignFilters>(EMPTY_FILTERS);
 
+  /*
+    Which of these the connected wallet has already joined.
+
+    Costs nothing extra here: `AppShell` runs this exact query on every route through
+    `useIsPromoter`, and both go through the same `useCampaigns` key, so this is a third observer
+    of one cache entry rather than a second fan-out. It returns an empty list with no wallet
+    connected, so a disconnected visitor issues no reads and sees no markers.
+  */
+  const {joined} = useJoinedCampaigns(campaigns);
+
+  // Lowercased so a checksummed address from one source still matches a lowercase one from
+  // another — the two happen to agree today, but a mismatch would silently drop every marker.
+  const joinedAddresses = useMemo(
+    () => new Set(joined.map((j) => j.view.campaign.toLowerCase())),
+    [joined],
+  );
+
   // Wall-clock time via an external store — see `useNow`. Returns 0 until the clock is live,
   // which keeps the server prerender and client hydration in agreement.
   const now = useNow();
@@ -61,7 +81,10 @@ export function CampaignsPage() {
   );
   const singleToken = tokenList.length === 1 ? tokens[tokenList[0]] : undefined;
 
-  const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
+  const columns = useMemo(
+    () => buildColumns(tokens, now, joinedAddresses),
+    [tokens, now, joinedAddresses],
+  );
 
   if (!deployed) {
     return (
@@ -114,7 +137,7 @@ export function CampaignsPage() {
           to spell out what a project is actually signing up for.
         */}
         <p className="mt-5 text-xs text-ink-secondary">
-          Set your KPIs. Fund the escrow. Pay for verified results.
+          Set your KPIs. Escrow Reward Pool. Pay for verified results.
         </p>
 
         <p className="mt-2 text-xs text-ink-muted">
@@ -198,7 +221,7 @@ export function CampaignsPage() {
 
       <Card padded={false}>
         {isLoading ? (
-          <SkeletonRows rows={4} cols={6} />
+          <SkeletonRows rows={4} cols={7} />
         ) : error ? (
           <ErrorState message={String(error)} onRetry={() => refetch()} />
         ) : (
@@ -206,7 +229,7 @@ export function CampaignsPage() {
             rows={visible}
             columns={columns}
             rowKey={(c) => c.campaign}
-            initialSort={{key: "pool", dir: "desc"}}
+                initialSort={{ key: "id", dir: "asc" }}
             isRefreshing={isRefreshing}
             emptyState={
               <EmptyState
@@ -238,8 +261,10 @@ export function CampaignsPage() {
 function buildColumns(
   tokens: Record<string, TokenMeta>,
   now: number,
+  joinedAddresses: ReadonlySet<string>,
 ): Column<CampaignView>[] {
   const meta = (c: CampaignView) => tokens[c.token.toLowerCase()] ?? {symbol: "", decimals: 18};
+  const hasJoined = (c: CampaignView) => joinedAddresses.has(c.campaign.toLowerCase());
 
   return [
     {
@@ -247,15 +272,33 @@ function buildColumns(
       header: "Campaign",
       sortValue: (c) => c.campaignId,
       render: (c) => (
-        <Link
-          href={`/campaign/${c.campaignId}`}
-          className="font-medium text-ink hover:underline"
-          onClick={(e) => e.stopPropagation()}
-        >
-          #{c.campaignId.toString()}
-          <span className="ml-2 font-normal text-ink-muted">{shortAddress(c.campaign)}</span>
-        </Link>
+        <span className="inline-flex items-center gap-2">
+          <Link
+            href={`/campaign/${c.campaignId}`}
+            className="font-medium text-ink hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            #{c.campaignId.toString()}
+            <span className="ml-2 font-normal text-ink-muted">{shortAddress(c.campaign)}</span>
+          </Link>
+          {hasJoined(c) ? <JoinedBadge /> : null}
+        </span>
       ),
+    },
+    {
+      key: "project",
+      header: "Project",
+      // Sorts on the displayed string, so the column orders the way it reads. Rows falling back
+      // to an address sort among themselves under "0x" rather than being scattered by name.
+      sortValue: (c) => projectName(c),
+      render: (c) =>
+        hasProjectName(c) ? (
+          <span className="text-ink-secondary">{projectName(c)}</span>
+        ) : (
+          // An address here means no name is on file — dimmed so it reads as absent metadata
+          // rather than as a project literally called "0xba95…".
+          <span className="font-normal text-ink-muted">{shortAddress(c.project)}</span>
+        ),
     },
     {
       key: "status",

@@ -4,6 +4,7 @@ import {useQuery} from "@tanstack/react-query";
 import {usePublicClient} from "wagmi";
 import {parseAbiItem, type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {
   planWindows,
   dedupePromoters,
@@ -55,7 +56,7 @@ export type PromoterDirectory = {
  * render, because a directory missing one block range is far more useful than an error page.
  */
 export function useCampaignPromoters(campaigns: readonly CampaignView[]) {
-  const client = usePublicClient();
+  const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
   const deployment = getDeployment(chainId);
 

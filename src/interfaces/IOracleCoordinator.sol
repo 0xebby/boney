@@ -50,6 +50,24 @@ interface IOracleCoordinator {
         bytes evidence;
     }
 
+    /// @notice A candidate per-user update, routed to `Campaign.reportUserAction`.
+    /// @dev The counterpart to `Report`, which only ever reaches `applyAggregateUpdate` and so can
+    ///      never credit an individual promoter. Without this path the campaign's `project` key is
+    ///      the only account that can pay anyone, which makes an absent or hostile project
+    ///      indistinguishable from one whose promoters simply earned nothing.
+    /// @param campaign Campaign receiving the update.
+    /// @param kpiIndex KPI index within the campaign; must be a per-user (non-aggregate) KPI.
+    /// @param user End user whose actions are being reported.
+    /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
+    /// @param evidence Passed through to the KPI's verifier, when it has one.
+    struct UserReport {
+        address campaign;
+        uint256 kpiIndex;
+        address user;
+        uint256 newTotal;
+        bytes evidence;
+    }
+
     /// @notice Lock collateral to become eligible to submit reports.
     function stake() external payable;
 
@@ -61,10 +79,24 @@ interface IOracleCoordinator {
     /// @return reportId Content-derived id used to apply or dispute the report.
     function submitReport(Report calldata report) external returns (bytes32 reportId);
 
+    /// @notice Submit a candidate per-user report; it becomes applicable after `disputeWindow`.
+    /// @dev Same stake, dispute and slashing rules as `submitReport`. Ids are domain-separated
+    ///      from aggregate reports, so the two kinds can never collide or be applied through the
+    ///      wrong entry point.
+    /// @param report The candidate per-user update.
+    /// @return reportId Content-derived id used to apply or dispute the report.
+    function submitUserReport(UserReport calldata report) external returns (bytes32 reportId);
+
     /// @notice Apply a previously submitted, un-disputed report to its campaign.
     /// @dev Callable by anyone once the dispute window has elapsed.
     /// @param reportId Id returned by `submitReport`.
     function applyReport(bytes32 reportId) external;
+
+    /// @notice Apply a previously submitted, un-disputed per-user report to its campaign.
+    /// @dev Callable by anyone once the dispute window has elapsed. The campaign credits the
+    ///      promoter the user is attributed to and settles any tier this crosses, in one call.
+    /// @param reportId Id returned by `submitUserReport`.
+    function applyUserReport(bytes32 reportId) external;
 
     /// @notice Dispute a report. Callable only by the governor while the window is open.
     ///         Slashes the reporter's stake; the report can never be applied.

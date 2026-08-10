@@ -5,6 +5,7 @@ import {usePublicClient} from "wagmi";
 import type {PublicClient} from "viem";
 import {IERC20MetadataAbi} from "@/lib/abis";
 import {isAddress} from "@/lib/validation";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 
 /**
  * Reads an ERC-20's `symbol` and `decimals` straight from the chain.
@@ -33,7 +34,7 @@ export type TokenMetaState = {
 };
 
 export function useTokenMeta(tokenAddress: string): TokenMetaState {
-  const client = usePublicClient();
+  const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
   const valid = isAddress(tokenAddress) && !/^0x0{40}$/i.test(tokenAddress);
 

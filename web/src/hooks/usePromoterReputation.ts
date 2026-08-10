@@ -5,6 +5,7 @@ import {usePublicClient} from "wagmi";
 import type {PublicClient} from "viem";
 import {ReputationRegistryAbi} from "@/lib/abis";
 import {getDeployment} from "@/lib/chains";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {
   SCHEMA_ETHOS,
   SCHEMA_REACH,
@@ -55,7 +56,7 @@ export type ReputationFreshness = {
 };
 
 export function usePromoterReputation(wallet: `0x${string}` | undefined) {
-  const client = usePublicClient();
+  const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
   const deployment = getDeployment(chainId);
 

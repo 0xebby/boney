@@ -13,6 +13,7 @@ import {KpiPanel} from "@/components/KpiPanel";
 import {ProjectActions} from "@/components/ProjectActions";
 import {PromoterPanel} from "@/components/PromoterPanel";
 import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
+import {projectName} from "@/lib/projects";
 import {
   formatTokenAmount,
   formatPercent,
@@ -137,7 +138,9 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
           <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
             <div className="flex gap-1.5">
               <dt>Project</dt>
-              <dd className="font-medium text-ink-secondary">{shortAddress(detail.project)}</dd>
+              <dd className="font-medium text-ink-secondary">
+                {projectName({campaignId, project: detail.project})}
+              </dd>
             </div>
             <div className="flex gap-1.5">
               <dt>Contract</dt>

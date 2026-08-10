@@ -377,6 +377,91 @@ contract AttributionRegistryTest is Test {
         new AttributionRegistry(0);
     }
 
+    // ── campaign window enforcement ──────────────────────────────
+
+    /// @dev A campaign's `attributionWindow` is enforced by this registry, not merely honoured by
+    ///      whichever client built the touch. Before this, `buildTouch` clamped to the campaign's
+    ///      window but nothing stopped a promoter hand-rolling a touch for the full global cap, so
+    ///      the window a project advertised was advisory.
+    function test_EffectiveMax_campaignWindowBindsBelowTheGlobalCap() public {
+        WindowStub c = new WindowStub(1 days);
+        vm.prank(address(c));
+        attribution.registerPromoter(promoterId);
+
+        assertEq(attribution.effectiveMaxDuration(address(c)), 1 days, "campaign window wins");
+
+        uint64 tooLong = uint64(block.timestamp) + 1 days + 1;
+        IAttributionRegistry.Touch memory t = _touch(address(c), promoterId, tooLong);
+        // Signed before `expectRevert`: `_sign` itself calls the registry, and expectRevert binds
+        // to the next call of any kind.
+        bytes memory sig = _sign(userPk, t);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 1 days
+            )
+        );
+        attribution.storeTouch(user, t, sig, relayer);
+    }
+
+    function test_EffectiveMax_acceptsExactlyTheCampaignWindow() public {
+        WindowStub c = new WindowStub(1 days);
+        vm.prank(address(c));
+        attribution.registerPromoter(promoterId);
+
+        _storeTouch(userPk, user, _touch(address(c), promoterId, uint64(block.timestamp) + 1 days));
+        assertEq(attribution.activePromoter(address(c), user), promoterId, "the boundary is inclusive");
+    }
+
+    /// @dev The global cap is a ceiling the campaign cannot raise. A hostile or buggy campaign
+    ///      reporting a huge window still clamps, so this can only ever narrow a horizon.
+    function test_EffectiveMax_campaignCannotExceedTheGlobalCap() public {
+        WindowStub c = new WindowStub(type(uint64).max);
+        vm.prank(address(c));
+        attribution.registerPromoter(promoterId);
+
+        assertEq(attribution.effectiveMaxDuration(address(c)), MAX_DURATION, "clamped to the cap");
+
+        uint64 tooLong = uint64(block.timestamp) + MAX_DURATION + 1;
+        IAttributionRegistry.Touch memory t = _touch(address(c), promoterId, tooLong);
+        bytes memory sig = _sign(userPk, t);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + MAX_DURATION
+            )
+        );
+        attribution.storeTouch(user, t, sig, relayer);
+    }
+
+    /// @dev Registration is namespaced by registrant and deliberately does not require a campaign
+    ///      contract, so a target that cannot answer must fall back to the global cap rather than
+    ///      reverting. An EOA registrant is the case every other test in this file relies on.
+    function test_EffectiveMax_fallsBackForANonCampaign() public view {
+        assertEq(attribution.effectiveMaxDuration(campaign), MAX_DURATION, "EOA falls back");
+        assertEq(attribution.effectiveMaxDuration(address(0xDEAD)), MAX_DURATION, "unknown falls back");
+    }
+
+    /// @dev A contract at the address that does not expose `attributionWindow()` is the same case
+    ///      as an EOA — no window of its own, so the global cap stands.
+    function test_EffectiveMax_fallsBackForANonConformingContract() public {
+        NoWindowStub c = new NoWindowStub();
+        assertEq(attribution.effectiveMaxDuration(address(c)), MAX_DURATION, "no window, global cap");
+    }
+
+    /// @dev Zero cannot mean "no attribution allowed": `Campaign` rejects a zero window at
+    ///      construction, so a zero here is a decoding surprise, and bricking every touch for that
+    ///      campaign would be a worse failure than falling through to the cap.
+    function test_EffectiveMax_zeroWindowFallsBackRatherThanBricking() public {
+        WindowStub c = new WindowStub(0);
+        vm.prank(address(c));
+        attribution.registerPromoter(promoterId);
+
+        assertEq(attribution.effectiveMaxDuration(address(c)), MAX_DURATION, "zero falls back");
+        _storeTouch(userPk, user, _touch(address(c), promoterId, uint64(block.timestamp) + 1 days));
+        assertEq(attribution.activePromoter(address(c), user), promoterId, "touches still work");
+    }
+
     // ── domain binding ───────────────────────────────────────────
 
     /// @dev A touch signed for one deployment must not verify against another (chain/contract
@@ -415,3 +500,16 @@ contract AttributionRegistryTest is Test {
         }
     }
 }
+
+/// @dev Minimal stand-in for a `Campaign`, exposing only the one function the registry reads back.
+contract WindowStub {
+    uint64 public attributionWindow;
+
+    constructor(uint64 window) {
+        attributionWindow = window;
+    }
+}
+
+/// @dev A contract that is not a campaign at all — the registry must tolerate it, since promoter
+///      registration is namespaced by registrant and never required a campaign.
+contract NoWindowStub {}

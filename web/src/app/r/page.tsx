@@ -6,7 +6,9 @@ import {useAccount, usePublicClient} from "wagmi";
 import {useQuery} from "@tanstack/react-query";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState} from "@/components/ui/States";
+import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
 import {useStoreTouch, type TxState} from "@/hooks/useWriteCampaign";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {fetchCampaignDetail} from "@/lib/campaignDetail";
 import {fetchBrowseCampaigns} from "@/lib/contracts";
 import {shortAddress, formatDuration} from "@/lib/format";
@@ -25,7 +27,7 @@ function AttributionPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const {isConnected} = useAccount();
-  const client = usePublicClient();
+  const client = usePublicClient({chainId: useBoneyChainId()});
   const now = useNow();
 
   const campaign = (searchParams.get("c") as `0x${string}`) || undefined;
@@ -187,14 +189,13 @@ function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
 
   if (state.status === "error") {
     return (
-      <div className="rounded border border-error/20 bg-error/5 p-3">
-        <p className="text-sm text-error">{state.message}</p>
-        <button
-          onClick={onReset}
-          className="mt-2 text-xs text-error underline hover:no-underline"
-        >
-          Try again
-        </button>
+      <div className="rounded border border-error/20 bg-error/5 p-3 text-sm">
+        <TxErrorMessage
+          message={state.message}
+          detail={state.detail}
+          onDismiss={onReset}
+          dismissLabel="Try again"
+        />
       </div>
     );
   }

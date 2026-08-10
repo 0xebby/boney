@@ -6,6 +6,7 @@ import {
   ranksAscending,
   rankExamples,
   rankDistribution,
+  minEthosAtFullReach,
   PURE_REACH_CEILING,
 } from "./ranks";
 import {
@@ -109,6 +110,51 @@ describe("rankOf", () => {
     // A zero-Ethos account with the largest audience the curve admits.
     const maxReachOnly = boneyScore({ethos: 0, reach: reachFromFollowers(10_000_000)});
     expect(rankOf(maxReachOnly).id).toBe("runner");
+  });
+});
+
+describe("minEthosAtFullReach", () => {
+  /**
+   * These tests exist because the ladder's names imply more trust than its boundaries require.
+   * `reachOnly` only marks the bands a *zero*-Ethos account clears; every band above it is still
+   * reachable on far less credibility than its `ethosFloor` suggests, because a maximal audience is
+   * worth 8,400 points. Pinning the real floors keeps /docs from drifting back to the old claim.
+   */
+  it("is zero for exactly the reachOnly bands", () => {
+    for (const rank of RANKS) {
+      expect(minEthosAtFullReach(rank) === 0).toBe(rank.reachOnly);
+    }
+  });
+
+  it("is always at or below the credibility the band is named for", () => {
+    for (const rank of RANKS) {
+      const {ethosAlone} = rankExamples(rank);
+      if (rank.min === 0) continue;
+      expect(minEthosAtFullReach(rank)).toBeLessThanOrEqual(ethosAlone);
+    }
+  });
+
+  it("admits a questionable profile into Samurai on audience alone", () => {
+    // The case that motivated the column: an "exemplary"-sounding rank taking an Ethos of 801.
+    const samurai = rankById("samurai")!;
+    expect(minEthosAtFullReach(samurai)).toBe(801);
+    expect(rankOf(boneyScore({ethos: 801, reach: MAX_ETHOS})).id).toBe("samurai");
+  });
+
+  it("lets a merely-known profile reach Legend with a maximal audience", () => {
+    const legend = rankById("legend")!;
+    expect(minEthosAtFullReach(legend)).toBe(1401);
+    expect(rankOf(boneyScore({ethos: 1401, reach: MAX_ETHOS})).id).toBe("legend");
+    // One point of credibility less and the top band is out of reach at any audience size.
+    expect(rankOf(boneyScore({ethos: 1400, reach: MAX_ETHOS})).id).not.toBe("legend");
+  });
+
+  it("returns a floor that actually clears the band at full reach", () => {
+    for (const rank of RANKS) {
+      if (rank.min === 0) continue;
+      const score = boneyScore({ethos: minEthosAtFullReach(rank), reach: MAX_ETHOS});
+      expect(score).toBeGreaterThanOrEqual(rank.min);
+    }
   });
 });
 

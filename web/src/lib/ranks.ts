@@ -18,10 +18,25 @@ import {
  * Why the boundaries sit where they do
  * ------------------------------------
  * Every boundary is `ETHOS_WEIGHT * <an Ethos band floor>` — the score an account of that
- * credibility reaches with *no audience at all*. That makes each rank a statement about trust
- * first, which is the point of weighting trust 70/30 in the first place. Reach then moves an
- * account within its rank, and can carry it into the next one, but cannot manufacture a rank on
- * its own.
+ * credibility reaches with *no audience at all*. So a boundary names the credibility that clears it
+ * unaided, and that is the only thing it names.
+ *
+ * What a rank does not tell you
+ * -----------------------------
+ * A rank is a function of the total score, and the total mixes both inputs, so reach *does*
+ * manufacture ranks. A maximal audience is worth `REACH_WEIGHT * MAX_ETHOS` = 8,400 points, which is
+ * six bands wide, so every band above Netrunner is reachable on far less credibility than its name
+ * suggests: an Ethos of 1,401 ("known") with ten million followers scores 18,201 and reads as
+ * `Legend`.
+ *
+ * `reachOnly` marks only the bands clearable with *zero* credibility. It is not a claim that the
+ * bands above it are trust-gated. `minEthosAtFullReach` is the honest floor for each band — the
+ * least credibility that reaches it when audience is doing everything it can — and /docs renders it
+ * beside `ethosAlone` so a host sees both ends of who a gate admits.
+ *
+ * Ranks remain the right thing to show a promoter: they are legible and monotonic in score. But a
+ * campaign owner who needs credibility specifically has to read the score's composition rather than
+ * the badge, and `explainScore` in `boneyscore.ts` is what splits it.
  *
  * The structural fact that anchors the whole ladder: `ETHOS_WEIGHT * 1200 === 8400` and
  * `REACH_WEIGHT * MAX_ETHOS === 8400` are the same number. A neutral-Ethos account with no
@@ -46,8 +61,10 @@ export type Rank = {
   ethosFloor: number;
   /**
    * True when the band's floor is at or below the pure-reach ceiling (8,400), meaning an account
-   * with zero Ethos credibility can reach it on follower count alone. A gate set inside one of
-   * these bands does not filter for trust.
+   * with *zero* Ethos credibility can reach it on follower count alone.
+   *
+   * A false here is not a trust guarantee — see `minEthosAtFullReach` for how little credibility a
+   * band actually requires once a real audience is counted.
    */
   reachOnly: boolean;
   /** One line on what an account here actually looks like. */
@@ -69,7 +86,8 @@ export const RANKS: ReadonlyArray<Rank> = [
     max: MAX_BONEY_SCORE,
     ethosFloor: 2600,
     reachOnly: false,
-    blurb: "Renowned on Ethos with a mass audience. Vanishingly rare — expect an empty directory.",
+    blurb:
+      "Renowned on Ethos, or merely known with an audience in the millions. Rare either way.",
   },
   {
     id: "oracle",
@@ -78,7 +96,7 @@ export const RANKS: ReadonlyArray<Rank> = [
     max: ETHOS_WEIGHT * 2600,
     ethosFloor: 2400,
     reachOnly: false,
-    blurb: "Revered standing. Vouched for by people who are themselves vouched for.",
+    blurb: "Revered standing, or neutral standing carried by a very large audience.",
   },
   {
     id: "ghost",
@@ -87,7 +105,7 @@ export const RANKS: ReadonlyArray<Rank> = [
     max: ETHOS_WEIGHT * 2400,
     ethosFloor: 2200,
     reachOnly: false,
-    blurb: "Distinguished and hard to reach. A long, clean history behind the score.",
+    blurb: "Distinguished, or a thinner profile behind a large following.",
   },
   {
     id: "samurai",
@@ -96,7 +114,7 @@ export const RANKS: ReadonlyArray<Rank> = [
     max: ETHOS_WEIGHT * 2200,
     ethosFloor: 2000,
     reachOnly: false,
-    blurb: "Exemplary credibility. The top of what most real accounts reach.",
+    blurb: "Exemplary credibility, or questionable standing behind a mass audience.",
   },
   {
     id: "ronin",
@@ -124,7 +142,7 @@ export const RANKS: ReadonlyArray<Rank> = [
     ethosFloor: 1200,
     reachOnly: false,
     blurb:
-      "The first rank that cannot be faked with followers. Neutral-or-better Ethos standing is required.",
+      "The first rank a zero-credibility account cannot reach — but only just. A maximal audience covers all but one point of it.",
   },
   {
     id: "runner",
@@ -188,6 +206,21 @@ export const PURE_REACH_CEILING = REACH_WEIGHT * MAX_ETHOS;
  * accident, and `minReputation` is immutable, so the mistake is unrecoverable.
  */
 export const PURE_TRUST_CEILING = ETHOS_WEIGHT * MAX_ETHOS;
+
+/**
+ * The least Ethos credibility that reaches a rank when reach contributes everything it can.
+ *
+ * The companion to `ethosAlone`, and the number that shows what a rank really guarantees. `Samurai`
+ * looks like it demands an exemplary 2,000, but a maximal audience covers 8,400 of its 14,001, so
+ * an Ethos of 801 — "questionable" — clears it. Both ends are rendered in the /docs table because
+ * the gap between them is the part a host setting an immutable gate needs to see.
+ *
+ * Returns 0 for bands a maximal audience clears outright, which is exactly the `reachOnly` set.
+ */
+export function minEthosAtFullReach(rank: Rank): number {
+  const gap = rank.min - PURE_REACH_CEILING;
+  return gap <= 0 ? 0 : Math.ceil(gap / ETHOS_WEIGHT);
+}
 
 /**
  * Two illustrative ways to reach a rank's floor, for the docs table.

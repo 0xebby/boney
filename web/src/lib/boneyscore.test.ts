@@ -8,6 +8,10 @@ import {
   boneyScore,
   ethosLevel,
   explainScore,
+  scoreSplit,
+  SCHEMA_ETHOS,
+  SCHEMA_REACH,
+  SCHEMA_FOLLOWERS,
   ETHOS_WEIGHT,
   REACH_WEIGHT,
   MAX_ETHOS,
@@ -226,5 +230,84 @@ describe("followersForReach", () => {
       const reach = reachFromFollowers(followers);
       expect(reachFromFollowers(followersForReach(reach))).toBe(reach);
     }
+  });
+});
+
+describe("schema names", () => {
+  /*
+   * These strings are the one part of this module that is not arithmetic, and the one part a unit
+   * test can still get wrong in a way that only shows up on chain: schema ids are `keccak256(name)`,
+   * so a rename silently repoints every read at a schema no registry has ever registered, and
+   * `valueOf` answers 0 for an unknown id exactly as it does for an unattested wallet. Nothing
+   * throws. Both deployed registries register these three names, verified from their
+   * `SchemaRegistered` logs, and `SeedLocal.s.sol` registers the same strings.
+   */
+  it("matches the names registered on chain", () => {
+    expect(SCHEMA_ETHOS).toBe("ETHOS_SCORE");
+    expect(SCHEMA_REACH).toBe("X_REACH");
+    expect(SCHEMA_FOLLOWERS).toBe("X_FOLLOWERS");
+  });
+});
+
+describe("scoreSplit", () => {
+  it("splits a real promoter's score into trust and reach", () => {
+    // Defi_Scribbler on Base Sepolia: Ethos 1,367 and 26,329 followers -> reach 1,768.
+    const split = scoreSplit({ethos: 1_367, reach: reachFromFollowers(26_329)});
+    expect(split.total).toBe(14_873);
+    expect(split.ethosPoints).toBe(9_569);
+    expect(split.reachPoints).toBe(5_304);
+    expect(split.trustPct).toBe(64);
+    expect(split.reachPct).toBe(36);
+  });
+
+  it("always sums to 100 so a row never reads 63/38", () => {
+    // reachPct is derived rather than rounded independently. Rounding both halves lets a row show
+    // a split that does not sum to 100, which destroys the only thing the pair communicates.
+    for (const ethos of [1, 7, 333, 1_367, 2_099, 2_800]) {
+      for (const reach of [0, 1, 991, 1_768, 2_800]) {
+        const split = scoreSplit({ethos, reach});
+        if (split.total > 0) expect(split.trustPct + split.reachPct).toBe(100);
+      }
+    }
+  });
+
+  it("reports a pure-reach account as 0% trust", () => {
+    // The case the reachOnly marker exists for: no credibility at all, carried entirely by audience.
+    const split = scoreSplit({ethos: 0, reach: MAX_ETHOS});
+    expect(split.trustPct).toBe(0);
+    expect(split.reachPct).toBe(100);
+    expect(split.total).toBe(REACH_WEIGHT * MAX_ETHOS);
+  });
+
+  it("reports a no-audience account as 100% trust", () => {
+    const split = scoreSplit({ethos: MAX_ETHOS, reach: 0});
+    expect(split.trustPct).toBe(100);
+    expect(split.reachPct).toBe(0);
+    expect(split.total).toBe(ETHOS_WEIGHT * MAX_ETHOS);
+  });
+
+  it("returns zeroes for an unattested wallet rather than dividing by zero", () => {
+    // A wallet with no record is not "all reach" — the caller must be able to tell the two apart.
+    const split = scoreSplit({ethos: 0, reach: 0});
+    expect(split).toEqual({total: 0, ethosPoints: 0, reachPoints: 0, trustPct: 0, reachPct: 0});
+  });
+
+  it("agrees with explainScore and boneyScore on the same inputs", () => {
+    // Three functions computing the same arithmetic; a divergence means the table and the join
+    // panel would disagree about the same promoter.
+    const parts = {ethos: 1_950, reach: 1_204};
+    const split = scoreSplit(parts);
+    const explained = explainScore(parts);
+    expect(split.total).toBe(boneyScore(parts));
+    expect(split.ethosPoints).toBe(explained.ethosPoints);
+    expect(split.reachPoints).toBe(explained.reachPoints);
+  });
+
+  it("puts a maxed-out account at the documented 70/30", () => {
+    // The weighting the whole design rests on, visible only when both inputs are at ceiling.
+    const split = scoreSplit({ethos: MAX_ETHOS, reach: MAX_ETHOS});
+    expect(split.total).toBe(MAX_BONEY_SCORE);
+    expect(split.trustPct).toBe(70);
+    expect(split.reachPct).toBe(30);
   });
 });

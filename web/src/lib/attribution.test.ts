@@ -4,6 +4,7 @@ import {
   TOUCH_TYPEHASH,
   attributionDomain,
   buildTouch,
+  effectiveHorizon,
   canStoreTouch,
 } from "./attribution";
 import type {Touch} from "./attribution";
@@ -60,6 +61,43 @@ describe("buildTouch", () => {
     const touch = buildTouch(campaign, promoterId, BigInt(7 * 86_400), BigInt(30 * 86_400), 1_700_000);
     expect(touch.campaign).toBe(campaign);
     expect(touch.promoterId).toBe(promoterId);
+  });
+
+  it("falls back to the global cap when the campaign window reads zero", () => {
+    // Mirrors AttributionRegistry._effectiveMaxDuration: `Campaign` rejects a zero
+    // attributionWindow at construction, so zero means "not a campaign", not "no attribution".
+    // Building a zero-length touch would produce one that fails TouchExpired immediately.
+    const now = 1_700_000;
+    const touch = buildTouch(campaign, promoterId, BigInt(0), BigInt(30 * 86_400), now);
+    expect(touch.expiresAt).toBe(BigInt(now) + BigInt(30 * 86_400));
+  });
+});
+
+describe("effectiveHorizon", () => {
+  const CAP = BigInt(30 * 86_400);
+
+  it("takes the campaign window when it is tighter", () => {
+    expect(effectiveHorizon(BigInt(7 * 86_400), CAP)).toBe(BigInt(7 * 86_400));
+  });
+
+  it("clamps to the global cap when the campaign asks for more", () => {
+    expect(effectiveHorizon(BigInt(90 * 86_400), CAP)).toBe(CAP);
+  });
+
+  it("returns either when they are equal", () => {
+    expect(effectiveHorizon(CAP, CAP)).toBe(CAP);
+  });
+
+  it("treats zero as 'no window of its own' and uses the cap", () => {
+    expect(effectiveHorizon(BigInt(0), CAP)).toBe(CAP);
+  });
+
+  it("never returns more than the cap, for any campaign window", () => {
+    // The security property: a campaign can narrow its horizon but never widen it, so a hostile
+    // or misconfigured campaign cannot grant itself a longer attribution than the protocol allows.
+    for (const w of [0, 1, 7, 30, 31, 365, 10_000]) {
+      expect(effectiveHorizon(BigInt(w * 86_400), CAP) <= CAP).toBe(true);
+    }
   });
 });
 

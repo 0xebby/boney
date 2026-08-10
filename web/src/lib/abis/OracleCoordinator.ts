@@ -43,6 +43,19 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
+    "name": "applyUserReport",
+    "inputs": [
+      {
+        "name": "reportId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "campaignContract",
     "inputs": [],
     "outputs": [
@@ -252,6 +265,16 @@ export const OracleCoordinatorAbi = [
             "name": "applied",
             "type": "bool",
             "internalType": "bool"
+          },
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
           }
         ]
       }
@@ -350,6 +373,52 @@ export const OracleCoordinatorAbi = [
           },
           {
             "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reportId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "submitUserReport",
+    "inputs": [
+      {
+        "name": "report",
+        "type": "tuple",
+        "internalType": "struct IOracleCoordinator.UserReport",
+        "components": [
+          {
+            "name": "campaign",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "newTotal",
             "type": "uint256",
             "internalType": "uint256"
           },
@@ -591,6 +660,28 @@ export const OracleCoordinatorAbi = [
         "name": "who",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotAggregateReport",
+    "inputs": [
+      {
+        "name": "reportId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NotUserReport",
+    "inputs": [
+      {
+        "name": "reportId",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ]
   },

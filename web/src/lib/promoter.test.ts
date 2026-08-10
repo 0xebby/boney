@@ -3,10 +3,13 @@ import {
   derivePromoterId,
   hasJoined,
   canJoin,
+  canSettle,
   trackingLink,
   parseTrackingLink,
   type JoinContext,
+  type SettleContext,
 } from "./promoter";
+import {isReclaimable} from "./campaign";
 
 /**
  * Promoter guard tests.
@@ -141,6 +144,96 @@ describe("canJoin", () => {
   it("gives a reason whenever it refuses", () => {
     for (const status of ["Paused", "Ended", "Cancelled"] as const) {
       expect(canJoin(ctx({status})).reason).toBeTruthy();
+    }
+  });
+});
+
+describe("canSettle", () => {
+  const ENDED_AT = 1_000_000;
+  const GRACE = 7 * 24 * 60 * 60;
+
+  const ctx = (o: Partial<SettleContext> = {}): SettleContext => ({
+    status: "Active",
+    joined: true,
+    owed: BigInt(500),
+    endedAtSeconds: 0,
+    claimGraceSeconds: GRACE,
+    nowSeconds: ENDED_AT,
+    connected: true,
+    ...o,
+  });
+
+  const ended = (o: Partial<SettleContext> = {}): SettleContext =>
+    ctx({status: "Ended", endedAtSeconds: ENDED_AT, ...o});
+
+  it("allows settling on an active campaign with an unpaid tier", () => {
+    expect(canSettle(ctx()).ok).toBe(true);
+  });
+
+  it("allows settling after the campaign ended, inside the grace window", () => {
+    expect(canSettle(ended({nowSeconds: ENDED_AT + 1})).ok).toBe(true);
+  });
+
+  it("keeps the boundary second open — the contract reverts on >, not >=", () => {
+    // Campaign.settle: `if (block.timestamp > endedAt + CLAIM_GRACE) revert`. Treating the
+    // boundary as closed would strand a promoter who settles on the last second the chain allows.
+    expect(canSettle(ended({nowSeconds: ENDED_AT + GRACE})).ok).toBe(true);
+  });
+
+  it("blocks once the grace window has passed — Solidity: WrongStatus", () => {
+    const r = canSettle(ended({nowSeconds: ENDED_AT + GRACE + 1}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/settlement window has closed/i);
+  });
+
+  it("blocks Pending, Paused and Cancelled — Solidity: WrongStatus", () => {
+    // The contract admits Active outright and Ended conditionally; everything else reverts.
+    for (const status of ["Pending", "Paused", "Cancelled"] as const) {
+      expect(canSettle(ctx({status})).ok, status).toBe(false);
+    }
+  });
+
+  it("blocks a wallet that never joined — Solidity: NotJoined", () => {
+    const r = canSettle(ctx({joined: false}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/not joined/i);
+  });
+
+  it("blocks a zero payout even when every contract guard passes", () => {
+    // Not a revert: `settle` walks a ladder with nothing left and transfers zero. The chain will
+    // not refuse this on the promoter's behalf, so the mirror has to.
+    const r = canSettle(ctx({owed: BigInt(0)}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/already been paid/i);
+  });
+
+  it("requires a wallet", () => {
+    expect(canSettle(ctx({connected: false})).ok).toBe(false);
+  });
+
+  it("gives a reason whenever it refuses", () => {
+    const refusals = [
+      ctx({connected: false}),
+      ctx({joined: false}),
+      ctx({status: "Paused"}),
+      ctx({owed: BigInt(0)}),
+      ended({nowSeconds: ENDED_AT + GRACE + 1}),
+    ];
+    for (const c of refusals) expect(canSettle(c).reason).toBeTruthy();
+  });
+
+  /**
+   * The property that keeps the two windows from contradicting each other: escrow is either still
+   * settleable by promoters or reclaimable by the project, never both and never neither. Both
+   * functions pivot on `endedAt + grace`, so an off-by-one in either direction shows up here as a
+   * second where the UI would offer both buttons or no button at all.
+   */
+  it("is the exact complement of isReclaimable across the boundary", () => {
+    for (const offset of [-2, -1, 0, 1, 2]) {
+      const now = ENDED_AT + GRACE + offset;
+      const settleable = canSettle(ended({nowSeconds: now})).ok;
+      const reclaimable = isReclaimable("Ended", ENDED_AT, now, GRACE);
+      expect(settleable, `offset ${offset}`).toBe(!reclaimable);
     }
   });
 });

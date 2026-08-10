@@ -71,8 +71,10 @@ export const TOUCH_EIP712_TYPES = {
 /**
  * Reads `maxTouchDuration` from the attribution registry.
  *
- * This is the longest horizon a touch may claim, and it clamps `expiresAt` when building a touch
- * from a campaign's `attributionWindow`. Typically 30 days.
+ * The protocol-wide ceiling, typically 30 days. Prefer `fetchEffectiveMaxDuration` when building a
+ * touch: a campaign may configure a shorter window, and the registry enforces the tighter of the
+ * two. This remains exported because it is the bound that applies when there is no campaign window
+ * to read.
  */
 export async function fetchMaxTouchDuration(
   client: PublicClient,
@@ -86,11 +88,36 @@ export async function fetchMaxTouchDuration(
 }
 
 /**
+ * Reads the horizon a touch for `campaign` may actually claim.
+ *
+ * `min(campaign.attributionWindow, maxTouchDuration)`, resolved on chain. This is the exact bound
+ * `storeTouch` enforces, so asking the registry beats recomputing the minimum client-side and
+ * risking a drift that only shows up as a `TouchTooLong` revert after the referral has signed.
+ */
+export async function fetchEffectiveMaxDuration(
+  client: PublicClient,
+  attributionRegistry: `0x${string}`,
+  campaign: `0x${string}`,
+): Promise<bigint> {
+  return await client.readContract({
+    address: attributionRegistry,
+    abi: AttributionRegistryAbi,
+    functionName: "effectiveMaxDuration",
+    args: [campaign],
+  });
+}
+
+/**
  * Builds a Touch ready to sign.
  *
  * `signedAt` is set to the current block timestamp (or the referral's local clock approximation —
  * the contract allows a few seconds of clock skew). `expiresAt` is derived from the campaign's
- * `attributionWindow`, clamped to `maxTouchDuration` to satisfy `TouchTooLong`.
+ * `attributionWindow`, clamped to the registry's cap to satisfy `TouchTooLong`.
+ *
+ * The clamp is belt-and-braces rather than the enforcement itself: `AttributionRegistry.storeTouch`
+ * caps every touch at `min(attributionWindow, maxTouchDuration)` on chain, so a client that skipped
+ * this — or a promoter hand-rolling a touch outside the app — is rejected rather than granted a
+ * longer horizon than the campaign advertised.
  *
  * @param campaign The campaign the referral is engaging with.
  * @param promoterId The promoter's opaque id (from `derivePromoterId`).
@@ -106,11 +133,22 @@ export function buildTouch(
   now: number = Math.floor(Date.now() / 1000),
 ): Touch {
   const signedAt = BigInt(now);
-  // The campaign's window is what the referral expects, but the registry enforces a global cap.
-  const horizon = attributionWindow < maxTouchDuration ? attributionWindow : maxTouchDuration;
+  const horizon = effectiveHorizon(attributionWindow, maxTouchDuration);
   const expiresAt = signedAt + horizon;
 
   return {campaign, promoterId, signedAt, expiresAt};
+}
+
+/**
+ * The horizon the registry will allow, mirroring `AttributionRegistry._effectiveMaxDuration`.
+ *
+ * A zero campaign window means "no window of its own" rather than "no attribution": `Campaign`
+ * rejects a zero `attributionWindow` at construction, so zero here is a non-campaign address and
+ * the global cap stands. Treating it as zero would build a touch that fails `TouchExpired`.
+ */
+export function effectiveHorizon(attributionWindow: bigint, maxTouchDuration: bigint): bigint {
+  if (attributionWindow <= BigInt(0)) return maxTouchDuration;
+  return attributionWindow < maxTouchDuration ? attributionWindow : maxTouchDuration;
 }
 
 /** Eligibility to store a touch. Mirrors `AttributionRegistry.storeTouch` reverts. */
@@ -130,6 +168,11 @@ function no(reason: string): TouchEligibility {
  * Mirrors every guard in `AttributionRegistry.storeTouch`. The contract is the authority;
  * this exists so the UI can block or explain before the referral signs.
  *
+ * `maxTouchDuration` here means the **effective** cap for the campaign in question — what
+ * `effectiveMaxDuration(campaign)` returns, which is `min(attributionWindow, maxTouchDuration)`.
+ * Passing the global cap alone would under-report `TouchTooLong` on a campaign with a tighter
+ * window and let the UI wave through a touch the chain rejects.
+ *
  * Does not check signature validity — that is always deferred to the chain.
  */
 export function canStoreTouch(ctx: {
@@ -137,6 +180,7 @@ export function canStoreTouch(ctx: {
   promoterRegistered: boolean;
   storedSignedAt: bigint;
   now: number;
+  /** The effective cap for this campaign — see `fetchEffectiveMaxDuration`. */
   maxTouchDuration: bigint;
 }): TouchEligibility {
   const nowTs = BigInt(ctx.now);

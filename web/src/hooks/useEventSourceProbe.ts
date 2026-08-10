@@ -4,6 +4,7 @@ import {useQuery} from "@tanstack/react-query";
 import {usePublicClient} from "wagmi";
 import type {PublicClient} from "viem";
 import {probeEventSource, type ProbeInput, type ProbeFinding} from "@/lib/kpiSource";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 
 /**
  * Debounce interval for the probe, matching the form's keystroke pace.
@@ -26,7 +27,7 @@ const PROBE_DEBOUNCE_MS = 600;
  * what gets credited; the probe is a second opinion before the gas is spent.
  */
 export function useEventSourceProbe(input: ProbeInput) {
-  const client = usePublicClient();
+  const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
 
   const enabled = Boolean(client) && input.source.trim().length > 0;

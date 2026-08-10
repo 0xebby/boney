@@ -66,8 +66,8 @@ interface IAttributionRegistry {
     ///         Returns `bytes32(0)` when there is no live touch.
     /// @param campaign The campaign to query.
     /// @param user The end user.
-    /// @return The attributed promoter id, or `bytes32(0)` if none is live.
-    function activePromoter(address campaign, address user) external view returns (bytes32);
+    /// @return promoterId attributed promoter id, or `bytes32(0)` if none is live.
+    function activePromoter(address campaign, address user) external view returns (bytes32 promoterId);
 
     /// @notice The stored touch for a user in a campaign, expired or not. Exposes `signedAt` so
     ///         verifier adapters can tell which actions predate the current attribution.
@@ -75,6 +75,14 @@ interface IAttributionRegistry {
     /// @param user The end user.
     /// @return The stored touch; zero-valued if the user never signed one here.
     function touchOf(address campaign, address user) external view returns (Touch memory);
+
+    /// @notice The longest horizon a touch for `campaign` may claim right now.
+    /// @dev `min(campaign.attributionWindow, maxTouchDuration)`, falling back to the global cap for
+    ///      a registrant that is not a campaign. This is the bound `storeTouch` enforces, so a
+    ///      frontend should build `expiresAt` against this rather than the global cap alone.
+    /// @param campaign The campaign the touch names.
+    /// @return Seconds; add to the current timestamp for the maximum `expiresAt`.
+    function effectiveMaxDuration(address campaign) external view returns (uint64);
 
     /// @notice Whether `campaign` has registered `promoterId` in its own namespace.
     /// @param campaign The registering campaign.

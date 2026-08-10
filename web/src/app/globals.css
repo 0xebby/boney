@@ -164,6 +164,36 @@ body {
   border-radius: 2px;
 }
 
+/**
+ * Blinking beta chip in the top bar.
+ *
+ * Opacity rather than `visibility` or a color swap, so the glyphs never reflow and the text stays
+ * selectable and legible to a screen reader throughout — a blink that toggles `display` would
+ * remove the word from the accessibility tree twice a second.
+ *
+ * It bottoms out at 0.25 instead of 0, so the label is always faintly present rather than fully
+ * disappearing. A chip that vanishes completely reads as a rendering fault; one that pulses reads
+ * as deliberate.
+ *
+ * `steps(1, end)` gives the hard on/off of a terminal cursor rather than a smooth fade, which is
+ * what "blinking" means for a status chip. The reduced-motion block below pins this to a single
+ * iteration, so a user who asked for less motion gets a static chip at full opacity.
+ */
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.25;
+  }
+}
+
+.animate-blink {
+  animation: blink 1.2s steps(1, end) infinite;
+}
+
 /* Respect reduced-motion for every transition in the app. */
 @media (prefers-reduced-motion: reduce) {
   *,

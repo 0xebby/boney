@@ -273,8 +273,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     }
 
     /// @inheritdoc ICampaign
-    /// @dev Only from `Pending`. Once active, promoters may have earned rewards, so cancellation
-    ///      would be a rug.
+    /// @dev Only from `Pending`. Once active, promoters may have earned rewards, so cancellation would be a rug.
     function cancel() external onlyProject {
         if (status != Types.CampaignStatus.Pending) revert WrongStatus(status);
 
@@ -330,15 +329,22 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
+    /// @dev Accepted while Active and inside the campaign window, **and** for `CLAIM_GRACE` after
+    ///      `end()`. The post-end half is load-bearing: `end()` is callable by the project at any
+    ///      time, so a reporting cutoff pinned to Active alone let a project end early and strand
+    ///      progress its promoters had already earned — the referrals were attributed, the actions
+    ///      happened, and no transaction could ever record them. Reporting now closes on exactly
+    ///      the second `reclaimUnspent` opens, so escrow is never reclaimable while credit is
+    ///      still owed.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external
         nonReentrant
-        onlyActive
     {
+        _requireReportableStatus();
         if (msg.sender != project && msg.sender != oracleCoordinator) revert NotReporter();
         if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
         if (user == address(0)) revert ZeroAddress();
-        _requireWindow();
+        _requireReportWindow();
 
         Types.KpiSpec storage spec = _kpis[kpiIndex];
         if (spec.aggregate) revert AggregateKpi(kpiIndex);
@@ -349,7 +355,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (delta == 0) return; // idempotent replay
 
         // Resolve attribution before crediting: unattributed actions have no payee.
-        bytes32 promoterId = attributionRegistry.activePromoter(address(this), user);
+        bytes32 promoterId = _resolvePromoterId(user);
         if (promoterId == bytes32(0)) revert NoAttribution(user);
         address promoter = _promoterOf[promoterId];
         if (promoter == address(0)) revert NoAttribution(user);
@@ -472,6 +478,57 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (block.timestamp < startTime || block.timestamp > endTime) {
             revert OutsideWindow(startTime, endTime);
         }
+    }
+
+    /// @dev Who gets paid for `user`'s actions.
+    ///
+    ///      While the campaign is live this is strictly `activePromoter` — an expired touch credits
+    ///      nobody, which is the consent model `AttributionRegistry` is built on: attribution lapses,
+    ///      and a promoter who goes quiet loses it. `test_Report_recoverableAfterAttributionExpires`
+    ///      pins the consequence that a lapse hands everything to whoever the user signs for next.
+    ///
+    ///      After `end()` that rule would defeat the reporting grace window it sits next to. Touch
+    ///      TTLs are days and campaigns run for weeks, so by the time a withheld report can finally
+    ///      be filed most touches have lapsed and every one of those reports would revert
+    ///      `NoAttribution` — handing the project back exactly the escrow the grace window exists to
+    ///      protect. So once the campaign is Ended, and only then, the stored touch is honoured even
+    ///      if expired.
+    ///
+    ///      That relaxation cannot be used to steal credit. `storeTouch` overwrites only with a
+    ///      strictly newer `signedAt`, so the stored touch is always the user's latest signed
+    ///      intent; it rejects an already-expired `expiresAt`, so no one can backfill a stale touch
+    ///      after the fact; and it is bounded to `CLAIM_GRACE`, after which reporting closes
+    ///      entirely. No new activity can occur post-end, so the only question left is who earned
+    ///      what already happened.
+    function _resolvePromoterId(address user) private view returns (bytes32) {
+        bytes32 live = attributionRegistry.activePromoter(address(this), user);
+        if (live != bytes32(0)) return live;
+        if (status != Types.CampaignStatus.Ended) return bytes32(0);
+        return attributionRegistry.touchOf(address(this), user).promoterId;
+    }
+
+    /// @dev Statuses that may still receive reports: Active, or Ended inside `CLAIM_GRACE`. Mirrors
+    ///      `settle`'s guard so crediting and paying open and close together, and is the exact
+    ///      complement of `reclaimUnspent` — that requires `block.timestamp > endedAt + CLAIM_GRACE`,
+    ///      so the two windows can never overlap.
+    ///
+    ///      Paused is intentionally excluded: pausing halts reporting, and it cannot be used to
+    ///      strand anyone because `end()` is permissionless once `endTime` passes, which converts a
+    ///      parked campaign into an Ended one and starts the grace clock.
+    function _requireReportableStatus() private view {
+        if (status == Types.CampaignStatus.Ended) {
+            if (block.timestamp > endedAt + CLAIM_GRACE) revert WrongStatus(status);
+        } else if (status != Types.CampaignStatus.Active) {
+            revert WrongStatus(status);
+        }
+    }
+
+    /// @dev While Active the campaign window bounds reports. Once Ended, the grace window already
+    ///      bounded them in `_requireReportableStatus`, and `endedAt` is necessarily past
+    ///      `startTime`, so re-checking `endTime` here would reject every post-end report.
+    function _requireReportWindow() private view {
+        if (status == Types.CampaignStatus.Ended) return;
+        _requireWindow();
     }
 
     // ── views ────────────────────────────────────────────────────

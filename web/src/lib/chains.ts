@@ -88,7 +88,23 @@ export function isDeployed(chainId: number | undefined): boolean {
   return d !== undefined && d.boney !== ZERO_ADDRESS;
 }
 
-export const DEFAULT_CHAIN = anvil;
+/**
+ * Chain to read from when no wallet is connected.
+ *
+ * wagmi has no concept of "no chain": `createConfig` seeds its store with `chains[0].id` and
+ * `getClient` falls back to it, so a visitor who has never connected still resolves to a chain —
+ * here that was `anvil`, which is a developer's local node and not something a public visitor can
+ * reach. Because `isDeployed(31337)` is true (anvil has a generated deployment), the "not available
+ * on this network" empty states did not fire either; the app simply issued reads against a dead
+ * endpoint and rendered an empty marketplace.
+ *
+ * Base Sepolia is the default because it is the deployment the public actually shares. Override
+ * with `NEXT_PUBLIC_DEFAULT_CHAIN_ID` when developing against a local node — note this only affects
+ * *disconnected* browsing; a connected wallet's own chain always wins (see `useBoneyChainId`).
+ */
+export const DEFAULT_CHAIN_ID = Number(
+  process.env.NEXT_PUBLIC_DEFAULT_CHAIN_ID ?? baseSepolia.id,
+);
 
 /** Block explorer URL for an address, or undefined for local chains. */
 export function explorerAddressUrl(chainId: number, address: string): string | undefined {
