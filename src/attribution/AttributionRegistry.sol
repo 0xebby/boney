@@ -5,6 +5,14 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 
+/// @dev The one thing this registry reads back from a campaign. Declared locally, and read through
+///      a low-level staticcall rather than a typed call, so the registry keeps working for
+///      registrants that are not campaigns at all — see `_effectiveMaxDuration`.
+interface ICampaignWindow {
+    /// @notice The campaign's configured attribution horizon, in seconds.
+    function attributionWindow() external view returns (uint64);
+}
+
 /// @title AttributionRegistry
 /// @notice Attributes end users to promoters within a campaign.
 /// @dev Model: LAST_TOUCH. A promoter's tracking link encodes an opaque, campaign-bound
@@ -85,8 +93,11 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         uint64 nowTs = uint64(block.timestamp);
         if (touch.signedAt > nowTs) revert TouchNotYetValid(touch.signedAt, nowTs);
         if (touch.expiresAt <= nowTs) revert TouchExpired(touch.expiresAt, nowTs);
-        if (touch.expiresAt > nowTs + maxTouchDuration) {
-            revert TouchTooLong(touch.expiresAt, nowTs + maxTouchDuration);
+
+        // The campaign's own window binds here, not just in the client that builds the touch.
+        uint64 maxExpiresAt = nowTs + _effectiveMaxDuration(touch.campaign);
+        if (touch.expiresAt > maxExpiresAt) {
+            revert TouchTooLong(touch.expiresAt, maxExpiresAt);
         }
 
         // The campaign named in the signed payload must have registered the id itself.
@@ -108,6 +119,40 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         _touches[user][touch.campaign] = touch;
 
         emit TouchStored(touch.campaign, user, touch.promoterId, touch.signedAt, touch.expiresAt, relayer);
+    }
+
+    /// @inheritdoc IAttributionRegistry
+    function effectiveMaxDuration(address campaign) external view returns (uint64) {
+        return _effectiveMaxDuration(campaign);
+    }
+
+    /// @dev The horizon a touch for `campaign` may actually claim: the campaign's own
+    ///      `attributionWindow`, floored by this registry's global `maxTouchDuration`.
+    ///
+    ///      Read through a low-level staticcall rather than a typed interface call on purpose.
+    ///      Registration is namespaced by registrant (see `registerPromoter`), so the registry
+    ///      deliberately does not require a registrant to be a `Campaign` — a typed call would
+    ///      revert on an EOA registrant and turn that documented independence into a hard
+    ///      dependency. A target that does not answer simply has no window of its own, and the
+    ///      global cap stands.
+    ///
+    ///      The global cap is a floor on the *max*, never bypassed: a campaign returning a huge
+    ///      window still clamps to `maxTouchDuration`, so a hostile or buggy campaign contract
+    ///      cannot widen its own horizon. It can only narrow it, which is the campaign's own
+    ///      prerogative — `attributionWindow` is immutable and set at creation.
+    function _effectiveMaxDuration(address campaign) private view returns (uint64) {
+        (bool ok, bytes memory data) =
+            campaign.staticcall(abi.encodeCall(ICampaignWindow.attributionWindow, ()));
+
+        // A non-campaign returns no data; a conforming campaign returns exactly one word.
+        if (!ok || data.length != 32) return maxTouchDuration;
+
+        uint64 window = abi.decode(data, (uint64));
+        // Campaign.sol rejects a zero window at construction, so zero here means "not a campaign"
+        // rather than "no attribution allowed" — falling through to the cap keeps a decoding
+        // surprise from bricking every touch for that address.
+        if (window == 0 || window > maxTouchDuration) return maxTouchDuration;
+        return window;
     }
 
     /// @inheritdoc IAttributionRegistry

@@ -3,6 +3,7 @@
 import {useQuery} from "@tanstack/react-query";
 import {usePublicClient, useAccount} from "wagmi";
 import {CampaignAbi} from "@/lib/abis";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import type {CampaignView} from "@/lib/types";
 import type {PublicClient} from "viem";
 
@@ -28,7 +29,7 @@ export type JoinedCampaign = {
  * otherwise be answered from the pre-join block.
  */
 export function useJoinedCampaigns(campaigns: readonly CampaignView[]) {
-  const client = usePublicClient();
+  const client = usePublicClient({chainId: useBoneyChainId()});
   const {address} = useAccount();
 
   const query = useQuery({
@@ -39,6 +40,11 @@ export function useJoinedCampaigns(campaigns: readonly CampaignView[]) {
       campaigns.map((c) => c.campaign).join(","),
     ],
     enabled: Boolean(client && address && campaigns.length > 0),
+    // `AppShell` observes this on every route to decide whether to show the Promoters tab, so the
+    // 10s global default would re-run an N+1 fan-out on every navigation. Membership changes only
+    // when the wallet signs a join — and that path calls `refetch` directly — so a minute of
+    // staleness costs nothing and a route change costs zero reads.
+    staleTime: 60_000,
     queryFn: async (): Promise<JoinedCampaign[]> => {
       if (!client || !address) return [];
 

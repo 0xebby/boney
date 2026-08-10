@@ -3,6 +3,7 @@
 import {useState} from "react";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
+import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
 import {useFundCampaign, useCampaignLifecycle} from "@/hooks/useWriteCampaign";
 import {isPending, type TxState} from "@/hooks/useWriteCampaign";
 import {
@@ -122,7 +123,7 @@ export function ProjectActions({
               onClick={() => setFundAmount(toAmountInput(shortfall, token.decimals))}
               className="text-xs text-brand hover:underline"
             >
-              Fill shortfall ({formatTokenAmount(shortfall, token.decimals, {compact: true})}{" "}
+              Fund Campaign Reward Pool ({formatTokenAmount(shortfall, token.decimals, {compact: true})}{" "}
               {token.symbol})
             </button>
           </div>
@@ -272,15 +273,8 @@ function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
       ) : state.status === "confirmed" ? (
         <p className="text-good">Confirmed.</p>
       ) : (
-        <p className="text-critical">
-          {state.message}{" "}
-          <button
-            type="button"
-            onClick={onReset}
-            className="text-ink-muted underline hover:text-ink"
-          >
-            Dismiss
-          </button>
+        <p>
+          <TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />
         </p>
       )}
     </div>

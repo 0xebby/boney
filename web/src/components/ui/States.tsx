@@ -43,13 +43,31 @@ export function SkeletonRows({rows = 5, cols = 6}: {rows?: number; cols?: number
   );
 }
 
-export function ErrorState({message, onRetry}: {message: string; onRetry?: () => void}) {
+/**
+ * `detail` is the machine-readable cause — a contract's `ErrorName(args)`, an HTTP status. It
+ * renders under the message in mono at reduced weight so it is available to paste into a bug
+ * report without competing with the sentence a user is meant to read.
+ */
+export function ErrorState({
+  message,
+  detail,
+  onRetry,
+}: {
+  message: string;
+  detail?: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
       <p className="flex items-center gap-1.5 text-sm font-medium text-critical">
         <span aria-hidden>⚠</span> Something went wrong
       </p>
       <p className="max-w-md text-xs leading-relaxed text-ink-muted">{message}</p>
+      {detail ? (
+        <p className="max-w-md break-all font-mono text-[10px] leading-relaxed text-ink-secondary">
+          {detail}
+        </p>
+      ) : null}
       {onRetry ? (
         <button
           onClick={onRetry}

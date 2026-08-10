@@ -4,18 +4,18 @@ import {useCallback, useState} from "react";
 import {usePublicClient, useWalletClient} from "wagmi";
 import {
   parseEventLogs,
-  BaseError,
-  ContractFunctionRevertedError,
   type Hex,
   type PublicClient,
   type TransactionReceipt,
 } from "viem";
 import {BoneyAbi, CampaignAbi, CampaignRegistryAbi, IERC20Abi, AttributionRegistryAbi} from "@/lib/abis";
 import {getDeployment} from "@/lib/chains";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {buildCreateCampaignArgs, toWireKpis} from "@/lib/campaignArgs";
+import {describeTxError} from "@/lib/txErrors";
 import {
   buildTouch,
-  fetchMaxTouchDuration,
+  fetchEffectiveMaxDuration,
   attributionDomain,
   TOUCH_EIP712_TYPES,
 } from "@/lib/attribution";
@@ -44,7 +44,8 @@ export type TxState =
   /** In the mempool. */
   | {status: "submitted"; hash: Hex}
   | {status: "confirmed"; hash: Hex}
-  | {status: "error"; message: string};
+  /** `message` is plain language; `detail` is the raw `ErrorName(args)` for a bug report. */
+  | {status: "error"; message: string; detail?: string};
 
 const IDLE: TxState = {status: "idle"};
 
@@ -54,32 +55,15 @@ export function isPending(state: TxState): boolean {
 }
 
 /**
- * Turns a viem error into something a user can act on.
+ * Error copy lives in `lib/txErrors`, not here.
  *
- * A reverted simulation carries the contract's own custom error (and its args) inside a nested
- * `ContractFunctionRevertedError`. Surfacing that name beats the default multi-paragraph dump,
- * which buries it under the full calldata. A wallet rejection is not an error worth alarming
- * about, so it gets its own plain message.
+ * A revert reaches this hook as a custom error name and its arguments — `WrongStatus(3)`,
+ * `InsufficientReputation(24620, 50000)` — which is exact and unreadable. Translating it is pure
+ * string work over the contract ABIs, so it belongs in a unit-tested module rather than inside a
+ * React hook. Re-exported so existing call sites keep importing it from here.
  */
-export function describeTxError(err: unknown): string {
-  if (err instanceof BaseError) {
-    const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError);
-    if (reverted instanceof ContractFunctionRevertedError) {
-      const name = reverted.data?.errorName;
-      if (name) {
-        const args = reverted.data?.args;
-        return args && args.length > 0 ? `${name}(${args.map(String).join(", ")})` : name;
-      }
-      if (reverted.reason) return reverted.reason;
-    }
-    // 4001 is the EIP-1193 user-rejected-request code.
-    if (/User rejected|denied transaction|4001/i.test(err.message)) {
-      return "Transaction rejected in wallet.";
-    }
-    return err.shortMessage || err.message;
-  }
-  return err instanceof Error ? err.message : String(err);
-}
+export {describeTxError} from "@/lib/txErrors";
+export type {TxErrorCopy} from "@/lib/txErrors";
 
 /**
  * Shared runner for a single write.
@@ -105,14 +89,22 @@ function useTx() {
 
         const receipt = await client.waitForTransactionReceipt({hash});
         if (receipt.status !== "success") {
-          setState({status: "error", message: "Transaction reverted on chain."});
+          // Simulation passed but execution didn't, so state moved between the two. There is no
+          // error name to decode from a receipt — the reason lives in the trace — so this says
+          // what the user can actually do rather than inventing a cause.
+          setState({
+            status: "error",
+            message:
+              "The transaction reverted on chain — the campaign's state changed after this page loaded. Reload and try again.",
+            detail: `receipt status: ${receipt.status}`,
+          });
           return;
         }
 
         onConfirmed?.(receipt);
         setState({status: "confirmed", hash});
       } catch (err) {
-        setState({status: "error", message: describeTxError(err)});
+        setState({status: "error", ...describeTxError(err)});
       }
     },
     [],
@@ -121,9 +113,17 @@ function useTx() {
   return {state, setState, reset, run};
 }
 
-/** Clients plus the resolved deployment, or an error message explaining what's missing. */
+/**
+ * Clients plus the resolved deployment, or an error message explaining what's missing.
+ *
+ * Pinning the public client to `useBoneyChainId` is safe for a *write* path specifically because
+ * every writer below bails with "Connect a wallet…" when `walletClient` is missing, and with a
+ * wallet connected that hook returns the wallet's own chain. So this never simulates against the
+ * disconnected default — it only removes the window where wagmi's store still reports `chains[0]`
+ * for a render after mount, which would otherwise resolve the deployment for the wrong chain.
+ */
 function useWriteContext() {
-  const publicClient = usePublicClient();
+  const publicClient = usePublicClient({chainId: useBoneyChainId()});
   const {data: walletClient} = useWalletClient();
   const deployment = getDeployment(publicClient?.chain?.id);
 
@@ -374,14 +374,67 @@ export function useJoinCampaign() {
   return {state, join, reset, promoterId};
 }
 
-/*
- * There is deliberately no `useSettleRewards`.
+/**
+ * `Campaign.settle(promoter, kpiIndex)` — the recovery path for a tier that was crossed but never
+ * paid.
  *
- * `Campaign.settle` exists and is permissionless, but it is not a payment path: `_settle` runs
- * inline at the end of `reportUserAction`, releasing escrow to the promoter's wallet in the same
- * transaction that credits progress. A settle hook would only ever back a button that pays zero.
- * Recovering a genuinely unsettled tier is an operator action, not a promoter-facing one.
+ * Not the normal payment path, and the UI must not present it as one: `_settle` runs inline at the
+ * end of `reportUserAction`, releasing escrow in the same transaction that credits progress, so on
+ * the happy path there is nothing left to settle. `canSettle` in `lib/promoter` gates the button on
+ * a non-zero payout for exactly that reason — see the note there.
+ *
+ * `promoter` is a parameter rather than the connected account because the contract pays the address
+ * it is handed, not `msg.sender`. Anyone can push a promoter's earned tiers through, which is what
+ * keeps a promoter from depending on the project to get paid after a campaign ends.
+ *
+ * Per-KPI by necessity: the tier ladder is keyed by `(promoter, kpiIndex)` and `settle` walks one
+ * ladder, so a promoter owed on two KPIs signs twice. `pendingKpi` tracks which one is in flight so
+ * only that row shows a spinner — same reason `useCampaignLifecycle` tracks `action`.
  */
+export function useSettleRewards() {
+  const {publicClient, walletClient} = useWriteContext();
+  const {state, setState, reset, run} = useTx();
+  const [pendingKpi, setPendingKpi] = useState<number | null>(null);
+
+  const settle = useCallback(
+    async (campaign: `0x${string}`, promoter: `0x${string}`, kpiIndex: number) => {
+      if (!publicClient || !walletClient) {
+        setState({status: "error", message: "Connect a wallet to settle these rewards."});
+        return;
+      }
+
+      const account = walletClient.account;
+      setPendingKpi(kpiIndex);
+
+      await run(
+        async () => {
+          const {request} = await publicClient.simulateContract({
+            account,
+            address: campaign,
+            abi: CampaignAbi,
+            functionName: "settle",
+            args: [promoter, BigInt(kpiIndex)],
+          });
+          return walletClient.writeContract(request);
+        },
+        undefined,
+        publicClient,
+      );
+    },
+    [publicClient, walletClient, run, setState],
+  );
+
+  return {
+    state,
+    settle,
+    reset: useCallback(() => {
+      setPendingKpi(null);
+      reset();
+    }, [reset]),
+    /** Which KPI's settle is in flight, so only that button shows a spinner. */
+    pendingKpi,
+  };
+}
 
 // ── attribution ──────────────────────────────────────────────────
 
@@ -420,23 +473,16 @@ export function useStoreTouch() {
 
       await run(
         async () => {
-          const [attributionWindow, maxTouchDuration, block] = await Promise.all([
-            publicClient.readContract({
-              address: campaign,
-              abi: CampaignAbi,
-              functionName: "attributionWindow",
-            }),
-            fetchMaxTouchDuration(publicClient, registry),
+          // One read, not two: the registry resolves `min(attributionWindow, maxTouchDuration)`
+          // itself and enforces exactly that in `storeTouch`, so asking it removes the chance of
+          // this client computing a different minimum and producing a touch that reverts
+          // `TouchTooLong` after the referral has already signed.
+          const [horizon, block] = await Promise.all([
+            fetchEffectiveMaxDuration(publicClient, registry, campaign),
             publicClient.getBlock(),
           ]);
 
-          const built = buildTouch(
-            campaign,
-            promoterId,
-            attributionWindow,
-            maxTouchDuration,
-            Number(block.timestamp),
-          );
+          const built = buildTouch(campaign, promoterId, horizon, horizon, Number(block.timestamp));
 
           // The referral signs; the connected wallet relays. They are usually the same account here,
           // but the contract does not require it and neither does this.

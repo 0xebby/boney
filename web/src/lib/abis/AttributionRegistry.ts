@@ -65,6 +65,25 @@ export const AttributionRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "effectiveMaxDuration",
+    "inputs": [
+      {
+        "name": "campaign",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "eip712Domain",
     "inputs": [],
     "outputs": [

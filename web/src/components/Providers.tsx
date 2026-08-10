@@ -19,8 +19,12 @@ export function Providers({children}: {children: ReactNode}) {
           queries: {
             staleTime: 10_000,
             retry: 1,
-            // Chain data changes on block time; refetching on every focus is noise.
-            refetchOnWindowFocus: false,
+            // Chain state can move while a tab sits in the background — a campaign ended from
+            // another tab, another wallet, or anyone at all once its window closes. Refetching on
+            // focus is the cheapest way to notice: it costs nothing while away and resolves the
+            // "came back to a stale page" case without polling. `staleTime` above still collapses
+            // the rapid focus/blur bursts that made this look like noise.
+            refetchOnWindowFocus: true,
           },
         },
       }),

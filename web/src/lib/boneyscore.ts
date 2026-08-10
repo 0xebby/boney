@@ -1,7 +1,7 @@
 /**
  * BoneyScore — the composite reputation number `Campaign.join()` gates on.
  *
- *   BoneyScore = 7 * ETHOS_SCORE + 3 * REACH
+ *   BoneyScore = 7 * ETHOS_SCORE + 3 * X_REACH
  *
  * Why the inputs are normalised before they reach the chain
  * --------------------------------------------------------
@@ -20,10 +20,23 @@
  * side mirrors the weights in `script/SeedLocal.s.sol` (ETHOS_WEIGHT / REACH_WEIGHT).
  */
 
-/** Schema names, hashed to schema ids by `ReputationRegistry.schemaId`. */
+/**
+ * Schema names, hashed to schema ids by `ReputationRegistry.schemaId`.
+ *
+ * The `X_` prefix names the *source*, not the metric: both are derived from an X account, and
+ * `fetchSmartFollowers` already reads a second, unrelated follower count from Kaito. Dropping the
+ * prefix would leave no room for that one to land later without a migration.
+ *
+ * These strings are load-bearing in a way a constant name is not: `schemaId` is `keccak256(name)`,
+ * so a rename silently repoints every read at a schema the registry has never heard of, and
+ * `valueOf` answers 0 for an unknown id exactly as it does for an unattested wallet. There is no
+ * error to notice. Both deployed registries (anvil and Base Sepolia) register `X_REACH` at weight
+ * 3 and `X_FOLLOWERS` at weight 0 — verified from their `SchemaRegistered` logs — so these names
+ * must match `SeedLocal.s.sol`, and neither side may be renamed alone.
+ */
 export const SCHEMA_ETHOS = "ETHOS_SCORE";
-export const SCHEMA_REACH = "REACH";
-export const SCHEMA_FOLLOWERS = "FOLLOWERS";
+export const SCHEMA_REACH = "X_REACH";
+export const SCHEMA_FOLLOWERS = "X_FOLLOWERS";
 
 /** On-chain schema weights. Must match `SeedLocal.s.sol`. */
 export const ETHOS_WEIGHT = 7;
@@ -201,4 +214,43 @@ export function explainScore(parts: ScoreParts): {
     reachPoints: REACH_WEIGHT * parts.reach,
     level: ethosLevel(parts.ethos),
   };
+}
+
+export type ScoreSplit = {
+  total: number;
+  ethosPoints: number;
+  reachPoints: number;
+  /** Share of the score contributed by credibility, 0–100. */
+  trustPct: number;
+  /** Share contributed by audience. Always `100 - trustPct` on a non-zero score. */
+  reachPct: number;
+};
+
+/**
+ * The trust/reach split as percentages, for the discovery table.
+ *
+ * `explainScore` gives the two halves in points, which answers "which half is short" for a promoter
+ * looking at their own gate. This answers a different question — the one a project browsing the
+ * directory asks: *what kind* of promoter is this, at a glance, independent of magnitude. Two
+ * promoters can score 14,000 with one carrying it on vouches and the other on followers, and the
+ * total alone cannot tell them apart.
+ *
+ * `reachPct` is derived as `100 - trustPct` rather than rounded independently. Rounding both would
+ * let them read 63/38 on the same row, and a split that does not sum to 100 undermines the one
+ * thing the pair is meant to convey. The consequence is that `trustPct` carries all the rounding
+ * error, which is the right place for it: it is the half the ranks are built on.
+ *
+ * A zero total returns zeroes rather than dividing by it. That case is real — an unattested wallet
+ * scores 0 — and the caller must render it as "no attestation", not as a 0/0 split, because a
+ * promoter with no record is not the same as one whose score is all reach.
+ */
+export function scoreSplit(parts: ScoreParts): ScoreSplit {
+  const ethosPoints = ETHOS_WEIGHT * parts.ethos;
+  const reachPoints = REACH_WEIGHT * parts.reach;
+  const total = ethosPoints + reachPoints;
+
+  if (total <= 0) return {total: 0, ethosPoints: 0, reachPoints: 0, trustPct: 0, reachPct: 0};
+
+  const trustPct = Math.round((100 * ethosPoints) / total);
+  return {total, ethosPoints, reachPoints, trustPct, reachPct: 100 - trustPct};
 }

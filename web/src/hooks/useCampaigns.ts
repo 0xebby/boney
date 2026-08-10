@@ -6,6 +6,7 @@ import type {PublicClient} from "viem";
 import {fetchBrowseCampaigns, fetchCampaignCount, fetchReputation} from "@/lib/contracts";
 import {IERC20MetadataAbi} from "@/lib/abis";
 import {isDeployed} from "@/lib/chains";
+import { useBoneyChainId } from "@/hooks/useBoneyChain";
 import type {CampaignView} from "@/lib/types";
 
 /** Token metadata, needed to format escrow amounts correctly. */
@@ -16,15 +17,36 @@ export type TokenMeta = {symbol: string; decimals: number};
  *
  * `browseCampaigns` is paginated on-chain; the MVP loads one page large enough for a local
  * chain. Real pagination is wired through `limit`/`offset` when campaign counts justify it.
+ *
+ * Polls on `POLL_MS` for the same reason the detail hook does — a status that changed on chain
+ * (a campaign ended, activated, or paused by anyone) would otherwise never reach an open list.
+ * Cheap by comparison: one `browseCampaigns` call for the whole page, plus one `symbol`/`decimals`
+ * pair per *distinct* token, so cost scales with token variety rather than campaign count.
  */
-export function useCampaigns({limit = 100}: {limit?: number} = {}) {
-  const client = usePublicClient();
+const POLL_MS = 30_000;
+
+/**
+ * @param enabled Set false to keep the query dormant. `AppShell` uses this so a disconnected
+ *   visitor's navigation costs zero reads — it only needs the list to decide whether the wallet is
+ *   a promoter, which is moot with no wallet.
+ * @param poll Set false to opt out of the interval. Every consumer shares one query key and React
+ *   Query polls at the shortest interval any observer asks for, so a page that wants live data
+ *   still gets it; this only stops routes whose *sole* observer is the nav (`/docs`, `/create`)
+ *   from polling the chain for a list they never render.
+ */
+export function useCampaigns({
+  limit = 100,
+  enabled = true,
+  poll = true,
+}: { limit?: number; enabled?: boolean; poll?: boolean } = {}) {
+  const client = usePublicClient({ chainId: useBoneyChainId() });
   const chainId = client?.chain?.id;
   const deployed = isDeployed(chainId);
 
   const query = useQuery({
     queryKey: ["campaigns", chainId, limit],
-    enabled: Boolean(client) && deployed,
+    enabled: Boolean(client) && deployed && enabled,
+    refetchInterval: poll ? POLL_MS : false,
     queryFn: async () => {
       if (!client) return {views: [] as CampaignView[], tokens: {} as Record<string, TokenMeta>};
 
@@ -80,9 +102,9 @@ async function fetchTokenMetas(
   return Object.fromEntries(entries);
 }
 
-/** The connected wallet's reputation score, used by the "joinable by me" filter. */
+/** The connected wallet's reputation score, used by the "Joinable by me" filter. */
 export function useReputation() {
-  const client = usePublicClient();
+  const client = usePublicClient({ chainId: useBoneyChainId() });
   const {address} = useAccount();
   const chainId = client?.chain?.id;
 
@@ -100,7 +122,7 @@ export function useReputation() {
 
 /** Total campaign count, for the summary row when the list is paginated. */
 export function useCampaignCount() {
-  const client = usePublicClient();
+  const client = usePublicClient({ chainId: useBoneyChainId() });
   const chainId = client?.chain?.id;
 
   const query = useQuery({

@@ -5,6 +5,7 @@ import {useAccount, usePublicClient, useWalletClient} from "wagmi";
 import type {PublicClient} from "viem";
 import {ReputationRegistryAbi, AttestationVerifierAbi} from "@/lib/abis";
 import {getDeployment} from "@/lib/chains";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 
 /**
  * Fetch signed attestations for the connected wallet and submit them on chain.
@@ -114,7 +115,7 @@ export type AttestState =
 
 export function useEthosAttestation() {
   const {address} = useAccount();
-  const publicClient = usePublicClient();
+  const publicClient = usePublicClient({chainId: useBoneyChainId()});
   const {data: walletClient} = useWalletClient();
   const [state, setState] = useState<AttestState>({status: "idle"});
 

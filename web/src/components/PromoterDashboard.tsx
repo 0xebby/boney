@@ -5,14 +5,22 @@ import Link from "next/link";
 import {useAccount} from "wagmi";
 import {useCampaigns, type TokenMeta} from "@/hooks/useCampaigns";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
+import {useReferredCampaigns} from "@/hooks/useReferredCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
-import {Card} from "@/components/ui/Card";
+import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {PromoterDirectory} from "@/components/PromoterDirectory";
 import {trackingLink} from "@/lib/promoter";
+import { projectName, hasProjectName } from "@/lib/projects";
+import {
+  classifyTouch,
+  sortReferrals,
+  countLive,
+  type ReferredCampaign,
+} from "@/lib/referrals";
 import {formatTokenAmount, formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
@@ -25,9 +33,16 @@ type JoinedRow = {
 /**
  * `/promoters` — promoter dashboard.
  *
- * Shows campaigns the connected wallet has joined, plus their tracking links. This is the
- * promoter's landing page: active campaigns and links to share. A "Join more" button routes to the
- * marketplace with the "Joinable by me" filter already set.
+ * Two roles, two tables. A wallet can hold both at once and they are genuinely different
+ * relationships, so neither is folded into the other:
+ *
+ *  - **Campaigns you promote** — memberships from `join()`, each with a tracking link to share.
+ *  - **Campaigns you were referred to** — campaigns where *this* wallet signed a Touch through
+ *    somebody else's link. The attribution is what credits that promoter when this wallet acts,
+ *    so it is worth being able to see, and until now nothing in the app read it back.
+ *
+ * A wallet with no memberships still sees the referral table (and vice versa); each carries its own
+ * empty state rather than the page hiding one behind the other.
  *
  * The dashboard does not total what each membership has paid — that requires one campaign-detail
  * read per membership to retrieve tier ladders and progress, which is better done on the detail
@@ -38,6 +53,7 @@ export function PromoterDashboard() {
   const {isConnected} = useAccount();
   const {campaigns, tokens, isLoading, error, refetch, deployed} = useCampaigns();
   const joinedQuery = useJoinedCampaigns(campaigns);
+  const referredQuery = useReferredCampaigns(campaigns);
   const now = useNow();
 
   const rows = useMemo((): JoinedRow[] => {
@@ -50,12 +66,23 @@ export function PromoterDashboard() {
     }));
   }, [joinedQuery.joined]);
 
+  const referredRows = useMemo(
+    () => sortReferrals(referredQuery.referred, now),
+    [referredQuery.referred, now],
+  );
+
   const activeCount = useMemo(
     () => rows.filter((r) => r.view.status === "Active").length,
     [rows],
   );
 
+  const liveReferrals = useMemo(
+    () => countLive(referredQuery.referred, now),
+    [referredQuery.referred, now],
+  );
+
   const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
+  const referredColumns = useMemo(() => buildReferredColumns(now), [now]);
 
   if (!deployed) {
     return (
@@ -98,11 +125,25 @@ export function PromoterDashboard() {
           value={rows.length.toLocaleString("en-US")}
           hint="one per campaign"
         />
+        <StatTile
+          label="Referred to"
+          value={referredRows.length.toLocaleString("en-US")}
+          hint={`${liveReferrals} still crediting`}
+          accent="var(--series-3)"
+        />
       </StatRow>
 
       <Card padded={false}>
+        {/* `Card` drops its padding so the table can run edge to edge; the header puts its own
+            back, matching how `PromoterDirectory` pads content inside an unpadded card. */}
+        <div className="px-4 pt-4">
+          <CardHeader
+            title="Campaigns you promote"
+            subtitle="Memberships you joined, and the link to share for each"
+          />
+        </div>
         {isLoading || joinedQuery.isLoading ? (
-          <SkeletonRows rows={3} cols={5} />
+          <SkeletonRows rows={3} cols={6} />
         ) : error ? (
           <ErrorState message={String(error)} onRetry={() => refetch()} />
         ) : joinedQuery.error ? (
@@ -112,7 +153,7 @@ export function PromoterDashboard() {
             rows={rows}
             columns={columns}
             rowKey={(r) => r.view.campaign}
-            initialSort={{key: "id", dir: "desc"}}
+                  initialSort={{ key: "id", dir: "asc" }}
             isRefreshing={joinedQuery.isRefreshing}
             emptyState={
               <EmptyState
@@ -126,6 +167,41 @@ export function PromoterDashboard() {
                     Browse the boneyard
                   </Link>
                 }
+              />
+            }
+          />
+        )}
+      </Card>
+
+      {/*
+        Referrals — campaigns somebody else's link brought this wallet to. Rendered even when
+        empty, because "nobody has referred you" is a fair answer to a question the page now
+        invites, and hiding the table would make the stat tile above point at nothing.
+      */}
+      <Card padded={false}>
+        <div className="px-4 pt-4">
+          <CardHeader
+            title="Campaigns you were referred to"
+            subtitle="Attributions you signed through a promoter's link"
+          />
+        </div>
+        {isLoading || referredQuery.isLoading ? (
+          <SkeletonRows rows={2} cols={5} />
+        ) : referredQuery.error ? (
+          <ErrorState
+            message={String(referredQuery.error)}
+            onRetry={() => referredQuery.refetch()}
+          />
+        ) : (
+          <DataTable
+            rows={referredRows}
+            columns={referredColumns}
+            rowKey={(r) => r.view.campaign}
+            isRefreshing={referredQuery.isRefreshing}
+            emptyState={
+              <EmptyState
+                title="No referrals yet"
+                description="When you follow a promoter's tracking link and confirm the attribution, the campaign shows up here."
               />
             }
           />
@@ -174,6 +250,17 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       ),
     },
     {
+      key: "project",
+      header: "Project",
+      sortValue: (r) => projectName(r.view),
+      render: (r) =>
+        hasProjectName(r.view) ? (
+          <span className="text-ink-secondary">{projectName(r.view)}</span>
+        ) : (
+          <span className="font-normal text-ink-muted">{shortAddress(r.view.project)}</span>
+        ),
+    },
+    {
       key: "status",
       header: "Status",
       sortValue: (r) => r.view.status,
@@ -212,6 +299,85 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
           <span className={Number(r.view.endTime) <= now ? "text-ink-muted" : undefined}>
             {formatTimeUntil(r.view.endTime, now)}
           </span>
+        );
+      },
+    },
+  ];
+}
+
+/**
+ * Columns for the referral table.
+ *
+ * Takes no `tokens`: a referral is not being paid from this escrow, so a reward pool would be
+ * noise. What matters instead is who referred them and whether the attribution is still crediting
+ * that person — the two facts nothing in the app surfaced before.
+ *
+ * Sorted by the hook (`sortReferrals`: live first, then most recent) rather than by `initialSort`,
+ * because the ordering depends on the clock and `DataTable`'s sort state is per-column.
+ */
+function buildReferredColumns(now: number): Column<ReferredCampaign>[] {
+  return [
+    {
+      key: "id",
+      header: "Campaign",
+      sortValue: (r) => r.view.campaignId,
+      render: (r) => (
+        <Link
+          href={`/campaign/${r.view.campaignId}`}
+          className="font-medium text-ink hover:underline"
+        >
+          #{r.view.campaignId.toString()}
+          <span className="ml-2 font-normal text-ink-muted">{shortAddress(r.view.campaign)}</span>
+        </Link>
+      ),
+    },
+    {
+      key: "project",
+      header: "Project",
+      sortValue: (r) => projectName(r.view),
+      render: (r) =>
+        hasProjectName(r.view) ? (
+          <span className="text-ink-secondary">{projectName(r.view)}</span>
+        ) : (
+          <span className="font-normal text-ink-muted">{shortAddress(r.view.project)}</span>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      hideOnMobile: true,
+      sortValue: (r) => r.view.status,
+      render: (r) => <StatusPill status={r.view.status} />,
+    },
+    {
+      key: "promoter",
+      header: "Referred by",
+      sortValue: (r) => r.promoter ?? r.promoterId,
+      render: (r) =>
+        // The wallet when `promoterOf` resolved, the opaque id when it did not — the attribution
+        // is real either way, so the row shows what it has rather than an em dash.
+        r.promoter ? (
+          <span className="text-ink-secondary">{shortAddress(r.promoter)}</span>
+        ) : (
+          <span className="font-mono text-[11px] text-ink-muted">
+            {shortAddress(r.promoterId, 8, 6)}
+          </span>
+        ),
+    },
+    {
+      key: "attribution",
+      header: "Attribution",
+      numeric: true,
+      sortValue: (r) => r.expiresAt,
+      render: (r) => {
+        // Same first-paint rule as every other clock-dependent cell: `useNow` reports 0 until
+        // hydration, and "expired" is the one thing that must not flash.
+        if (now === 0) return <span className="text-ink-muted">—</span>;
+
+        return classifyTouch(r, now) === "live" ? (
+          <span className="text-good">{formatTimeUntil(r.expiresAt, now)} left</span>
+        ) : (
+          <span className="text-ink-muted">Expired</span>
         );
       },
     },

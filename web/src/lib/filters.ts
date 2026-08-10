@@ -1,3 +1,4 @@
+import {projectName} from "./projects";
 import type {CampaignStatus, CampaignView} from "./types";
 
 /**
@@ -44,12 +45,20 @@ export function isJoinable(
  * substring match on addresses would make short queries useless: every hex address contains
  * "2", so searching `2` would return essentially every campaign. Address search therefore
  * requires a query that looks like hex — either `0x`-prefixed or at least four hex digits.
+ *
+ * Project *names* are matched before that hex gate, because a name is ordinary text and the
+ * reasoning above does not apply to it: "aave" is not a prefix of every campaign the way "2" is.
+ * Without this the placeholder's promise to search "projects" only held for people who knew the
+ * project's address, which is nobody scanning a marketplace. Note names are display-layer data
+ * (see `lib/projects`) — a campaign with no name simply never matches by name.
  */
 function matchesSearch(view: CampaignView, needle: string): boolean {
   const q = needle.trim().toLowerCase();
   if (!q) return true;
 
   if (/^\d+$/.test(q)) return view.campaignId.toString() === q;
+
+  if (projectName(view).toLowerCase().includes(q)) return true;
 
   const looksLikeAddress = q.startsWith("0x") || /^[0-9a-f]{4,}$/.test(q);
   if (!looksLikeAddress) return false;

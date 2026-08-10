@@ -31,6 +31,8 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     error ReportIsDisputed(bytes32 reportId);
     error ReportAlreadyApplied(bytes32 reportId);
     error UnknownCampaign(address campaign);
+    error NotUserReport(bytes32 reportId);
+    error NotAggregateReport(bytes32 reportId);
     error TransferFailed();
     error RegistryAlreadySet();
     error RegistryNotSet();
@@ -44,10 +46,15 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     /// @param reporter Account that submitted the report.
     /// @param campaign Campaign the report targets.
     /// @param kpiIndex KPI index within that campaign.
-    /// @param amount New campaign-level total being reported.
+    /// @param amount New total being reported — campaign-level for an aggregate report,
+    ///        `(user, kpi)`-level for a per-user one.
     /// @param deadline Timestamp after which the report may be applied.
     /// @param disputed Whether governance voided the report.
     /// @param applied Whether the report has already been pushed to the campaign.
+    /// @param user End user credited by a per-user report, or `address(0)` for an aggregate. This
+    ///        is the discriminator between the two kinds — a user report can never name the zero
+    ///        address, because `submitUserReport` rejects it.
+    /// @param evidence Verifier evidence forwarded to `reportUserAction`; empty for aggregates.
     struct ReportState {
         address reporter;
         address campaign;
@@ -56,6 +63,8 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
         uint64 deadline;
         bool disputed;
         bool applied;
+        address user;
+        bytes evidence;
     }
 
     /// @notice Registry used to confirm a target address is a real campaign.
@@ -140,44 +149,86 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
 
     /// @inheritdoc IOracleCoordinator
     function submitReport(Report calldata report) external returns (bytes32 reportId) {
+        return _record(report.campaign, report.kpiIndex, report.amount, address(0), "");
+    }
+
+    /// @inheritdoc IOracleCoordinator
+    /// @dev Rejects a zero user because `address(0)` is what marks a stored report as an aggregate;
+    ///      admitting one would let a per-user submission be applied through the aggregate branch.
+    function submitUserReport(UserReport calldata report) external returns (bytes32 reportId) {
+        if (report.user == address(0)) revert ZeroAddress();
+        return _record(report.campaign, report.kpiIndex, report.newTotal, report.user, report.evidence);
+    }
+
+    /// @dev Shared submission path for both report kinds: stake gate, campaign check, id
+    ///      derivation, and the collateral lock that keeps a reporter slashable while their report
+    ///      is in flight. `user` is folded into the id so the two kinds occupy disjoint id spaces.
+    function _record(address campaign, uint256 kpiIndex, uint256 amount, address user, bytes memory evidence)
+        private
+        returns (bytes32 reportId)
+    {
         if (_stake[msg.sender] < minStake) revert NotAReporter(msg.sender);
         if (address(campaignRegistry) == address(0)) revert RegistryNotSet();
-        if (!campaignRegistry.isCampaign(report.campaign)) revert UnknownCampaign(report.campaign);
+        if (!campaignRegistry.isCampaign(campaign)) revert UnknownCampaign(campaign);
 
         uint256 seq = _sequence[msg.sender]++;
-        reportId = keccak256(abi.encode(msg.sender, report.campaign, report.kpiIndex, report.amount, seq));
+        reportId = keccak256(abi.encode(msg.sender, campaign, kpiIndex, amount, user, seq));
         if (_reports[reportId].reporter != address(0)) revert ReportAlreadyExists(reportId);
 
         uint64 deadline = uint64(block.timestamp + disputeWindow);
         _reports[reportId] = ReportState({
             reporter: msg.sender,
-            campaign: report.campaign,
-            kpiIndex: report.kpiIndex,
-            amount: report.amount,
+            campaign: campaign,
+            kpiIndex: kpiIndex,
+            amount: amount,
             deadline: deadline,
             disputed: false,
-            applied: false
+            applied: false,
+            user: user,
+            evidence: evidence
         });
 
         // Keep collateral locked past this report's dispute window.
         uint256 lockUntil = block.timestamp + disputeWindow + unstakeDelay;
         if (lockUntil > stakeLockedUntil[msg.sender]) stakeLockedUntil[msg.sender] = lockUntil;
 
-        emit ReportSubmitted(reportId, report.campaign, msg.sender, deadline);
+        emit ReportSubmitted(reportId, campaign, msg.sender, deadline);
     }
 
     /// @inheritdoc IOracleCoordinator
     /// @dev Permissionless once the window closes: anyone can push a good report through.
     function applyReport(bytes32 reportId) external nonReentrant {
         ReportState storage r = _reports[reportId];
+        if (r.user != address(0)) revert NotAggregateReport(reportId);
+        _clearForApply(r, reportId);
+
+        ICampaign(r.campaign).applyAggregateUpdate(r.kpiIndex, r.amount);
+        emit ReportApplied(reportId, r.campaign);
+    }
+
+    /// @inheritdoc IOracleCoordinator
+    /// @dev The path that makes a promoter payable without the project's cooperation. The campaign
+    ///      resolves attribution, credits the promoter, and settles any crossed tier inline, so a
+    ///      single call turns an unreported action into tokens in a promoter's wallet.
+    function applyUserReport(bytes32 reportId) external nonReentrant {
+        ReportState storage r = _reports[reportId];
+        if (r.user == address(0)) revert NotUserReport(reportId);
+        _clearForApply(r, reportId);
+
+        ICampaign(r.campaign).reportUserAction(r.kpiIndex, r.user, r.amount, r.evidence);
+        emit ReportApplied(reportId, r.campaign);
+    }
+
+    /// @dev The checks-and-effects half both apply paths share. Marks the report applied *before*
+    ///      the external campaign call, so a reverting campaign cannot be retried into a double
+    ///      apply and a re-entrant one finds the flag already set.
+    function _clearForApply(ReportState storage r, bytes32 reportId) private {
         if (r.reporter == address(0)) revert UnknownReport(reportId);
         if (r.disputed) revert ReportIsDisputed(reportId);
         if (r.applied) revert ReportAlreadyApplied(reportId);
         if (block.timestamp < r.deadline) revert DisputeWindowOpen(r.deadline);
 
         r.applied = true;
-        ICampaign(r.campaign).applyAggregateUpdate(r.kpiIndex, r.amount);
-        emit ReportApplied(reportId, r.campaign);
     }
 
     /// @inheritdoc IOracleCoordinator

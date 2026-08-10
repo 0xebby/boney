@@ -12,6 +12,7 @@ import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {utilization} from "@/lib/campaign";
+import {projectName, hasProjectName} from "@/lib/projects";
 import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
@@ -116,7 +117,7 @@ export function MyCampaignsPage() {
 
       <Card padded={false}>
         {isLoading ? (
-          <SkeletonRows rows={3} cols={6} />
+          <SkeletonRows rows={3} cols={7} />
         ) : error ? (
           <ErrorState message={String(error)} onRetry={() => refetch()} />
         ) : (
@@ -124,7 +125,7 @@ export function MyCampaignsPage() {
             rows={mine}
             columns={columns}
             rowKey={(c) => c.campaign}
-            initialSort={{key: "id", dir: "desc"}}
+            initialSort={{key: "id", dir: "asc"}}
             isRefreshing={isRefreshing}
             emptyState={
               <EmptyState
@@ -172,6 +173,17 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
           <span className="ml-2 font-normal text-ink-muted">{shortAddress(c.campaign)}</span>
         </Link>
       ),
+    },
+    {
+      key: "project",
+      header: "Project",
+      sortValue: (c) => projectName(c),
+      render: (c) =>
+        hasProjectName(c) ? (
+          <span className="text-ink-secondary">{projectName(c)}</span>
+        ) : (
+          <span className="font-normal text-ink-muted">{shortAddress(c.project)}</span>
+        ),
     },
     {
       key: "status",

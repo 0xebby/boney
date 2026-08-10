@@ -3,11 +3,17 @@
 import {useState, useMemo} from "react";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
-import {useJoinCampaign, isPending, type TxState} from "@/hooks/useWriteCampaign";
+import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
+import {
+  useJoinCampaign,
+  useSettleRewards,
+  isPending,
+  type TxState,
+} from "@/hooks/useWriteCampaign";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useEthosAttestation} from "@/hooks/useEthosAttestation";
-import {canJoin, derivePromoterId, trackingLink} from "@/lib/promoter";
-import {settledRewards} from "@/lib/campaign";
+import {canJoin, canSettle, derivePromoterId, trackingLink} from "@/lib/promoter";
+import {settledRewards, settlementPayout} from "@/lib/campaign";
 import {daysUntilExpiry} from "@/lib/boneyscore";
 import {formatTokenAmount, formatDuration, shortAddress} from "@/lib/format";
 import {KPI_KIND_LABEL} from "@/lib/types";
@@ -20,11 +26,12 @@ import type {CampaignDetail, PromoterState} from "@/lib/campaignDetail";
  * with the contract's own reason rather than disappearing — "why can't I join?" is the question
  * this exists to answer.
  *
- * There is deliberately no claim control. `Campaign.reportUserAction` calls `_settle` inline, and
- * `_settle` calls `escrowVault.release(promoter, pay)` — so crossing a tier *is* the payment, and
- * the tokens are already in the promoter's wallet by the time progress is readable here. The
- * permissionless `Campaign.settle` still exists on chain as a recovery path; it is not a UI
- * affordance, because offering one implies rewards wait to be collected when they never do.
+ * Settlement is normally invisible here, and that is not an omission. `Campaign.reportUserAction`
+ * calls `_settle` inline, and `_settle` calls `escrowVault.release(promoter, pay)` — so crossing a
+ * tier *is* the payment, and the tokens are in the promoter's wallet before progress is readable.
+ * A claim button appears per KPI only when the chain says a crossed tier went unpaid, which is the
+ * one state `Campaign.settle` exists to clear; the rest of the time showing one would imply rewards
+ * wait to be collected when they never do.
  */
 export function PromoterPanel({
   detail,
@@ -41,6 +48,7 @@ export function PromoterPanel({
 }) {
   const {address, isConnected} = useAccount();
   const join = useJoinCampaign();
+  const settle = useSettleRewards();
   const {
     reputation,
     hasExpired,
@@ -74,21 +82,28 @@ export function PromoterPanel({
   );
 
   // Per-KPI progress and what the contract has marked settled — which is what it has paid.
+  //
+  // `owed` is the gap: tiers whose threshold this promoter has crossed that `_settledTiers` has not
+  // caught up to. `settlementPayout` caps it at the remaining pool rather than using the raw
+  // `unsettledRewards`, so the button never advertises more than escrow can transfer.
   const perKpi = useMemo(() => {
     if (!promoter?.joined) return [];
     return detail.kpis.map((kpi) => {
       const state = promoter.perKpi.find((s) => s.kpiIndex === kpi.index);
       const settled = state?.settledTiers ?? 0;
+      const progress = state?.progress ?? BigInt(0);
       return {
         kpi,
-        progress: state?.progress ?? BigInt(0),
+        progress,
         earned: settledRewards(kpi.tiers, settled),
+        owed: settlementPayout(progress, kpi.tiers, settled, detail.remainingPool).payout,
         settledTiers: settled,
       };
     });
   }, [detail, promoter]);
 
   const totalEarned = perKpi.reduce((sum, k) => sum + k.earned, BigInt(0));
+  const totalOwed = perKpi.reduce((sum, k) => sum + k.owed, BigInt(0));
 
   // `settledRewards` sums each crossed tier's full reward, but `Campaign._settle` advances
   // `_settledTiers` even when escrow could only cover part of a tier (it emits `PoolExhausted` for
@@ -119,7 +134,7 @@ export function PromoterPanel({
       <Card>
         <CardHeader title="Promote this campaign" subtitle="Earn rewards for verified results" />
         <p className="text-xs text-ink-muted">
-          Connect a wallet to join as a promoter and generate a tracking link.
+          Connect a wallet to join as a <b>promoter</b> and generate a <b>tracking link</b>.
         </p>
       </Card>
     );
@@ -255,8 +270,8 @@ export function PromoterPanel({
               </button>
             </div>
             <p className="text-xs text-ink-muted">
-              Traffic through this link is attributed to you for{" "}
-              {formatDuration(Number(detail.attributionWindow))} after each visit.
+                <b>Traffic through this link is attributed to you for{" "}
+                  {formatDuration(Number(detail.attributionWindow))} after each visit.</b>
             </p>
           </div>
 
@@ -268,10 +283,17 @@ export function PromoterPanel({
                 {formatTokenAmount(totalEarned, token.decimals)}{" "}
                 <span className="text-sm font-normal text-ink-muted">{token.symbol}</span>
               </p>
-              <p className="mt-1 text-xs text-ink-muted">
-                Rewards are sent to your wallet the moment a tier is crossed. There is nothing to
-                claim.
-              </p>
+              {totalOwed > BigInt(0) ? (
+                <p className="mt-1 text-xs text-warning">
+                  {formatTokenAmount(totalOwed, token.decimals)} {token.symbol} was earned but
+                  never paid out. Settling releases it to your wallet.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-ink-muted">
+                  Rewards are sent to your wallet the moment a tier is crossed. There is nothing to
+                  claim.
+                </p>
+              )}
               {poolDrained ? (
                 <p className="mt-1 text-xs text-warning">
                   This campaign&rsquo;s escrow is empty. Any tier crossed after it ran dry paid
@@ -281,20 +303,59 @@ export function PromoterPanel({
             </div>
 
             <ul className="mt-3 space-y-2">
-              {perKpi.map(({kpi, progress, earned, settledTiers}) => (
-                <li
-                  key={kpi.index}
-                  className="rounded border border-hairline px-3 py-2"
-                >
-                  <p className="text-xs font-medium text-ink">{KPI_KIND_LABEL[kpi.spec.kind]}</p>
-                  <p className="text-xs text-ink-muted">
-                    {progress.toLocaleString("en-US")} credited · {settledTiers}/
-                    {kpi.tiers.length} tiers · {formatTokenAmount(earned, token.decimals)}{" "}
-                    {token.symbol} paid
-                  </p>
-                </li>
-              ))}
+              {perKpi.map(({kpi, progress, earned, owed, settledTiers}) => {
+                const eligibility = canSettle({
+                  status: detail.status,
+                  joined: true,
+                  owed,
+                  endedAtSeconds: Number(detail.endedAt),
+                  claimGraceSeconds: Number(detail.claimGrace),
+                  nowSeconds,
+                  connected: isConnected,
+                });
+
+                return (
+                  <li key={kpi.index} className="rounded border border-hairline px-3 py-2">
+                    <p className="text-xs font-medium text-ink">{KPI_KIND_LABEL[kpi.spec.kind]}</p>
+                    <p className="text-xs text-ink-muted">
+                      {progress.toLocaleString("en-US")} credited · {settledTiers}/
+                      {kpi.tiers.length} tiers · {formatTokenAmount(earned, token.decimals)}{" "}
+                      {token.symbol} paid
+                    </p>
+
+                    {/*
+                      Only rendered when the chain says a crossed tier went unpaid. `settle` would
+                      succeed and transfer nothing otherwise, so an always-on button would cost the
+                      promoter gas to learn they were already paid.
+                    */}
+                    {owed > BigInt(0) ? (
+                      <div className="mt-2 space-y-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!address) return;
+                            await settle.settle(detail.address, address, kpi.index);
+                            onDone();
+                          }}
+                          disabled={!eligibility.ok || isPending(settle.state)}
+                          title={eligibility.reason}
+                          className="rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-plane hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {settle.pendingKpi === kpi.index && isPending(settle.state)
+                            ? "Settling…"
+                            : `Claim ${formatTokenAmount(owed, token.decimals)} ${token.symbol}`}
+                        </button>
+                        {!eligibility.ok ? (
+                          <p className="text-xs text-warning">{eligibility.reason}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
+
+            <TxFeedback state={settle.state} onReset={settle.reset} />
           </div>
         </div>
       )}
@@ -315,15 +376,8 @@ function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
       ) : state.status === "confirmed" ? (
         <p className="text-good">Confirmed.</p>
       ) : (
-        <p className="text-critical">
-          {state.message}{" "}
-          <button
-            type="button"
-            onClick={onReset}
-            className="text-ink-muted underline hover:text-ink"
-          >
-            Dismiss
-          </button>
+        <p>
+          <TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />
         </p>
       )}
     </div>

@@ -12,6 +12,7 @@ import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IKpiVerifier} from "../src/interfaces/IKpiVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Vm} from "lib/forge-std/src/Vm.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -207,6 +208,7 @@ contract CampaignTest is Test {
         Campaign c = Campaign(addr);
 
         assertEq(c.project(), project, "project is whoever the config names");
+         _fund(c, POOL);
 
         // The creator cannot drive it.
         vm.prank(outsider);
@@ -216,6 +218,22 @@ contract CampaignTest is Test {
         vm.prank(outsider);
         vm.expectRevert(Campaign.NotProject.selector);
         c.cancel();
+
+        vm.prank(project);
+        c.activate();
+
+        //vm.warp(block.timestamp + 100 days);
+
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        c.end();
+
+        vm.warp(block.timestamp + 100 days);
+
+        vm.prank(project);
+        c.reclaimUnspent();
     }
 
     function test_Create_revertsNonAscendingTiers() public {
@@ -696,7 +714,7 @@ contract CampaignTest is Test {
         _activate(campaign);
         bytes32 id = _join(campaign, kol);
         _touch(campaign, userPk, user, id, 7 days);
-
+//
         _report(campaign, project, user, 10);
 
         assertEq(token.balanceOf(kol), 1_000 ether, "tier 0 auto-paid");

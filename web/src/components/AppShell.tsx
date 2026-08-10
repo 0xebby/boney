@@ -6,7 +6,9 @@ import type {ReactNode} from "react";
 import {useAccount, useConnect, useDisconnect} from "wagmi";
 import {RankBadge} from "@/components/ui/RankBadge";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
+import {useIsPromoter} from "@/hooks/useIsPromoter";
 import {rankOf} from "@/lib/ranks";
+import {describeTxError} from "@/lib/txErrors";
 
 /**
  * AppShell — a persistent top bar over a single full-width content column.
@@ -19,14 +21,51 @@ import {rankOf} from "@/lib/ranks";
  *
  * Create is deliberately NOT in this list. It is the primary action of the whole product, so it
  * sits in the right-hand cluster as a filled button rather than reading as one more peer link.
+ *
+ * Two entries are personal rather than public, and appear only once they have something to show.
+ * A tab that can only ever render "nothing here" is a dead end that costs a navigation to discover:
+ *
+ *  - **My Campaigns** needs a wallet to know whose campaigns to filter to.
+ *  - **Promoters** is a dashboard of memberships and tracking links, so it waits until the wallet
+ *    actually holds one — see `useIsPromoter`.
+ *
+ * Both start hidden during the server render and the first client render, which is what keeps
+ * hydration consistent: wagmi rehydrates its connection inside an effect, so there is no wallet to
+ * read at markup time on either side. They appear a moment later rather than flashing wrong.
  */
-const NAV = [
+const PUBLIC_NAV = [
   {href: "/", label: "Campaigns", icon: "▦"},
-  {href: "/my", label: "My Campaigns", icon: "◈"},
   {href: "/discover", label: "Discover", icon: "◍"},
-  {href: "/promoters", label: "Promoters", icon: "◎"},
   {href: "/docs", label: "Docs", icon: "◌"},
 ] as const;
+
+const MY_CAMPAIGNS = {href: "/my", label: "My Campaigns", icon: "◈"} as const;
+const PROMOTERS = {href: "/promoters", label: "Promoters", icon: "◎"} as const;
+
+type NavItem = {href: string; label: string; icon: string};
+
+/**
+ * The nav in display order, with the personal entries spliced into the positions they occupy when
+ * present — "My Campaigns" beside the marketplace it filters, "Promoters" beside Discover, and Docs
+ * last either way. Building the list rather than rendering conditionals inline keeps that ordering
+ * in one place instead of spread across the JSX.
+ */
+function navItems({
+  isConnected,
+  isPromoter,
+}: {
+  isConnected: boolean;
+  isPromoter: boolean;
+}): NavItem[] {
+  const [campaigns, discover, docs] = PUBLIC_NAV;
+  return [
+    campaigns,
+    ...(isConnected ? [MY_CAMPAIGNS] : []),
+    discover,
+    ...(isPromoter ? [PROMOTERS] : []),
+    docs,
+  ];
+}
 
 /**
  * Wallet connect / disconnect.
@@ -43,11 +82,9 @@ function WalletButton() {
   const injected = connectors[0];
   const short = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "Connect wallet";
 
-  const failure = error
-    ? error.message.includes("rejected")
-      ? "Connection rejected."
-      : "Could not connect."
-    : null;
+  // Connect failures are wallet- and node-level, never contract reverts, so they go through the
+  // same prose matching every other failure uses rather than a bespoke `includes("rejected")`.
+  const failure = error ? describeTxError(error).message : null;
   const note = !isConnected && !injected ? "No browser wallet detected." : null;
 
   return (
@@ -127,6 +164,9 @@ function WalletRank() {
 
 export function AppShell({children}: {children: ReactNode}) {
   const pathname = usePathname();
+  const {isConnected} = useAccount();
+  const {isPromoter} = useIsPromoter();
+  const nav = navItems({isConnected, isPromoter});
 
   const navLink = ({href, label, icon}: {href: string; label: string; icon: string}) => {
     const active = pathname === href || (href !== "/" && pathname.startsWith(href));
@@ -175,11 +215,16 @@ export function AppShell({children}: {children: ReactNode}) {
             aria-label="Main"
             className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1"
           >
-            {NAV.map(navLink)}
+            {nav.map(navLink)}
           </nav>
 
           <div className="flex shrink-0 items-center gap-2.5">
-            <span className="hidden text-[10px] uppercase tracking-wider text-ink-muted xl:inline">
+            {/*
+              Brand yellow rather than the amber `--status-warning`: this is a badge on the product
+              itself, not a status on a campaign row, and borrowing the warning hue here would put
+              it in the same visual language as a Paused pill.
+            */}
+            <span className="animate-blink hidden text-[10px] font-bold uppercase tracking-wider text-brand xl:inline">
               beta
             </span>
 
