@@ -4,6 +4,10 @@
 
 Two promoters, scored against every campaign live on Boneyard today.
 
+![The Boneyard marketplace — 12 campaigns on Base Sepolia, 8 live](web/screenshots/shill-marketplace.png)
+
+*The live marketplace. Every row is a real `Campaign` contract on Base Sepolia — pool, status, and the* **Min. rep.** *column that decides who can join. Project names in that second column are placeholder seed labels, not real customers (see Notes).*
+
 ---
 
 ## 1. Scorecard
@@ -74,6 +78,12 @@ Ceiling at today's follower count: **25,363** for @leaf_swan, **25,045** for @xe
 
 **@xeverade** — you are **63 points** short of the single biggest live pool on Boneyard (#10, 100,000 bUSD). That is **+9 Ethos points**. One vouch. Campaign #2 needs +152 Ethos or 266k followers — the vouch is the cheap door.
 
+Here is the campaign in question:
+
+![Campaign #10 — 100K bUSD pool, minimum reputation 15,000](web/screenshots/shill-campaign-10.png)
+
+*Campaign #10: a 100,000 bUSD pool, 99.9K still unspent in escrow, running to 25 Dec 2026. The gate is the* **Min. reputation 15,000** *field. @leaf_swan clears it at 16,004. @xeverade sits at 14,937 — 63 points away from a three-tier ladder paying 100 / 500 / 1,000 bUSD.*
+
 Campaigns #5–#7 are Ethos-gated by design for both of you: at your current audiences, followers alone mathematically cannot clear them.
 
 > **Verify Ethos → attest on chain → join → get attributed → get paid.**
@@ -98,5 +108,7 @@ Closed to new promoters, listed for completeness.
 - **Gates** are the on-chain `minReputation` on each `Campaign`. A gate of 0 ("open") disables the check entirely.
 - **Eligibility** is computed through the real `canJoin` gate (`web/src/lib/promoter.ts`): status must be Active *or* Pending, and score ≥ gate.
 - **Campaign set** is all 12 live on Base Sepolia via `CampaignRegistry.campaignAt`. Campaigns carry no on-chain names, hence the ids.
+- **Project names in the screenshots are placeholders.** `web/src/lib/projects.ts` maps campaign *id* to a label (Aerodrome, Moonwell, Beefy…) purely so the marketplace column renders realistic data. Nothing on chain carries a project name, and all 12 seeded campaigns are owned by the same deployer key — these are not real projects.
+- **Screenshots** are of the app running against Base Sepolia at the snapshot date; figures in them match the tables above.
 
 Snapshot taken 2026-08-10.
