@@ -1,0 +1,231 @@
+import {classifyTouch, type TouchStatus} from "./referrals";
+import {nextTier} from "./campaign";
+import type {RewardTier} from "./types";
+
+/**
+ * Planning `reportUserAction` calls from a KOL selection — the dev reporting tool.
+ *
+ * Pure and React-free (decision F6); the log scan lives in `useCampaignTouches` and the writes in
+ * `useReportUserAction`. Everything that can credit the *wrong wallet* lives here, where a fixture
+ * can prove it.
+ *
+ * ## Why a KOL selection needs planning at all
+ *
+ * `Campaign.reportUserAction(kpiIndex, user, newTotal, evidence)` takes a **referral** wallet, not
+ * a promoter. It resolves the payee itself: `_resolvePromoterId(user)` reads the stored touch, and
+ * a wallet with no live touch reverts `NoAttribution(user)`. So "report for this KOL" is not a call
+ * the contract offers — it has to be turned into one call per referral currently attributed to
+ * that KOL, which is what `planKolReport` does.
+ *
+ * Vocabulary, per `indexerCore`'s note: the ABI calls the attributed wallet `user` and those
+ * strings are load-bearing, so they stay at the boundary. Here it is a **referral**. The web app
+ * says "promoter" where the contracts say KOL; this file is named for the contract-side concept
+ * because the dev tool it backs is explicitly a testing affordance over `reportUserAction`.
+ */
+
+/** One referral attributed to some promoter on one campaign, as reconstructed from a log. */
+export type TouchEntry = {
+  referral: `0x${string}`;
+  promoterId: `0x${string}`;
+  signedAt: bigint;
+  expiresAt: bigint;
+  /** Block the touch landed in, so a superseding touch can be picked out. */
+  blockNumber: bigint;
+};
+
+/**
+ * Collapses raw touch logs to one row per referral, keeping the newest.
+ *
+ * `AttributionRegistry` stores only the latest touch per `(campaign, user)` pair and accepts a new
+ * one only when `signedAt` is strictly greater, so a referral who re-signed under a *different*
+ * promoter appears in the log history under both — but only the newest is live on chain. Ordering
+ * by `signedAt` (not block number) matches the contract's own comparison, so the row kept here is
+ * the row `_resolvePromoterId` will read.
+ */
+export function latestTouches(entries: readonly TouchEntry[]): TouchEntry[] {
+  const byReferral = new Map<string, TouchEntry>();
+
+  for (const entry of entries) {
+    const key = entry.referral.toLowerCase();
+    const seen = byReferral.get(key);
+    if (!seen || entry.signedAt > seen.signedAt) byReferral.set(key, entry);
+  }
+
+  return [...byReferral.values()];
+}
+
+/** A referral row with its live/expired classification resolved. */
+export type ReferralTarget = TouchEntry & {status: TouchStatus};
+
+/** One row in the KOL dropdown. */
+export type KolTarget = {
+  promoter: `0x${string}`;
+  promoterId: `0x${string}`;
+  /** Every referral whose newest touch names this KOL, live or expired. */
+  referrals: ReferralTarget[];
+  /** The subset that would actually credit — `status === "live"`. */
+  live: ReferralTarget[];
+  /**
+   * Why this KOL cannot be reported for right now, or undefined when it can. Rendered as the
+   * disabled reason rather than hiding the row: "why can't I report for this KOL?" is the question
+   * the dropdown exists to answer, matching how `ProjectActions` treats blocked lifecycle actions.
+   */
+  blocked?: string;
+};
+
+/**
+ * Builds the KOL dropdown for a campaign.
+ *
+ * Every promoter who joined is listed, including those nothing can be reported for — a KOL missing
+ * from the list would read as a bug in the scan rather than as an un-attributed promoter.
+ *
+ * `expired` is reported separately from `none` because the two are different facts and the fix
+ * differs: an expired touch needs the referral to re-sign, while `none` means that KOL's link was
+ * never used. Collapsing them into "cannot report" would hide which.
+ */
+export function buildKolTargets(
+  promoters: readonly {promoter: `0x${string}`; promoterId: `0x${string}`}[],
+  touches: readonly TouchEntry[],
+  nowSeconds: number,
+): KolTarget[] {
+  const byPromoterId = new Map<string, ReferralTarget[]>();
+
+  for (const touch of latestTouches(touches)) {
+    const key = touch.promoterId.toLowerCase();
+    const row: ReferralTarget = {...touch, status: classifyTouch(touch, nowSeconds)};
+    const list = byPromoterId.get(key);
+    if (list) list.push(row);
+    else byPromoterId.set(key, [row]);
+  }
+
+  return promoters.map(({promoter, promoterId}) => {
+    const referrals = (byPromoterId.get(promoterId.toLowerCase()) ?? [])
+      .slice()
+      .sort((a, b) => (a.signedAt === b.signedAt ? 0 : a.signedAt > b.signedAt ? -1 : 1));
+    const live = referrals.filter((r) => r.status === "live");
+
+    let blocked: string | undefined;
+    if (referrals.length === 0) {
+      blocked = "no attribution touch — reportUserAction would revert NoAttribution";
+    } else if (live.length === 0) {
+      blocked = `attribution expired (${referrals.length} referral${
+        referrals.length === 1 ? "" : "s"
+      }) — the referral must re-sign a touch`;
+    }
+
+    return blocked === undefined
+      ? {promoter, promoterId, referrals, live}
+      : {promoter, promoterId, referrals, live, blocked};
+  });
+}
+
+/**
+ * Splits `total` into `count` shares, remainder to the last.
+ *
+ * Integer division loses the remainder, and a report that lands one unit short of a threshold does
+ * not cross the tier — the whole point of the call. Giving the remainder to the last share keeps
+ * the sum exact, the same correction `indexerCore.splitActions` makes for verifier evidence.
+ */
+export function splitAmount(total: bigint, count: number): bigint[] {
+  if (count <= 0) return [];
+
+  const share = total / BigInt(count);
+  const out: bigint[] = [];
+  let assigned = BigInt(0);
+
+  for (let i = 0; i < count; i++) {
+    const value = i === count - 1 ? total - assigned : share;
+    assigned += value;
+    out.push(value);
+  }
+
+  return out;
+}
+
+/**
+ * The extra progress a KOL needs to cross its next unclaimed tier.
+ *
+ * Zero when every tier is already crossed — there is nothing left to release, and the caller
+ * renders that as "ladder complete" rather than sending a report the contract would treat as a
+ * no-op (`delta == 0` returns early).
+ */
+export function deltaToNextTier(progress: bigint, tiers: readonly RewardTier[]): bigint {
+  const next = nextTier(progress, tiers);
+  if (!next) return BigInt(0);
+  return next.threshold - progress;
+}
+
+/** One `reportUserAction` call, ready to send. */
+export type PlannedReport = {
+  referral: `0x${string}`;
+  /** Cumulative, as the ABI requires — this referral's credited total plus its share. */
+  newTotal: bigint;
+  /** The share itself, for display. */
+  delta: bigint;
+};
+
+export type ReportPlan =
+  | {ok: true; calls: PlannedReport[]; totalDelta: bigint; projectedProgress: bigint}
+  | {ok: false; reason: string};
+
+/**
+ * Turns "report for this KOL" into the calls that credit it.
+ *
+ * `amount` is the progress to add to the KOL, spread across its live referrals so the KOL's total
+ * advances by exactly that much. Spreading rather than repeating matters: `newTotal` is cumulative
+ * per `(user, kpiIndex)`, so sending the same figure to three referrals credits the KOL three
+ * times over, and the projected progress shown next to the button would be a lie.
+ *
+ * Refusals mirror named contract behavior, so the panel can explain a block without simulating:
+ *
+ *  - aggregate KPI → `AggregateKpi(kpiIndex)`; those never credit an individual promoter (D7).
+ *  - no live referral → `NoAttribution(user)`.
+ *  - zero amount → `Campaign` returns early on `delta == 0`, so the transaction would cost gas
+ *    and change nothing.
+ *
+ * A referral whose share rounds to zero is dropped rather than sent: same early return, and it
+ * would show up as a wallet confirmation that did nothing.
+ */
+export function planKolReport({
+  kol,
+  amount,
+  progress,
+  credited,
+  aggregate,
+}: {
+  kol: KolTarget;
+  amount: bigint;
+  /** The KOL's current progress on this KPI, from `progressOf`. */
+  progress: bigint;
+  /** Each live referral's `userCreditedOf(referral, kpiIndex)`, keyed lowercase. */
+  credited: ReadonlyMap<string, bigint>;
+  aggregate: boolean;
+}): ReportPlan {
+  if (aggregate) {
+    return {ok: false, reason: "aggregate KPIs never credit a promoter — reverts AggregateKpi"};
+  }
+  if (kol.blocked) return {ok: false, reason: kol.blocked};
+  if (amount <= BigInt(0)) {
+    return {ok: false, reason: "amount must be greater than zero — the contract ignores a zero delta"};
+  }
+
+  const shares = splitAmount(amount, kol.live.length);
+  const calls: PlannedReport[] = [];
+  let totalDelta = BigInt(0);
+
+  for (let i = 0; i < kol.live.length; i++) {
+    const delta = shares[i]!;
+    if (delta <= BigInt(0)) continue;
+
+    const referral = kol.live[i]!.referral;
+    const already = credited.get(referral.toLowerCase()) ?? BigInt(0);
+    calls.push({referral, newTotal: already + delta, delta});
+    totalDelta += delta;
+  }
+
+  if (calls.length === 0) {
+    return {ok: false, reason: "amount is too small to split across this KOL's referrals"};
+  }
+
+  return {ok: true, calls, totalDelta, projectedProgress: progress + totalDelta};
+}
