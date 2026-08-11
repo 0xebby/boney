@@ -22,9 +22,20 @@ import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
 ///      `MAX_TOUCH_DURATION` and `MIN_STAKE` are env-configurable for testing; the rest are
 ///      protocol constants.
 contract DeployBoney is Script {
-    uint64 public constant MAX_TOUCH_DURATION = 30 days;
-    uint256 public constant DISPUTE_WINDOW = 1 days;
-    uint256 public constant UNSTAKE_DELAY = 2 days;
+    /// @dev [bscoretest] Durations shortened from their protocol values (30 days / 1 day / 2 days)
+    ///      so oracle disputes, unstaking and touch expiry all resolve inside a manual testing
+    ///      session. Restore before any release/merge to main.
+    uint64 public constant MAX_TOUCH_DURATION = 2 hours;
+    uint256 public constant DISPUTE_WINDOW = 4 minutes;
+    uint256 public constant UNSTAKE_DELAY = 10 minutes;
+
+    /// @dev [bscoretest] Default initial attestor: the dev wallet that `web/.env.local`'s
+    ///      `ATTESTOR_PRIVATE_KEY` (== `ETHOS_PK`) signs with, and that `pnpm ethos:stub:dev` pins.
+    ///      The deployer is a *different* wallet, so without this the redeployed verifier would not
+    ///      recognise the signing key and every `submitAttestation` from the app would revert
+    ///      `NotAnAttestor` — the stub-driven reputation path would be dead on arrival. Still
+    ///      overridable with `BONEY_INITIAL_ATTESTOR`.
+    address public constant DEV_ATTESTOR = 0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8;
 
     function run() external returns (Boney boney, CampaignRegistry registry) {
         uint256 minStake = vm.envOr("BONEY_MIN_STAKE", uint256(100 ether));
@@ -36,8 +47,9 @@ contract DeployBoney is Script {
 
         // 1. Standalone modules.
         AttributionRegistry attribution = new AttributionRegistry(maxTouch);
-        AttestationVerifier attestations =
-            new AttestationVerifier(deployer, vm.envAddress("BONEY_INITIAL_ATTESTOR"));
+        AttestationVerifier attestations = new AttestationVerifier(
+            deployer, vm.envOr("BONEY_INITIAL_ATTESTOR", DEV_ATTESTOR)
+        );
         ReputationRegistry reputation = new ReputationRegistry(deployer, address(attestations));
 
         // 2. Oracle coordinator (needs no registry yet).

@@ -77,7 +77,7 @@ contract SeedEventKpi is Script {
             rewardPool: pool,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 30 days),
-            attributionWindow: 7 days,
+            attributionWindow: 30 minutes,
             minReputation: 0
         });
 

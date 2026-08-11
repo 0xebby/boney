@@ -55,7 +55,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @notice Window after a campaign ends during which promoters may still settle earned tiers,
     ///         before the project can reclaim what is left.
-    uint64 public constant CLAIM_GRACE = 7 days;
+    /// @dev [bscoretest] Shortened from 7 days so a full end→grace→reclaim cycle fits in a manual
+    ///      testing session. Restore 7 days before any release/merge to main.
+    uint64 public constant CLAIM_GRACE = 20 minutes;
 
     /// @notice Caps on campaign shape.
     /// @dev `_settle` walks the tier ladder and `reportUserAction` indexes KPIs, both on

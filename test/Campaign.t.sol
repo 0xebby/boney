@@ -996,7 +996,9 @@ contract CampaignTest is Test {
         campaign.end();
 
         // Progress beyond tier 0 was credited before the end; settle after ending.
-        skip(1 days);
+        // Derived from CLAIM_GRACE rather than a fixed duration so the test still lands *inside*
+        // the grace window when the constant is shortened for testing.
+        skip(campaign.CLAIM_GRACE() / 2);
         campaign.settle(kol, 0);
         assertEq(token.balanceOf(kol), 1_000 ether);
     }

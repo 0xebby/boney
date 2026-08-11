@@ -48,8 +48,12 @@ contract ReportWithholdingTest is Test {
     uint256 internal constant POOL = 10_000 ether;
     uint64 internal constant MAX_TOUCH = 30 days;
     uint256 internal constant MIN_STAKE = 100 ether;
-    uint256 internal constant DISPUTE_WINDOW = 1 days;
-    uint256 internal constant UNSTAKE_DELAY = 2 days;
+    /// @dev Must stay well inside `Campaign.CLAIM_GRACE`: the grace-window tests push an oracle
+    ///      report *after* `end()`, and that push has to clear its dispute window while the
+    ///      campaign is still reportable. Scaled off CLAIM_GRACE so shortening the constant for
+    ///      testing cannot silently invert the two.
+    uint256 internal constant DISPUTE_WINDOW = 1 minutes;
+    uint256 internal constant UNSTAKE_DELAY = 2 minutes;
 
     /// @dev Tier 0 pays at 10 units; the referral below delivers 50, clearing it five times over.
     uint256 internal constant THRESHOLD = 10;
@@ -188,6 +192,10 @@ contract ReportWithholdingTest is Test {
 
         assertEq(campaign.progressOf(promoter, 0), 0, "nothing credited while the project stalled");
 
+        // The report push must clear its dispute window before the campaign leaves the grace
+        // period: the oracle's window runs from submission, not from the campaign end, so it
+        // cannot be interleaved with the reclaim warp below. This is why DISPUTE_WINDOW has to
+        // stay comfortably shorter than CLAIM_GRACE.
         _stakeAndPushUserReport(DELIVERED);
 
         assertEq(campaign.progressOf(promoter, 0), DELIVERED, "credited after the campaign ended");
@@ -291,6 +299,9 @@ contract ReportWithholdingTest is Test {
         vm.prank(promoter);
         campaign.end();
 
+        // The push is bound by the grace window, so with the shortened CLAIM_GRACE the dispute
+        // window (1 minute) is the constraining one — a hardcoded multi-day skip would land the
+        // report after the campaign stopped being reportable.
         _stakeAndPushUserReport(DELIVERED);
         assertEq(token.balanceOf(promoter), TIER_REWARD, "paid despite the pause");
     }

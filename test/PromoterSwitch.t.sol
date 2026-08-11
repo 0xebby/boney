@@ -145,6 +145,8 @@ contract PromoterSwitchTest is Test {
         assertEq(campaign.progressOf(promoterB, 0), 20, "B receives only the delta");
         assertEq(token.balanceOf(promoterA), TIER_REWARD, "A is paid");
         assertEq(token.balanceOf(promoterB), TIER_REWARD, "B is paid too");
+
+        attribution.domain();
     }
 
     /// @dev A lapse with no replacement is different from a switch: the stored touch is still A's,

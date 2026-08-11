@@ -790,7 +790,9 @@ function defaultDraft(): CampaignDraft {
     // nothing rejects a window that is already open.
     startTime: now,
     endTime: now + 86400 * 30,
-    attributionWindow: 86400 * 7,
+    // [bscoretest] Shortened from 7 days so a touch visibly expires within a testing session.
+    // Restore to 86400 * 7 before any release/merge to main.
+    attributionWindow: 30 * 60,
     minReputation: "0",
     kpis: [
       {

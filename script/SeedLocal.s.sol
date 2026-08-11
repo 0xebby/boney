@@ -280,7 +280,7 @@ contract SeedLocal is Script {
             rewardPool: pool,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 60 days),
-            attributionWindow: 14 days,
+            attributionWindow: 1 hours,
             minReputation: 0
         });
 
@@ -335,7 +335,7 @@ contract SeedLocal is Script {
             rewardPool: pool,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 30 days),
-            attributionWindow: 7 days,
+            attributionWindow: 30 minutes,
             minReputation: minReputation
         });
 
@@ -374,7 +374,7 @@ contract SeedLocal is Script {
             campaign: campaign,
             promoterId: promoterId,
             signedAt: uint64(block.timestamp),
-            expiresAt: uint64(block.timestamp + 7 days)
+            expiresAt: uint64(block.timestamp + 30 minutes)
         });
 
         bytes32 structHash = keccak256(

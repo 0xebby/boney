@@ -102,5 +102,12 @@ export const MAX_KPIS = 32;
 export const MAX_TIERS_PER_KPI = 32;
 export const MAX_SCHEMAS = 64;
 
-/** `Campaign.CLAIM_GRACE` — seconds after a campaign ends before the project may reclaim. */
-export const CLAIM_GRACE_SECONDS = 7 * 24 * 60 * 60;
+/**
+ * `Campaign.CLAIM_GRACE` — seconds after a campaign ends before the project may reclaim.
+ *
+ * [bscoretest] Mirrors the shortened on-chain constant (was `7 * 24 * 60 * 60`). This is only a
+ * fallback for code paths with no live read; `fetchCampaignDetail` reads `CLAIM_GRACE()` from the
+ * contract, so a stale value here does not affect the campaign detail page. Restore with the
+ * contract before any release/merge to main.
+ */
+export const CLAIM_GRACE_SECONDS = 20 * 60;

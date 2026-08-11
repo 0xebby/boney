@@ -14,8 +14,7 @@ import {Types} from "../libraries/Types.sol";
 ///      — but every campaign that exists came from here.
 ///
 ///      Campaigns are deployed in full rather than cloned (D8): a campaign holding escrowed funds
-///      should not share code that anyone can later point elsewhere. Clone-based deployment is a
-///      tracked optimization, not an MVP requirement.
+///      should not share code that anyone can later point elsewhere. 
 contract CampaignRegistry is ICampaignRegistry {
     error ZeroAddress();
     error UnknownCampaign(uint256 campaignId);
