@@ -76,7 +76,9 @@ as post-MVP work.
 4. A user signs a touch binding their wallet to that promoter id; anyone may relay it.
 5. The project or oracle reports **cumulative** per-user actions. Progress credits the attributed
    promoter, and each newly crossed tier pays out automatically.
-6. On end, a 7-day claim grace window lets promoters settle; then the project reclaims the rest.
+6. On end, a claim grace window lets promoters settle; then the project reclaims the rest.
+   Protocol value is 7 days; this branch (`bscoretest`) shortens it to 20 minutes for testing —
+   see [Shortened durations](#shortened-durations-bscoretest).
 
 Rewards draw from one shared pool, first-come. If the pool cannot cover a crossed tier, the
 contract pays what remains and emits `PoolExhausted` — it never reverts, since reverting would
@@ -86,10 +88,10 @@ let one exhausted tier block reporting for everyone.
 
 ```bash
 forge build
-forge test                    # 187 tests across 7 suites
+forge test                    # 331 tests across 15 suites
 forge test --mc CampaignTest  # a single suite
 
-PRIVATE_KEY=0x... BONEY_INITIAL_ATTESTOR=0x... \
+PRIVATE_KEY=0x... \
   forge script script/DeployBoney.s.sol:DeployBoney
 ```
 
@@ -100,6 +102,29 @@ Deploy order (encoded in `script/DeployBoney.s.sol`):
 3. `EscrowVault`, then `CampaignRegistry`; the registry becomes the vault's registrar via a
    one-time `setRegistrar`
 4. Wire the coordinator to the registry, then deploy the `Boney` facade
+
+## Shortened durations (bscoretest)
+
+`bscoretest` exists to make manual testing fast, so the time-based constants are far shorter
+than the protocol values. **Restore the protocol values before merging to main.** Each source
+constant carries a `[bscoretest]` comment with its protocol value.
+
+| Constant | Protocol | bscoretest |
+|---|---|---|
+| `Campaign.CLAIM_GRACE` | 7 days | 20 minutes |
+| `DeployBoney.DISPUTE_WINDOW` | 1 day | 4 minutes |
+| `DeployBoney.UNSTAKE_DELAY` | 2 days | 10 minutes |
+| `DeployBoney.MAX_TOUCH_DURATION` | 30 days | 2 hours |
+| `attributionWindow` (seed scripts, create form) | 7–14 days | 30 minutes – 1 hour |
+
+Because `CLAIM_GRACE` is a `constant` compiled into `Campaign`, changing it requires a full
+redeploy (`DeployBoney`) and regenerating `web/src/lib/deployments.ts` (`pnpm deployments` in
+`web/`). The deploy script defaults `BONEY_INITIAL_ATTESTOR` to the dev wallet so the
+stub-driven attestation path keeps working on the new deployment.
+
+Campaign `endTime` (30–60 days) and the reputation freshness windows (`ETHOS_MAX_AGE` /
+`REACH_MAX_AGE`, 180/90 days) are intentionally **not** shortened: a shortened freshness window
+would expire seeded attestations mid-session and drop wallets below their campaign gates.
 
 ## Security
 

@@ -78,7 +78,7 @@ contract SeedGated is Script {
             rewardPool: POOL,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 60 days),
-            attributionWindow: 7 days,
+            attributionWindow: 30 minutes,
             minReputation: minReputation
         });
 

@@ -117,7 +117,7 @@ export function CampaignsPage() {
           page it is the primary way in, not one control among several. The status and
           "joinable" filters stay below, where they scope the table they sit above.
         */}
-        <div className="mt-6">
+        <div className="mx-auto mt-6 max-w-lg">
           <label className="sr-only" htmlFor="campaign-search">
             Search campaigns, projects, or campaign IDs
           </label>
@@ -142,7 +142,7 @@ export function CampaignsPage() {
 
         <p className="mt-2 text-xs text-ink-muted">
           <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
-            How it works
+            See how it works
           </Link>
         </p>
       </header>
