@@ -8,8 +8,8 @@ import {useReportUserAction, isPending, type TxState} from "@/hooks/useWriteCamp
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
 import {useCampaignTouches} from "@/hooks/useCampaignTouches";
 import {useKolReportState} from "@/hooks/useKolReportState";
-import {buildKolTargets, planKolReport, deltaToNextTier} from "@/lib/reporting";
-import {shortAddress} from "@/lib/format";
+import {buildKolTargets, planKolReport, nextTierSeed, type TierSeed} from "@/lib/reporting";
+import {shortAddress, formatTokenAmount} from "@/lib/format";
 import {KPI_KIND_LABEL} from "@/lib/types";
 import type {CampaignDetail} from "@/lib/campaignDetail";
 import type {CampaignView} from "@/lib/types";
@@ -34,12 +34,15 @@ import type {CampaignView} from "@/lib/types";
 export function ReportPanel({
   view,
   detail,
+  token,
   onDone,
   nowSeconds,
 }: {
   /** The campaign row, for the promoter scan — which takes views, not detail records. */
   view: CampaignView;
   detail: CampaignDetail;
+  /** Escrow token metadata, for rendering what a tier pays out. */
+  token: {symbol: string; decimals: number};
   /** Refetch the detail record after a report lands, so progress and tiers move. */
   onDone: () => void;
   nowSeconds: number;
@@ -49,7 +52,6 @@ export function ReportPanel({
 
   const [kolIndex, setKolIndex] = useState(0);
   const [kpiIndex, setKpiIndex] = useState(0);
-  const [amountInput, setAmountInput] = useState("");
 
   const promoterScan = useCampaignPromoters(isProject ? [view] : []);
   const touchScan = useCampaignTouches(isProject ? detail.address : undefined);
@@ -80,13 +82,14 @@ export function ReportPanel({
     enabled: isProject,
   });
 
-  // Default the amount to exactly what clears the KOL's next tier — the reason to reach for this
-  // panel is almost always "release this promoter's pay", and that is the number that does it.
-  const suggested = kpi ? deltaToNextTier(promoterProgress, kpi.tiers) : BigInt(0);
-  const amount = amountInput.trim() === "" ? suggested : parseUnsignedInt(amountInput);
+  // The amount is derived, not typed. Each report aims at exactly one thing — clearing the KOL's
+  // next threshold on the selected KPI — so the tier that the (KOL, KPI) pair is standing in front
+  // of determines the figure, and a free-text box could only be used to enter a different one.
+  const seed = kpi ? nextTierSeed(promoterProgress, kpi.tiers) : null;
+  const amount = seed?.delta ?? BigInt(0);
 
   const plan = useMemo(() => {
-    if (!kol || !kpi || amount === null) return null;
+    if (!kol || !kpi) return null;
     return planKolReport({
       kol,
       amount,
@@ -127,16 +130,15 @@ export function ReportPanel({
             <KolSelect kols={kols} value={kolIndex} onChange={setKolIndex} />
             <KpiSelect kpis={detail.kpis} value={kpiIndex} onChange={setKpiIndex} />
             <AmountField
-              value={amountInput}
-              onChange={setAmountInput}
-              suggested={suggested}
-              invalid={amount === null}
+              seed={seed}
+              loading={stateLoading}
+              unitLabel={kpi ? KPI_KIND_LABEL[kpi.spec.kind] : ""}
+              decimals={token.decimals}
+              symbol={token.symbol}
             />
           </div>
 
-          {amount === null ? (
-            <p className="text-xs text-critical">Enter a whole number of KPI units.</p>
-          ) : stateLoading ? (
+          {stateLoading ? (
             <p className="text-xs text-ink-muted">Reading progress and credited totals…</p>
           ) : plan?.ok && kol ? (
             <PlanBreakdown
@@ -185,23 +187,6 @@ export function ReportPanel({
       )}
     </Card>
   );
-}
-
-/**
- * Parses a whole-number KPI amount.
- *
- * KPI units are raw integers on chain (scaling belongs to the event source, per `kpiSource`), so
- * this deliberately rejects decimals rather than truncating one into a different number than the
- * dev typed. Returns null for anything unparseable.
- */
-function parseUnsignedInt(raw: string): bigint | null {
-  const trimmed = raw.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  try {
-    return BigInt(trimmed);
-  } catch {
-    return null;
-  }
 }
 
 function KolSelect({
@@ -271,35 +256,58 @@ function KpiSelect({
   );
 }
 
+/**
+ * The amount, derived from the selected KOL and KPI rather than typed.
+ *
+ * Read-only by design: a report exists to release the next tier, so the figure is whatever closes
+ * the gap to that threshold, and every other figure is either short of it (paying nothing) or past
+ * it (crediting progress the promoter did not earn). Rendered as text, not a disabled input — a
+ * greyed-out box reads as "temporarily unavailable" and invites the dev to look for the enable.
+ *
+ * The tier's payout is shown beside the delta but is never the delta; see `nextTierSeed` for why
+ * conflating KPI units with an 18-decimal token amount is the mistake worth designing against.
+ */
 function AmountField({
-  value,
-  onChange,
-  suggested,
-  invalid,
+  seed,
+  loading,
+  unitLabel,
+  decimals,
+  symbol,
 }: {
-  value: string;
-  onChange: (next: string) => void;
-  suggested: bigint;
-  invalid: boolean;
+  seed: TierSeed | null;
+  loading: boolean;
+  unitLabel: string;
+  decimals: number;
+  symbol: string;
 }) {
   return (
     <div>
-      <label htmlFor="report-amount" className="text-xs text-ink-muted">
-        Amount to credit
-      </label>
-      <input
-        id="report-amount"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={
-          suggested > BigInt(0) ? `${suggested.toString()} (clears next tier)` : "0"
-        }
-        inputMode="numeric"
-        aria-invalid={invalid || undefined}
-        className={`mt-1 w-full rounded border bg-surface-2 px-2 py-1.5 text-xs text-ink ${
-          invalid ? "border-critical" : "border-hairline"
-        }`}
-      />
+      <span className="text-xs text-ink-muted">Amount to credit</span>
+      <div className="mt-1 rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs">
+        {loading ? (
+          <span className="text-ink-muted">Reading progress…</span>
+        ) : seed ? (
+          <>
+            <span className="font-mono text-ink">{seed.delta.toString()}</span>{" "}
+            <span className="text-ink-muted">{unitLabel.toLowerCase()}</span>
+          </>
+        ) : (
+          <span className="text-ink-muted">Ladder complete</span>
+        )}
+      </div>
+
+      <p className="mt-1 text-[11px] text-ink-muted">
+        {loading ? (
+          " "
+        ) : seed ? (
+          <>
+            Clears tier {seed.index + 1} at {seed.threshold.toString()} — pays{" "}
+            {formatTokenAmount(seed.reward, decimals)} {symbol}
+          </>
+        ) : (
+          "Every tier is already crossed; there is nothing left to release."
+        )}
+      </p>
     </div>
   );
 }
