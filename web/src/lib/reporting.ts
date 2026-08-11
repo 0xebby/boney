@@ -142,17 +142,42 @@ export function splitAmount(total: bigint, count: number): bigint[] {
   return out;
 }
 
+/** The next tier a KOL would cross, and what it takes to get there. */
+export type TierSeed = {
+  /** Ladder position, zero-based. */
+  index: number;
+  threshold: bigint;
+  /** Token payout crossing this tier releases — display only; never the reported amount. */
+  reward: bigint;
+  /** KPI units to add. This is what the amount field is seeded with. */
+  delta: bigint;
+};
+
 /**
- * The extra progress a KOL needs to cross its next unclaimed tier.
+ * The tier a report should aim at, and the progress that gets there.
  *
- * Zero when every tier is already crossed — there is nothing left to release, and the caller
- * renders that as "ladder complete" rather than sending a report the contract would treat as a
- * no-op (`delta == 0` returns early).
+ * This is what seeds the amount field, so the panel opens on the number that releases the next
+ * payout rather than an empty box the dev has to derive by reading the ladder.
+ *
+ * `delta` and `reward` are different units and must not be confused: `reportUserAction` credits
+ * **KPI units**, and the tier's `reward` is the **token** payout that crossing it releases. Seeding
+ * the field with `reward` would report a token amount as progress — usually a wildly wrong number,
+ * since rewards carry 18 decimals and thresholds are small integers. `reward` is carried here only
+ * so the panel can say what the report will pay out.
+ *
+ * Null when every tier is crossed: there is nothing left to release, and a report at that point is
+ * a no-op the contract returns early on (`delta == 0`).
  */
-export function deltaToNextTier(progress: bigint, tiers: readonly RewardTier[]): bigint {
+export function nextTierSeed(progress: bigint, tiers: readonly RewardTier[]): TierSeed | null {
   const next = nextTier(progress, tiers);
-  if (!next) return BigInt(0);
-  return next.threshold - progress;
+  if (!next) return null;
+
+  return {
+    index: next.index,
+    threshold: next.threshold,
+    reward: next.reward,
+    delta: next.threshold - progress,
+  };
 }
 
 /** One `reportUserAction` call, ready to send. */
@@ -180,8 +205,8 @@ export type ReportPlan =
  *
  *  - aggregate KPI → `AggregateKpi(kpiIndex)`; those never credit an individual promoter (D7).
  *  - no live referral → `NoAttribution(user)`.
- *  - zero amount → `Campaign` returns early on `delta == 0`, so the transaction would cost gas
- *    and change nothing.
+ *  - zero amount → `Campaign` returns early on `delta == 0`. Since the amount is derived from
+ *    `nextTierSeed`, zero means the ladder is finished rather than a mistyped figure.
  *
  * A referral whose share rounds to zero is dropped rather than sent: same early return, and it
  * would show up as a wallet confirmation that did nothing.
@@ -206,7 +231,10 @@ export function planKolReport({
   }
   if (kol.blocked) return {ok: false, reason: kol.blocked};
   if (amount <= BigInt(0)) {
-    return {ok: false, reason: "amount must be greater than zero — the contract ignores a zero delta"};
+    return {
+      ok: false,
+      reason: "every tier on this KPI is already crossed — there is nothing left to release",
+    };
   }
 
   const shares = splitAmount(amount, kol.live.length);

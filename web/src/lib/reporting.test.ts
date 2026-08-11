@@ -3,7 +3,7 @@ import {
   latestTouches,
   buildKolTargets,
   splitAmount,
-  deltaToNextTier,
+  nextTierSeed,
   planKolReport,
   type TouchEntry,
   type KolTarget,
@@ -153,16 +153,32 @@ describe("splitAmount", () => {
   });
 });
 
-describe("deltaToNextTier", () => {
-  const ladder = tiers([BigInt(10), BigInt(1)], [BigInt(50), BigInt(5)]);
+describe("nextTierSeed", () => {
+  const ladder = tiers([BigInt(10), BigInt(1_000)], [BigInt(50), BigInt(5_000)]);
 
-  it("measures the gap to the first uncrossed threshold", () => {
-    expect(deltaToNextTier(BigInt(0), ladder)).toBe(BigInt(10));
-    expect(deltaToNextTier(BigInt(10), ladder)).toBe(BigInt(40));
+  it("aims at the first uncrossed threshold", () => {
+    expect(nextTierSeed(BigInt(0), ladder)).toMatchObject({index: 0, threshold: BigInt(10), delta: BigInt(10)});
+    expect(nextTierSeed(BigInt(10), ladder)).toMatchObject({index: 1, threshold: BigInt(50), delta: BigInt(40)});
   });
 
-  it("is zero once every tier is crossed", () => {
-    expect(deltaToNextTier(BigInt(50), ladder)).toBe(BigInt(0));
+  it("measures the delta from current progress, not from the previous threshold", () => {
+    expect(nextTierSeed(BigInt(30), ladder)).toMatchObject({delta: BigInt(20)});
+  });
+
+  it("carries the tier's reward without mixing it into the delta", () => {
+    // The seed is KPI units; `reward` is an 18-decimal token figure. Seeding the amount field with
+    // the reward would report a payout as progress.
+    const seed = nextTierSeed(BigInt(0), ladder);
+    expect(seed).toMatchObject({delta: BigInt(10), reward: BigInt(1_000)});
+  });
+
+  it("is null once every tier is crossed", () => {
+    expect(nextTierSeed(BigInt(50), ladder)).toBeNull();
+    expect(nextTierSeed(BigInt(999), ladder)).toBeNull();
+  });
+
+  it("is null for a ladder with no tiers", () => {
+    expect(nextTierSeed(BigInt(0), [])).toBeNull();
   });
 });
 
@@ -225,8 +241,11 @@ describe("planKolReport", () => {
     expect(plan).toMatchObject({ok: false, reason: "attribution expired"});
   });
 
-  it("refuses a zero amount rather than sending a no-op", () => {
-    expect(planKolReport({...base, amount: BigInt(0)})).toMatchObject({ok: false});
+  it("refuses a zero amount as a finished ladder, not a bad input", () => {
+    const plan = planKolReport({...base, amount: BigInt(0)});
+    expect(plan).toMatchObject({ok: false});
+    if (plan.ok) return;
+    expect(plan.reason).toMatch(/already crossed/);
   });
 
   it("drops referrals whose share rounds to zero", () => {

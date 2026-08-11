@@ -271,7 +271,13 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
 
       {/* Dev tool — manual reportUserAction; renders only for the project wallet. */}
       {view ? (
-        <ReportPanel view={view} detail={detail} onDone={refetchAll} nowSeconds={now} />
+        <ReportPanel
+          view={view}
+          detail={detail}
+          token={token}
+          onDone={refetchAll}
+          nowSeconds={now}
+        />
       ) : null}
 
       {/* 7.1 / 7.2 — join, tracking link, progress */}
