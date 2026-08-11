@@ -11,6 +11,7 @@ import {Meter} from "@/components/ui/Meter";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {KpiPanel} from "@/components/KpiPanel";
 import {ProjectActions} from "@/components/ProjectActions";
+import {ReportPanel} from "@/components/ReportPanel";
 import {PromoterPanel} from "@/components/PromoterPanel";
 import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
 import {projectName} from "@/lib/projects";
@@ -267,6 +268,11 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         onDone={refetchAll}
         nowSeconds={now}
       />
+
+      {/* Dev tool — manual reportUserAction; renders only for the project wallet. */}
+      {view ? (
+        <ReportPanel view={view} detail={detail} onDone={refetchAll} nowSeconds={now} />
+      ) : null}
 
       {/* 7.1 / 7.2 — join, tracking link, progress */}
       <PromoterPanel
