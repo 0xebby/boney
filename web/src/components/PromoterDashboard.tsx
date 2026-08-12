@@ -3,7 +3,8 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
-import {useCampaigns, type TokenMeta} from "@/hooks/useCampaigns";
+import {useCampaigns} from "@/hooks/useCampaigns";
+import type {TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useReferredCampaigns} from "@/hooks/useReferredCampaigns";
 import {useNow} from "@/hooks/useNow";
@@ -139,7 +140,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you promote"
-            subtitle="Campaigns you joined, and the link to share for each"
+            subtitle="Campaigns you joined, and the promotion link to share for each"
           />
         </div>
         {isLoading || joinedQuery.isLoading ? (
@@ -164,7 +165,7 @@ export function PromoterDashboard() {
                     href="/"
                     className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
                   >
-                    Browse the boneyard
+                    Browse boneyard
                   </Link>
                 }
               />

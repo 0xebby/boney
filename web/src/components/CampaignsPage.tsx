@@ -2,7 +2,8 @@
 
 import {useMemo, useState} from "react";
 import Link from "next/link";
-import {useCampaigns, useReputation, type TokenMeta} from "@/hooks/useCampaigns";
+import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
+import {denominations, type TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
@@ -73,13 +74,19 @@ export function CampaignsPage() {
   );
   const summary = useMemo(() => summarize(visible), [visible]);
 
-  // The summary tiles read in whatever token the first campaign escrows. Mixed-token lists
-  // would make a single total meaningless, so the tiles show a count instead in that case.
-  const tokenList = useMemo(
-    () => [...new Set(campaigns.map((c) => c.token.toLowerCase()))],
-    [campaigns],
-  );
-  const singleToken = tokenList.length === 1 ? tokens[tokenList[0]] : undefined;
+  // The summary tiles read in whatever token the campaigns escrow. Mixed tokens would make a
+  // single total meaningless, so the tiles show a count of units instead in that case — see
+  // `denominations` for what makes two token contracts one unit.
+  //
+  // Derived from `visible`, not `campaigns`, because `summary` is: filtering down to a
+  // single-token slice should denominate the totals that filter produced, rather than leave the
+  // row reporting a mix the table below no longer shows.
+  const units = useMemo(() => denominations(visible, tokens), [visible, tokens]);
+  const singleToken = units.length === 1 ? units[0] : undefined;
+
+  // Only reached with zero or 2+ units, so there is no singular case to spell. Nothing visible
+  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
+  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
   const columns = useMemo(
     () => buildColumns(tokens, now, joinedAddresses),
@@ -106,10 +113,10 @@ export function CampaignsPage() {
       */}
       <header className="py-8 text-center sm:py-12">
         <h1 className="font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-          boneyard
+          Boneyard
         </h1>
-        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-ink-secondary sm:text-base">
-          The marketplace for verifiable Web3 growth.
+        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-brand sm:text-base">
+          The Marketplace for verifiable Web3 Growth.
         </p>
 
         {/*
@@ -158,7 +165,7 @@ export function CampaignsPage() {
           value={
             singleToken
               ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
-              : `${tokenList.length} tokens`
+              : mixedLabel
           }
           unit={singleToken?.symbol}
           //accent="var(--series-1)"
@@ -173,10 +180,20 @@ export function CampaignsPage() {
           unit={singleToken?.symbol}
           //accent="var(--series-3)"
         />
+        {/*
+          Gated on a single unit like the two tiles beside it. A percentage looks unitless, but
+          this one divides one sum of token amounts by another, so a mixed list makes it exactly
+          as meaningless as the totals above — and more misleading, because nothing in "15.7%"
+          hints that it added two different tokens together to get there.
+        */}
         <StatTile
-          label="Pool Utilization"
-          value={formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))}
-          hint="across all campaigns"
+          label="Pool Utilization across all campaigns"
+          value={
+            singleToken
+              ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
+              : "—"
+          }
+          //hint="across all campaigns"
         />
       </StatRow>
 
