@@ -187,6 +187,14 @@ export type PlannedReport = {
   newTotal: bigint;
   /** The share itself, for display. */
   delta: bigint;
+  /**
+   * Per-action evidence backing `delta`, when the report is sourced from observed logs.
+   *
+   * Only meaningful for a verifier-gated KPI, which decodes it as `TouchWindowVerifier.Action[]`;
+   * `verifier == address(0)` ignores the argument, so the caller sends `"0x"` rather than paying
+   * calldata for a blob nothing reads. Absent on a simulated report, which has no actions behind it.
+   */
+  actions?: readonly {timestamp: bigint; amount: bigint}[];
 };
 
 export type ReportPlan =
@@ -194,7 +202,16 @@ export type ReportPlan =
   | {ok: false; reason: string};
 
 /**
- * Turns "report for this KOL" into the calls that credit it.
+ * Turns "credit this KOL by `amount`" into the calls that do it — the **simulated** path.
+ *
+ * Nothing here consults what any referral actually did: the caller supplies the figure, and the
+ * only thing this decides is how to spread it. That makes it the wrong default. A report built this
+ * way credits progress no on-chain event supports, and because `Campaign.reportUserAction` settles
+ * inline, an amount that happens to clear the next threshold pays a tier out on the spot. Seeding
+ * that amount from `nextTierSeed` — the gap to the next rung — is how the panel used to guarantee a
+ * payout on every click, for referrals that had done nothing at all. `planObservedReport` is the
+ * honest path; this one is reachable only behind an explicit simulate opt-in, for KPIs whose
+ * `params` declare no event source and therefore have nothing observable to report.
  *
  * `amount` is the progress to add to the KOL, spread across its live referrals so the KOL's total
  * advances by exactly that much. Spreading rather than repeating matters: `newTotal` is cumulative
@@ -253,6 +270,102 @@ export function planKolReport({
 
   if (calls.length === 0) {
     return {ok: false, reason: "amount is too small to split across this KOL's referrals"};
+  }
+
+  return {ok: true, calls, totalDelta, projectedProgress: progress + totalDelta};
+}
+
+/** What one referral was observed doing on a KPI's declared event source. */
+export type ObservedReferral = {
+  referral: `0x${string}`;
+  /** Post-scaling total across every matched log, as `aggregateByActor` folds it. */
+  observed: bigint;
+  /** Per-log contributions, for verifier evidence. */
+  actions: readonly {timestamp: bigint; amount: bigint}[];
+};
+
+/**
+ * Turns observed on-chain activity into the calls that credit it — the honest path.
+ *
+ * This is what a report is *supposed* to be: the KPI's `params` name a contract and an event
+ * (`lib/kpiSource`), the logs say which attributed wallets triggered it and how much, and the
+ * report records that. A referral who did nothing produces no call, so no tier is crossed and
+ * nothing pays out. `planKolReport` cannot make that distinction — it credits whatever figure it is
+ * handed — which is why this exists alongside it rather than on top of it.
+ *
+ * Same rules as `scripts/indexer.ts`, which reports the same numbers unattended:
+ *
+ *  - `observed` is **cumulative**, not a delta: it is everything the scan saw, so `newTotal` is the
+ *    observed total itself and re-reporting the same range is the no-op `Campaign` returns early on.
+ *  - A referral already credited at or above what was observed is dropped, not sent — `delta == 0`
+ *    is an early return on chain and a pointless wallet confirmation here. This is also what makes
+ *    the button idempotent: click it twice and the second click has nothing to do.
+ *
+ * Refusals mirror `planKolReport`'s so the panel renders one warning either way, plus the two this
+ * path adds: a KPI with no event source has nothing to observe, and an observed total of zero means
+ * the referrals genuinely have not acted yet.
+ */
+export function planObservedReport({
+  kol,
+  observed,
+  credited,
+  aggregate,
+  hasSource,
+  progress,
+}: {
+  kol: KolTarget;
+  /** Observed activity per live referral, keyed lowercase. Absent referrals count as zero. */
+  observed: ReadonlyMap<string, ObservedReferral>;
+  /** Each live referral's `userCreditedOf(referral, kpiIndex)`, keyed lowercase. */
+  credited: ReadonlyMap<string, bigint>;
+  aggregate: boolean;
+  /** Whether the KPI's `params` decoded to an event source at all. */
+  hasSource: boolean;
+  /** The KOL's current progress on this KPI, from `progressOf`. */
+  progress: bigint;
+}): ReportPlan {
+  if (aggregate) {
+    return {ok: false, reason: "aggregate KPIs never credit a promoter — reverts AggregateKpi"};
+  }
+  if (kol.blocked) return {ok: false, reason: kol.blocked};
+  if (!hasSource) {
+    return {
+      ok: false,
+      reason:
+        "this KPI declares no event source, so there is no activity to observe — reporting a " +
+        "figure anyway would credit progress nothing on chain supports",
+    };
+  }
+
+  const calls: PlannedReport[] = [];
+  let totalDelta = BigInt(0);
+  let sawActivity = false;
+
+  for (const target of kol.live) {
+    const key = target.referral.toLowerCase();
+    const seen = observed.get(key);
+    if (!seen || seen.observed <= BigInt(0)) continue;
+    sawActivity = true;
+
+    const already = credited.get(key) ?? BigInt(0);
+    if (seen.observed <= already) continue;
+
+    calls.push({
+      referral: target.referral,
+      newTotal: seen.observed,
+      delta: seen.observed - already,
+      actions: seen.actions,
+    });
+    totalDelta += seen.observed - already;
+  }
+
+  if (calls.length === 0) {
+    return {
+      ok: false,
+      reason: sawActivity
+        ? "every observed action is already credited — nothing new to report"
+        : "no KPI actions observed for this KOL's referrals yet",
+    };
   }
 
   return {ok: true, calls, totalDelta, projectedProgress: progress + totalDelta};
