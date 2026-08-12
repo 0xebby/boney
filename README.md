@@ -114,8 +114,17 @@ constant carries a `[bscoretest]` comment with its protocol value.
 | `Campaign.CLAIM_GRACE` | 7 days | 20 minutes |
 | `DeployBoney.DISPUTE_WINDOW` | 1 day | 4 minutes |
 | `DeployBoney.UNSTAKE_DELAY` | 2 days | 10 minutes |
-| `DeployBoney.MAX_TOUCH_DURATION` | 30 days | 2 hours |
-| `attributionWindow` (seed scripts, create form) | 7–14 days | 30 minutes – 1 hour |
+| `DeployBoney.MAX_TOUCH_DURATION` | 30 days | 30 days (unchanged — see below) |
+| `attributionWindow` (`SeedLocal`, `SeedGated`, `SeedEventKpi`, create form) | 7–14 days | 30 minutes – 1 hour |
+| `attributionWindow` (`SeedExpiry`) | — | equal to each campaign's own length |
+
+`MAX_TOUCH_DURATION` is deliberately **not** shortened. It is a per-touch ceiling the attribution
+registry applies as `min(campaign.attributionWindow, maxTouchDuration)`, and it applies *silently* —
+a campaign whose window exceeds the cap still reports its own longer window from
+`attributionWindow()`, which is what the UI renders. Shortening it does not shorten what the app
+says; it only makes the app disagree with the chain. `SeedExpiry` asserts the deployed cap covers
+its longest campaign before spending gas, so a registry deployed with a short cap fails that seed
+instead of truncating it.
 
 Because `CLAIM_GRACE` is a `constant` compiled into `Campaign`, changing it requires a full
 redeploy (`DeployBoney`) and regenerating `web/src/lib/deployments.ts` (`pnpm deployments` in

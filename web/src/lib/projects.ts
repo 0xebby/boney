@@ -28,7 +28,7 @@ const PROJECT_NAMES: Record<number, string> = {
   6: "Morpho",
   7: "Seamless",
   8: "Extra Finance",
-  9: "Overnight",
+  9: "Loom",
   10: "Beefy",
   11: "Yearn",
 };

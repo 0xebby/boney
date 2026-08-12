@@ -267,8 +267,11 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
       // mock cannot disagree with the chain (the F7 lesson).
       const views = await fetchBrowseCampaigns(client, BigInt(0), BigInt(100));
 
-      const funded = views.find((v) => v.status === "Active" || v.status === "Ended");
-      expect(funded, "no seeded campaign is funded").toBeDefined();
+      // Active on purpose, not Active-or-Ended. `reclaimUnspent` opens only on an Ended or
+      // Cancelled campaign, so Active is the one status where custody is still guaranteed to
+      // equal the accounting — the Ended case below is allowed to diverge.
+      const funded = views.find((v) => v.status === "Active");
+      expect(funded, "no seeded campaign is active").toBeDefined();
 
       const detail = await fetchCampaignDetail(client, funded!.campaign);
 
@@ -279,6 +282,33 @@ describe.skipIf(!process.env.LIVE_CHAIN)("live chain reads", () => {
       // invariant that would break if `balanceOf` were called with the wrong address or the
       // wrong argument — a mistake that still returns a plausible-looking bigint.
       expect(detail.escrowBalance).toBe(detail.rewardPool - detail.paidOut);
+    });
+
+    it("a closed campaign's custody may fall below its accounting once escrow is reclaimed", async () => {
+      // `reclaimUnspent` moves the entire vault balance out but never touches `paidOut`, so
+      // `remainingPool` keeps reporting the pre-reclaim figure forever. That is why the detail
+      // page renders `escrowBalance` for "Remaining escrow" and gates the reclaim prompt on it:
+      // quoting `remainingPool` there offers a number the project cannot collect.
+      //
+      // Asserting the strict equality here instead would pass right up until someone exercised
+      // the end → grace → reclaim path, then fail on a correct reading of a reclaimed campaign.
+      const views = await fetchBrowseCampaigns(client, BigInt(0), BigInt(100));
+      const closed = views.find((v) => v.status === "Ended" || v.status === "Cancelled");
+
+      if (!closed) return; // seed has no closed campaign; nothing to assert
+
+      const detail = await fetchCampaignDetail(client, closed.campaign);
+
+      // Either untouched (custody still matches accounting) or fully reclaimed (custody empty).
+      // Nothing in between is reachable: reclaim withdraws the whole balance or reverts
+      // `NothingToReclaim`.
+      const untouched = detail.escrowBalance === detail.rewardPool - detail.paidOut;
+      const reclaimed = detail.escrowBalance === BigInt(0);
+      expect(
+        untouched || reclaimed,
+        `escrow ${detail.escrowBalance} is neither the accounting figure ` +
+          `${detail.rewardPool - detail.paidOut} nor zero`,
+      ).toBe(true);
     });
 
     it("an unfunded pending campaign has zero custody but a nonzero remainingPool", async () => {

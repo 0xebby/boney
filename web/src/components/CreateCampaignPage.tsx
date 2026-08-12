@@ -145,8 +145,8 @@ export function CreateCampaignPage() {
     <form onSubmit={handleSubmit} className="space-y-5">
       <header>
         <h1 className="font-display text-2xl text-ink">Create a Campaign</h1>
-        <p className="mt-1 text-xs text-ink-muted">
-          Deploy a performance-based campaign with escrowed rewards
+        <p className="mt-1 text-xs text-ink-bold">
+          Launch a performance-based campaign with escrowed rewards.
         </p>
       </header>
 
@@ -191,7 +191,7 @@ export function CreateCampaignPage() {
             error={issueFor("rewardPool")}
             hint={
               tokenDecimals === undefined
-                ? "Total escrow amount"
+                ? "Total Rewards escrowed."
                 : `Total escrow amount, in whole ${token.meta?.symbol}`
             }
           />
@@ -233,7 +233,7 @@ export function CreateCampaignPage() {
         />
         <p className="mt-1.5 text-xs text-ink-muted">
           BoneyScore ranges from <b>0–{MAX_BONEY_SCORE.toLocaleString()}</b>. 
-           Campaign settings[including this score cap] are <b>immutable</b> once created.
+           Campaign settings [including this score cap] are <b>immutable</b> once created.
         </p>
       </Card>
 
