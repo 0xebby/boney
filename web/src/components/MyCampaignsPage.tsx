@@ -3,7 +3,8 @@
 import {useMemo} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
-import {useCampaigns, type TokenMeta} from "@/hooks/useCampaigns";
+import {useCampaigns} from "@/hooks/useCampaigns";
+import {denominations, type TokenMeta} from "@/lib/token";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
@@ -44,12 +45,14 @@ export function MyCampaignsPage() {
     );
   }, [mine]);
 
-  // Mixed-token totals do not add up to anything meaningful, so the tiles fall back to a count.
-  const tokenList = useMemo(
-    () => [...new Set(mine.map((c) => c.token.toLowerCase()))],
-    [mine],
-  );
-  const singleToken = tokenList.length === 1 ? tokens[tokenList[0]] : undefined;
+  // Mixed-token totals do not add up to anything meaningful, so the tiles fall back to a count
+  // of units — see `denominations` for what makes two token contracts one unit.
+  const units = useMemo(() => denominations(mine, tokens), [mine, tokens]);
+  const singleToken = units.length === 1 ? units[0] : undefined;
+
+  // Only reached with zero or 2+ units, so there is no singular case to spell. No campaigns
+  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
+  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
   const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
 
@@ -93,7 +96,7 @@ export function MyCampaignsPage() {
           value={
             singleToken
               ? formatTokenAmount(totals.pool, singleToken.decimals, {compact: true})
-              : `${tokenList.length} tokens`
+              : mixedLabel
           }
           unit={singleToken?.symbol}
           //accent="var(--series-1)"
@@ -108,9 +111,15 @@ export function MyCampaignsPage() {
           unit={singleToken?.symbol}
           //accent="var(--series-3)"
         />
+        {/*
+          Gated on a single unit like the two tiles beside it: the percentage looks unitless, but
+          it divides one sum of token amounts by another, so a mixed list makes it as meaningless
+          as the totals above — and quieter about it, since a bare "15.7%" gives no hint that two
+          different tokens went into it.
+        */}
         <StatTile
           label="Pool utilization"
-          value={formatPercent(Number(totals.paidOut), Number(totals.pool))}
+          value={singleToken ? formatPercent(Number(totals.paidOut), Number(totals.pool)) : "—"}
           hint="across your campaigns"
         />
       </StatRow>
