@@ -13,6 +13,7 @@ import {getDeployment} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {buildCreateCampaignArgs, toWireKpis} from "@/lib/campaignArgs";
 import {describeTxError} from "@/lib/txErrors";
+import {encodeActions} from "@/lib/indexerCore";
 import {
   buildTouch,
   fetchEffectiveMaxDuration,
@@ -521,9 +522,10 @@ export function useStoreTouch() {
  * `Campaign.reportUserAction` — the project crediting a referral's activity.
  *
  * Normally the indexer's job (`scripts/indexer.ts` watches KPI event sources and reports what it
- * finds). This hook exists so a project wallet can push a report by hand while testing, without
- * standing up an event source first — which is why it lives behind `isProject` in `ReportPanel`
- * rather than being part of the promoter-facing flow.
+ * finds). This hook exists so a project wallet can push the same reports by hand while testing —
+ * which is why it lives behind `isProject` in `ReportPanel` rather than being part of the
+ * promoter-facing flow. What it reports is decided by `planObservedReport`, from the same logs the
+ * indexer reads; this hook only sends what it is handed.
  *
  * **Sequential, not batched.** One KOL can have several attributed referrals, and the contract
  * takes one referral per call, so crediting a KOL is N transactions. They run in series and the
@@ -551,7 +553,11 @@ export function useReportUserAction() {
     async (
       campaign: `0x${string}`,
       kpiIndex: number,
-      calls: readonly {referral: `0x${string}`; newTotal: bigint}[],
+      calls: readonly {
+        referral: `0x${string}`;
+        newTotal: bigint;
+        actions?: readonly {timestamp: bigint; amount: bigint}[];
+      }[],
     ) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to report progress."});
@@ -567,15 +573,18 @@ export function useReportUserAction() {
         try {
           setState({status: "preparing"});
 
+          // Evidence is the observed actions when the plan carries them, `"0x"` otherwise. A KPI
+          // with `verifier == address(0)` ignores the argument either way (`Campaign.sol:325`); a
+          // verifier-gated one decodes it as `TouchWindowVerifier.Action[]`, so sending the empty
+          // blob there would fail the decode rather than credit a discounted amount.
+          const evidence = call.actions?.length ? encodeActions(call.actions) : "0x";
+
           const {request} = await publicClient.simulateContract({
             account,
             address: campaign,
             abi: CampaignAbi,
             functionName: "reportUserAction",
-            // Empty evidence: a KPI with no verifier ignores the argument entirely, and a manual
-            // report has no indexed actions to encode. A verifier-gated KPI will discount this to
-            // zero rather than credit it — surfaced as a plan warning, not silently retried here.
-            args: [BigInt(kpiIndex), call.referral, call.newTotal, "0x"],
+            args: [BigInt(kpiIndex), call.referral, call.newTotal, evidence],
           });
 
           const hash = await walletClient.writeContract(request);
