@@ -164,19 +164,27 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         <StatTile
           label="Reward pool"
           value={formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})}
-          hint={token.symbol}
+          unit={token.symbol}
           accent="var(--series-1)"
         />
         <StatTile
           label="Paid out"
           value={formatTokenAmount(detail.paidOut, token.decimals, {compact: true})}
-          hint={`of ${formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})} ${token.symbol}`}
+          unit={token.symbol}
+          qualifier={`of ${formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})}`}
           accent="var(--series-3)"
         />
+        {/*
+          Custody, not accounting. `remainingPool()` is `rewardPool - paidOut`, which a reclaim
+          never touches — the tokens leave the vault but the subtraction stays put, so this tile
+          would keep quoting the pre-reclaim figure forever. The vault balance is the only number
+          that answers "how much is actually still escrowed", and it is what `reclaimUnspent`
+          itself pays out. Same reason it also reads 0 on a campaign that was never funded.
+        */}
         <StatTile
           label="Remaining escrow"
-          value={formatTokenAmount(detail.remainingPool, token.decimals, {compact: true})}
-          hint={token.symbol}
+          value={formatTokenAmount(detail.escrowBalance, token.decimals, {compact: true})}
+          unit={token.symbol}
         />
         <StatTile
           label={clockReady && Number(detail.endTime) <= now ? "Window closed" : "Ends in"}
@@ -222,11 +230,21 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
           {detail.status === "Ended" || detail.status === "Cancelled" ? (
             <div className="space-y-2 text-xs">
               {reclaimOpen ? (
-                <p className="text-good">
-                  The settlement window has closed. The project can reclaim{" "}
-                  {formatTokenAmount(detail.remainingPool, token.decimals, {compact: true})}{" "}
-                  {token.symbol}.
-                </p>
+                detail.escrowBalance > BigInt(0) ? (
+                  <p className="text-good">
+                    The settlement window has closed. The project can reclaim{" "}
+                    {formatTokenAmount(detail.escrowBalance, token.decimals, {compact: true})}{" "}
+                    {token.symbol}.
+                  </p>
+                ) : (
+                  /* Empty vault: already reclaimed, fully paid out, or never funded. All three
+                     read the same from here, and `reclaimUnspent` reverts `NothingToReclaim` in
+                     each — so don't offer a number the project cannot collect. */
+                  <p className="text-ink-secondary">
+                    The settlement window has closed and escrow is empty — nothing left to
+                    reclaim.
+                  </p>
+                )
               ) : detail.status === "Cancelled" ? (
                 <p className="text-ink-secondary">
                   Cancelled — unspent escrow returns immediately.

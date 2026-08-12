@@ -116,20 +116,20 @@ export function PromoterDashboard() {
 
       <StatRow>
         <StatTile
-          label="Joined campaigns"
+          label="Campaigns Joined"
           value={rows.length.toLocaleString("en-US")}
           hint={`${activeCount} active`}
         />
         <StatTile
-          label="Tracking links"
+          label="Promotion links"
           value={rows.length.toLocaleString("en-US")}
-          hint="one per campaign"
+          hint="(one per campaign)"
         />
         <StatTile
           label="Referred to"
           value={referredRows.length.toLocaleString("en-US")}
           hint={`${liveReferrals} still crediting`}
-          accent="var(--series-3)"
+         // accent="var(--series-3)"
         />
       </StatRow>
 
@@ -139,7 +139,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you promote"
-            subtitle="Memberships you joined, and the link to share for each"
+            subtitle="Campaigns you joined, and the link to share for each"
           />
         </div>
         {isLoading || joinedQuery.isLoading ? (
@@ -427,7 +427,7 @@ function CopyLinkButton({link}: {link: string}) {
       <span aria-hidden className="text-[10px]">
         {state === "copied" ? "✓" : state === "failed" ? "!" : "⎘"}
       </span>
-      {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy link"}
+      {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy Promotion link"}
       {/* Announced to screen readers, which see no color change. */}
       <span role="status" aria-live="polite" className="sr-only">
         {state === "copied" ? "Tracking link copied" : state === "failed" ? "Copy failed" : ""}

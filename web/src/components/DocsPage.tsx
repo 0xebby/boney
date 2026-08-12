@@ -30,7 +30,7 @@ export function DocsPage() {
       <header>
         <h1 className="font-display text-2xl text-ink">How Boney works</h1>
         <p className="mt-0.5 text-xs text-ink-muted">
-          Escrowed, performance-based campaigns between projects and promoters.
+          Escrowed, Performance-based Campaigns between Projects and Promoters.
         </p>
       </header>
 
@@ -42,8 +42,8 @@ export function DocsPage() {
           rewards move only as verified milestones are met.
         </p>
         <p>
-          A campaign cannot be activated until the
-          vault actually holds the tokens, which is why funding is a distinct step from creation.
+          A campaign cannot be <Term>activated </Term> until the escrow
+          vault actually holds the reward tokens, which is why funding is a distinct step from creation.
         </p>
       </Section>
 
@@ -67,7 +67,7 @@ export function DocsPage() {
         />
       </Section>
 
-      <Section title="Joining as a promoter">
+      <Section title="Joining as a Promoter">
         <p>
           A promoter joins a campaign and receives a <Term>promoter id</Term> — a hash binding
           their address to that specific campaign. The id is the subject of every attribution and
@@ -88,8 +88,8 @@ export function DocsPage() {
         <p>
           Verifying reads both figures and records them through the protocol&rsquo;s attestation
           registry, so a campaign can require a track record without the project vetting anyone by
-          hand. Only the numbers reach the chain — social handles stay off it. A claimed Ethos
-          profile is required: Ethos returns a baseline score for any address it has never seen,
+          hand. Only the numbers reach the chain — social handles stay off it. <Term>A claimed Ethos
+            profile is required:</Term> Ethos returns a baseline score for any address it has never seen,
           and accepting those would let a freshly generated wallet clear a gate it never earned.
         </p>
       </Section>
@@ -210,7 +210,7 @@ export function DocsPage() {
           by that promoter.
         </p>
         <p>
-          The signature matters. The chain accepts a touch only when the referral&rsquo;s own signature recovers
+          The chain accepts a touch only when the referral&rsquo;s own signature recovers
           to it. A touch expires after the campaign&rsquo;s attribution window, and a fresher touch
           from another promoter replaces an older one, so credit reflects the most recent referral
           rather than the first.
@@ -252,7 +252,7 @@ export function DocsPage() {
           href="/"
           className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
         >
-        Browse Boneyard
+        Browse Boneyard Campaigns 
         </Link>
         <Link
           href="/create"

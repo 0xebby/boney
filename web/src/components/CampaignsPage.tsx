@@ -151,7 +151,7 @@ export function CampaignsPage() {
         <StatTile
           label="Active campaigns"
           value={summary.activeCount.toLocaleString("en-US")}
-          hint={`of ${summary.count.toLocaleString("en-US")} shown`}
+          qualifier={`of ${summary.count.toLocaleString("en-US")} shown`}
         />
         <StatTile
           label="Total rewards"
@@ -160,7 +160,7 @@ export function CampaignsPage() {
               ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
               : `${tokenList.length} tokens`
           }
-          hint={singleToken?.symbol}
+          unit={singleToken?.symbol}
           accent="var(--series-1)"
         />
         <StatTile
@@ -170,7 +170,7 @@ export function CampaignsPage() {
               ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
               : "—"
           }
-          hint={singleToken?.symbol}
+          unit={singleToken?.symbol}
           accent="var(--series-3)"
         />
         <StatTile

@@ -22,12 +22,25 @@ import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
 ///      `MAX_TOUCH_DURATION` and `MIN_STAKE` are env-configurable for testing; the rest are
 ///      protocol constants.
 contract DeployBoney is Script {
-    /// @dev [bscoretest] Durations shortened from their protocol values (30 days / 1 day / 2 days)
-    ///      so oracle disputes, unstaking and touch expiry all resolve inside a manual testing
-    ///      session. Restore before any release/merge to main.
-    uint64 public constant MAX_TOUCH_DURATION = 2 hours;
+    /// @dev [bscoretest] Dispute and unstake delays shortened from their protocol values (1 day /
+    ///      2 days) so both resolve inside a manual testing session. Restore before any
+    ///      release/merge to main.
     uint256 public constant DISPUTE_WINDOW = 4 minutes;
     uint256 public constant UNSTAKE_DELAY = 10 minutes;
+
+    /// @dev [bscoretest] Held at the protocol value of 30 days, deliberately *not* shortened.
+    ///
+    ///      This is a per-touch ceiling the attribution registry applies as
+    ///      `min(campaign.attributionWindow, maxTouchDuration)`, and it applies **silently** — a
+    ///      campaign whose window exceeds the cap still reports its own longer window from
+    ///      `attributionWindow()`, which is what the UI renders. Shortening this to a testing value
+    ///      therefore does not shorten what the app *says*; it only makes the app disagree with the
+    ///      chain, which is a worse failure than a long window.
+    ///
+    ///      `script/SeedExpiry.s.sol` seeds campaigns up to 23 days that attribute for their whole
+    ///      lifetime, and asserts this cap covers them before spending gas. Lowering this below
+    ///      23 days will fail that seed rather than silently truncating it.
+    uint64 public constant MAX_TOUCH_DURATION = 30 days;
 
     /// @dev [bscoretest] Default initial attestor: the dev wallet that `web/.env.local`'s
     ///      `ATTESTOR_PRIVATE_KEY` (== `ETHOS_PK`) signs with, and that `pnpm ethos:stub:dev` pins.
@@ -47,9 +60,8 @@ contract DeployBoney is Script {
 
         // 1. Standalone modules.
         AttributionRegistry attribution = new AttributionRegistry(maxTouch);
-        AttestationVerifier attestations = new AttestationVerifier(
-            deployer, vm.envOr("BONEY_INITIAL_ATTESTOR", DEV_ATTESTOR)
-        );
+        AttestationVerifier attestations =
+            new AttestationVerifier(deployer, vm.envOr("BONEY_INITIAL_ATTESTOR", DEV_ATTESTOR));
         ReputationRegistry reputation = new ReputationRegistry(deployer, address(attestations));
 
         // 2. Oracle coordinator (needs no registry yet).

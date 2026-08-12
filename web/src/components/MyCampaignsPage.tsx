@@ -95,8 +95,8 @@ export function MyCampaignsPage() {
               ? formatTokenAmount(totals.pool, singleToken.decimals, {compact: true})
               : `${tokenList.length} tokens`
           }
-          hint={singleToken?.symbol}
-          accent="var(--series-1)"
+          unit={singleToken?.symbol}
+          //accent="var(--series-1)"
         />
         <StatTile
           label="Paid to promoters"
@@ -105,8 +105,8 @@ export function MyCampaignsPage() {
               ? formatTokenAmount(totals.paidOut, singleToken.decimals, {compact: true})
               : "—"
           }
-          hint={singleToken?.symbol}
-          accent="var(--series-3)"
+          unit={singleToken?.symbol}
+          //accent="var(--series-3)"
         />
         <StatTile
           label="Pool utilization"
@@ -129,14 +129,20 @@ export function MyCampaignsPage() {
             isRefreshing={isRefreshing}
             emptyState={
               <EmptyState
-                title="No campaigns yet"
-                description="Campaigns you create with this wallet appear here, with funding and lifecycle controls."
+                title="This wallet has no Campaigns yet."
+                description="Campaigns you create with this wallet appear here."
                 action={
                   <Link
                     href="/create"
-                    className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
                   >
-                    Create campaign
+                    {/*Create campaign*/}
+
+                    <button
+                              type="submit"
+                              className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:opacity-50"
+                            >
+                      Create campaign
+                            </button>
                   </Link>
                 }
               />
