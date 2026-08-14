@@ -8,6 +8,7 @@ import {IReputationRegistry} from "../interfaces/IReputationRegistry.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {Types} from "../libraries/Types.sol";
+import {Names} from "../libraries/Names.sol";
 
 /// @title Campaign
 /// @notice One performance campaign: escrowed rewards released automatically as attributed KPI
@@ -85,6 +86,15 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @notice Owner of the campaign; funds it, controls its lifecycle, receives unspent escrow.
     address public immutable project;
+    /// @notice Human-readable campaign name, as supplied at creation.
+    /// @dev The one frozen parameter that is *not* `immutable`: Solidity restricts immutables to
+    ///      value types, so a string has to live in storage. It is written once in the constructor
+    ///      and never again, so it is frozen in every sense but the keyword.
+    ///
+    ///      Validated here (length, charset) but not checked for uniqueness — that requires an index
+    ///      across campaigns, which only `CampaignRegistry` has. A campaign constructed directly
+    ///      therefore carries a well-formed name that may duplicate another's.
+    string public name;
     /// @notice ERC20 used for escrow and payouts.
     address public immutable token;
     /// @notice Total escrow required before the campaign can be activated, and the ceiling on
@@ -166,18 +176,19 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
         if (cfg.attributionWindow == 0) revert InvalidWindow();
 
+        // Reverts EmptyName / NameTooLong / InvalidNameChar. Checked here rather than only in the
+        // registry so a directly constructed campaign cannot hold a name the create form could never
+        // have produced — an unrenderable or 400-character name would otherwise reach every UI that
+        // lists campaigns.
+        Names.validate(cfg.name);
+
         // Reject a gate no wallet could ever clear. `minReputation` is immutable and `join()` is
         // the only thing that reads it, so an unreachable value produces a campaign that deploys
         // cleanly, accepts escrow, reports Active, and silently admits nobody for its whole life —
         // with no way to correct it short of redeploying and re-funding.
         //
         // Read from the registry rather than hard-coded: the ceiling is a product of the
-        // registered schemas and their weights, both of which governance can move, so a constant
-        // here would be wrong the first time anything is re-weighted.
-        //
-        // `try` because `maxScore` postdates the first deployments. A registry that predates it
-        // reverts on the call, and treating that as "no constraint" keeps campaign creation
-        // working against an older registry instead of bricking it protocol-wide. The comparison
+        // registered schemas and their weights, both of which governance can move.
         // is deliberately outside the `try` block so a genuine `UnreachableReputation` revert
         // cannot be swallowed by the `catch`.
         uint256 cap = type(uint256).max;
@@ -220,6 +231,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         }
 
         project = cfg.project;
+        name = cfg.name;
         token = cfg.token;
         rewardPool = cfg.rewardPool;
         startTime = cfg.startTime;
@@ -234,6 +246,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         status = Types.CampaignStatus.Pending;
     }
+
+
 
     // ── lifecycle ────────────────────────────────────────────────
 
@@ -385,7 +399,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @dev Aggregate KPIs (TVL, volume) are campaign-level and never credit an individual
-    ///      promoter — see D7. They advance totals for display only.
+    ///      promoter.
     function applyAggregateUpdate(uint256 kpiIndex, uint256 newTotal) external onlyActive {
         if (msg.sender != oracleCoordinator) revert NotOracle();
         if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
@@ -419,12 +433,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
     }
 
     /// @dev Walks the tier ladder for one `(promoter, kpi)` pair and pays every newly crossed
-    ///      tier. State is written before each external transfer (checks-effects-interactions);
-    ///      callers are `nonReentrant`.
-    ///      The ladder is per-promoter by design (each KOL earns their own tiers), which also means
-    ///      it is re-walkable by a KOL joining from a second wallet — see the sybil note on
-    ///      `join()`. `_settledTiers` is never cleared, so a given promoter address cannot re-earn
-    ///      a tier; the repetition is across addresses, not within one.
+    ///      tier. 
+
+    ///      The ladder is per-promoter by design (each KOL earns their own tiers), so the loop is bounded by the number of tiers, not the number of promoters.
     /// @param promoter Wallet receiving the payouts.
     /// @param promoterId The promoter's campaign-bound id, used for event indexing.
     /// @param kpiIndex Index of the KPI whose ladder is walked.
@@ -485,9 +496,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Who gets paid for `user`'s actions.
     ///
     ///      While the campaign is live this is strictly `activePromoter` — an expired touch credits
-    ///      nobody, which is the consent model `AttributionRegistry` is built on: attribution lapses,
-    ///      and a promoter who goes quiet loses it. `test_Report_recoverableAfterAttributionExpires`
-    ///      pins the consequence that a lapse hands everything to whoever the user signs for next.
+    ///      nobody,
+    ///      consequence that a lapse hands everything to whoever the user signs for next.
     ///
     ///      After `end()` that rule would defeat the reporting grace window it sits next to. Touch
     ///      TTLs are days and campaigns run for weeks, so by the time a withheld report can finally
@@ -539,6 +549,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function config() external view returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: name,
             token: token,
             rewardPool: rewardPool,
             startTime: startTime,
@@ -606,4 +617,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function remainingPool() external view returns (uint256) {
         return rewardPool - paidOut;
     }
+
+    function getProject() external view returns(address) {
+        return project;
+    }
+
+    function getOracle() external view returns(address) {
+        return oracleCoordinator;
+    }
+
 }

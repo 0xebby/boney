@@ -38,6 +38,11 @@ contract TouchWindowVerifierTest is Test {
     TouchWindowVerifier internal verifier;
     Campaign internal campaign;
 
+    /// @dev Names are unique per registry, so each fixture campaign needs its own. A storage counter
+    ///      rather than an external read: an external call in an argument list would consume the
+    ///      pending `vm.prank`/`vm.expectRevert` before the call under test.
+    uint256 private _nameNonce;
+
     address internal admin = address(0xA11CE);
     address internal project = address(0xC0DE);
     address internal oracle = address(0x0BAC);
@@ -70,6 +75,7 @@ contract TouchWindowVerifierTest is Test {
     function _createCampaign(bytes memory params) internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: string.concat("Touch Window Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: POOL,
             startTime: uint64(block.timestamp),

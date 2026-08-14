@@ -73,6 +73,10 @@ contract SeedEventKpi is Script {
 
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            // Names are unique per registry, so this appends the campaign id the registry is about
+            // to assign — re-running this script against the same chain would otherwise revert
+            // `NameTaken` on the second run.
+            name: string.concat("Event KPI Demo ", vm.toString(registry.campaignCount())),
             token: address(token),
             rewardPool: pool,
             startTime: uint64(block.timestamp),

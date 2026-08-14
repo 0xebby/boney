@@ -34,6 +34,8 @@ export type KpiDetail = {
 export type CampaignDetail = {
   address: `0x${string}`;
   project: `0x${string}`;
+  /** The campaign's display name, unique across the registry that created it. */
+  name: string;
   token: `0x${string}`;
   rewardPool: bigint;
   paidOut: bigint;
@@ -128,6 +130,7 @@ export async function fetchCampaignDetail(
 
   const [
     project,
+    name,
     token,
     rewardPool,
     paidOut,
@@ -143,6 +146,7 @@ export async function fetchCampaignDetail(
     escrowVault,
   ] = await Promise.all([
     at<`0x${string}`>("project"),
+    at<string>("name"),
     at<`0x${string}`>("token"),
     at<bigint>("rewardPool"),
     at<bigint>("paidOut"),
@@ -175,6 +179,7 @@ export async function fetchCampaignDetail(
   return {
     address,
     project,
+    name,
     token,
     rewardPool,
     paidOut,

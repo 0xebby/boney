@@ -13,7 +13,6 @@ import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {Types} from "../src/libraries/Types.sol";
 
-
 contract MultiKpiMockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
 
@@ -73,8 +72,7 @@ contract MultiKpiTest is Test {
         reputation = new ReputationRegistry(admin, address(verifier));
 
         vault = new EscrowVault(address(this));
-        registry =
-            new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
+        registry = new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
         vault.setRegistrar(address(registry));
 
         campaign = _createCampaign(POOL);
@@ -83,9 +81,15 @@ contract MultiKpiTest is Test {
 
     // ── fixtures ─────────────────────────────────────────────────
 
-    function _config(uint256 pool) internal view returns (Types.CampaignConfig memory) {
+    /// @dev Names are unique per registry, so each fixture campaign needs its own. A storage counter
+    ///      rather than an external read: an external call in an argument list would consume the
+    ///      pending `vm.prank`/`vm.expectRevert` before the call under test.
+    uint256 private _nameNonce;
+
+    function _config(uint256 pool) internal returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: string.concat("Multi KPI Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: pool,
             startTime: uint64(block.timestamp),
@@ -174,8 +178,7 @@ contract MultiKpiTest is Test {
         bytes32 structHash = keccak256(
             abi.encode(attribution.TOUCH_TYPEHASH(), t.campaign, t.promoterId, t.signedAt, t.expiresAt)
         );
-        bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
         attribution.storeTouch(user, t, abi.encodePacked(r, s, v), user);
     }
@@ -375,15 +378,13 @@ contract MultiKpiTest is Test {
 
     /// A campaign-wide sweep: every attributed KPI reported, every ladder walked, totals and payout
     /// reconciled against the pool in one place.
-    function testFuzz_EveryAttributedKpiTracksItsOwnTotal(uint256 mint, uint256 signUps, uint256 dl)
-        public
-    {
+    function testFuzz_EveryAttributedKpiTracksItsOwnTotal(uint256 mint, uint256 signUps, uint256 dl) public {
         mint = bound(mint, 0, 1_000);
         signUps = bound(signUps, 0, 1_000);
         dl = bound(dl, 0, 1_000);
 
         _joinAndAttribute(campaign);
-        uint initialPoolBal = token.balanceOf(address(vault));
+        uint256 initialPoolBal = token.balanceOf(address(vault));
 
         vm.startPrank(project);
         if (mint != 0) campaign.reportUserAction(MINT_KPI, user, mint, "");

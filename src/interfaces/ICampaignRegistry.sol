@@ -13,8 +13,15 @@ interface ICampaignRegistry {
     /// @param campaign Address of the deployed campaign.
     /// @param project The campaign's owner.
     /// @param token ERC20 the campaign escrows and pays out in.
+    /// @param name The campaign's display name, verbatim as supplied. Unindexed: an indexer wanting
+    ///        to search by name needs the normalized key rather than the raw string, and it can read
+    ///        `campaignByName` for that.
     event CampaignCreated(
-        uint256 indexed campaignId, address indexed campaign, address indexed project, address token
+        uint256 indexed campaignId,
+        address indexed campaign,
+        address indexed project,
+        address token,
+        string name
     );
 
     /// @notice Deploy a new campaign.

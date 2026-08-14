@@ -140,7 +140,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
             <div className="flex gap-1.5">
               <dt>Project</dt>
               <dd className="font-medium text-ink-secondary">
-                {projectName({campaignId, project: detail.project})}
+                {projectName({name: detail.name, project: detail.project})}
               </dd>
             </div>
             <div className="flex gap-1.5">
@@ -165,14 +165,14 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
           label="Reward pool"
           value={formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})}
           unit={token.symbol}
-          accent="var(--series-1)"
+          //accent="var(--series-1)"
         />
         <StatTile
           label="Paid out"
           value={formatTokenAmount(detail.paidOut, token.decimals, {compact: true})}
           unit={token.symbol}
           qualifier={`of ${formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})}`}
-          accent="var(--series-3)"
+          //accent="var(--series-3)"
         />
         {/*
           Custody, not accounting. `remainingPool()` is `rewardPool - paidOut`, which a reclaim

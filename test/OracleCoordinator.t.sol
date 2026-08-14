@@ -75,6 +75,7 @@ contract OracleCoordinatorTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Oracle Test",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,

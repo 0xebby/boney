@@ -17,6 +17,7 @@ type ViewTuple = {
   campaignId: bigint;
   campaign: `0x${string}`;
   project: `0x${string}`;
+  name: string;
   token: `0x${string}`;
   rewardPool: bigint;
   paidOut: bigint;
@@ -32,6 +33,7 @@ function decodeView(raw: ViewTuple): CampaignView {
     campaignId: raw.campaignId,
     campaign: raw.campaign,
     project: raw.project,
+    name: raw.name,
     token: raw.token,
     rewardPool: raw.rewardPool,
     paidOut: raw.paidOut,

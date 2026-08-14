@@ -84,9 +84,15 @@ contract BoneyTest is Test {
 
     // ── fixtures ─────────────────────────────────────────────────
 
-    function _config(uint256 minReputation) internal view returns (Types.CampaignConfig memory) {
+    /// @dev Names are unique per registry, so each fixture campaign needs its own. A storage counter
+    ///      rather than an external read: an external call in an argument list would consume the
+    ///      pending `vm.prank`/`vm.expectRevert` before the call under test.
+    uint256 private _nameNonce;
+
+    function _config(uint256 minReputation) internal returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: string.concat("Facade Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,

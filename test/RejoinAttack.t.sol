@@ -80,6 +80,7 @@ contract RejoinAttackTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Rejoin Attack Test",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,

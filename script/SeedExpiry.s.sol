@@ -120,6 +120,9 @@ contract SeedExpiry is Script {
     function _createFunded(uint64 duration) internal returns (address campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            // Suffixed with the id the registry is about to assign: names are unique per registry,
+            // so a fixed string here would revert `NameTaken` on the second of these seven.
+            name: string.concat("Expiry Demo ", vm.toString(registry.campaignCount())),
             token: address(token),
             rewardPool: POOL,
             startTime: uint64(block.timestamp),

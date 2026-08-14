@@ -1,4 +1,4 @@
-import {MAX_KPIS, MAX_TIERS_PER_KPI, type KpiKind} from "./types";
+import {MAX_KPIS, MAX_TIERS_PER_KPI, MAX_CAMPAIGN_NAME_LENGTH, type KpiKind} from "./types";
 import {MAX_BONEY_SCORE} from "./boneyscore";
 
 /**
@@ -10,7 +10,7 @@ import {MAX_BONEY_SCORE} from "./boneyscore";
  *
  * Corresponding Solidity errors: NoKpis, TooManyKpis, TierLengthMismatch, EmptyTiers,
  * TooManyTiers, TiersNotAscending, ZeroTierReward, CustomKpiNeedsVerifier, ZeroRewardPool,
- * InvalidWindow, UnreachableReputation.
+ * InvalidWindow, UnreachableReputation, EmptyName, NameTooLong, InvalidNameChar, NameTaken.
  *
  * One rule here has no Solidity counterpart: the event-source checks, flagged where they appear.
  * The chain never reads that blob, so a malformed source deploys fine and then indexes nothing.
@@ -20,6 +20,11 @@ import {MAX_BONEY_SCORE} from "./boneyscore";
  * this form. The version here differs in one way worth knowing: the contract computes the ceiling
  * from live schema configuration, while this file derives it from the seeded weights. See the note
  * at that check.
+ *
+ * Name *uniqueness* is the one rule this file cannot decide alone: it is a property of the registry's
+ * index, not of the draft. The caller reads `CampaignRegistry.isNameAvailable` and passes the answer
+ * in as `opts.nameTaken`, so normalization stays on chain and there is no second implementation of it
+ * here to drift.
  */
 
 export type TierDraft = {threshold: string; reward: string};
@@ -55,6 +60,7 @@ export type KpiDraft = {
 };
 
 export type CampaignDraft = {
+  name: string;
   token: string;
   rewardPool: string;
   startTime: number;
@@ -75,6 +81,22 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export function isAddress(value: string): boolean {
   return ADDRESS_RE.test(value);
+}
+
+/**
+ * Whether every character is printable ASCII (0x20–0x7E), matching `Names.validate`.
+ *
+ * Deliberately not a Unicode-aware check: the contract's rule *is* "ASCII only", so a laxer test
+ * here would let a name through the form that reverts on submit, and a stricter one would refuse a
+ * name the chain accepts. Iterates code points rather than UTF-16 units so an astral character (an
+ * emoji) is rejected once rather than twice.
+ */
+export function isPrintableAscii(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0)!;
+    if (code < 0x20 || code > 0x7e) return false;
+  }
+  return true;
 }
 
 /** Parses a decimal string to bigint base units. Returns null when unparseable. */
@@ -107,10 +129,37 @@ export function parseCount(value: string): bigint | null {
 
 export function validateCampaignDraft(
   draft: CampaignDraft,
-  opts: {tokenDecimals: number; nowSeconds: number},
+  opts: {tokenDecimals: number; nowSeconds: number; nameTaken?: boolean},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const {tokenDecimals, nowSeconds} = opts;
+  const {tokenDecimals, nowSeconds, nameTaken} = opts;
+
+  // ── name ──────────────────────────────────────────────────────
+  // Solidity: EmptyName, NameTooLong, InvalidNameChar (Names.validate), NameTaken (the registry).
+  //
+  // Length is checked against the *raw* string and the charset check is what makes that sound: the
+  // contract's limit is 32 bytes, and rejecting every non-ASCII byte means one character is one byte.
+  // Without the charset rule, "café" would count as 4 here and 5 on chain.
+  const name = draft.name.trim();
+  if (!name) {
+    issues.push({path: "name", message: "Give the campaign a name."});
+  } else if (draft.name.length > MAX_CAMPAIGN_NAME_LENGTH) {
+    issues.push({
+      path: "name",
+      message: `Keep the name to ${MAX_CAMPAIGN_NAME_LENGTH} characters or fewer.`,
+    });
+  } else if (!isPrintableAscii(draft.name)) {
+    issues.push({
+      path: "name",
+      message:
+        "Names use plain letters, digits, spaces and punctuation only — no emoji or accented " +
+        "characters. Lookalike characters would let one campaign impersonate another.",
+    });
+  } else if (nameTaken) {
+    // Read from the chain by the caller, because the registry normalizes before comparing: "Aave",
+    // "aave" and "Aave " are the same name to it.
+    issues.push({path: "name", message: "Another campaign already uses that name."});
+  }
 
   // ── token & pool ──────────────────────────────────────────────
   if (!isAddress(draft.token)) {

@@ -7,10 +7,11 @@ import {Card, CardHeader} from "@/components/ui/Card";
 import {ErrorState} from "@/components/ui/States";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
+import {useNameAvailability} from "@/hooks/useNameAvailability";
 import {useNow} from "@/hooks/useNow";
 import {useEventSourceProbe} from "@/hooks/useEventSourceProbe";
 import {validateCampaignDraft, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
-import {KPI_KIND, type KpiKind} from "@/lib/types";
+import {KPI_KIND, MAX_CAMPAIGN_NAME_LENGTH, type KpiKind} from "@/lib/types";
 import {MAX_BONEY_SCORE} from "@/lib/boneyscore";
 import {AMOUNT_MODE, EVENT_PRESETS} from "@/lib/kpiSource";
 import {
@@ -38,6 +39,10 @@ export function CreateCampaignPage() {
   const token = useTokenMeta(draft.token);
   const tokenDecimals = token.meta?.decimals;
 
+  // Whether the registry already holds this name. Only a hint: the contract re-checks on submit and
+  // is the one that decides.
+  const nameCheck = useNameAvailability(draft.name);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -50,14 +55,18 @@ export function CreateCampaignPage() {
       }
 
       const nowSeconds = Math.floor(Date.now() / 1000);
-      const found = validateCampaignDraft(draft, {tokenDecimals, nowSeconds});
+      const found = validateCampaignDraft(draft, {
+        tokenDecimals,
+        nowSeconds,
+        nameTaken: nameCheck.isTaken,
+      });
       setIssues(found);
 
       if (found.length > 0) return;
 
       await create(draft, tokenDecimals);
     },
-    [draft, tokenDecimals, create],
+    [draft, tokenDecimals, create, nameCheck.isTaken],
   );
 
   const updateField = <K extends keyof CampaignDraft>(key: K, value: CampaignDraft[K]) => {
@@ -157,6 +166,45 @@ export function CreateCampaignPage() {
       ) : null}
 
       <Card>
+        <CardHeader title="Identity" subtitle="How this campaign is listed" />
+        <div className="space-y-3">
+          <Field
+            label="Campaign name"
+            value={draft.name}
+            onChange={(v) => updateField("name", v)}
+            error={issueFor("name")}
+            hint={`Shown wherever the campaign is listed. Up to ${MAX_CAMPAIGN_NAME_LENGTH} characters, and unique — plain letters, digits and punctuation.`}
+          />
+
+          {/* Live availability, so a taken name is caught before a wallet prompt rather than as a
+              reverted transaction. The contract re-checks on submit and is what actually decides. */}
+          <p className="text-xs" role="status" aria-live="polite">
+            {nameCheck.isIdle ? (
+              <span className="text-ink-muted">
+                {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH} characters
+              </span>
+            ) : nameCheck.isLoading ? (
+              <span className="text-ink-muted">Checking availability…</span>
+            ) : nameCheck.isUnavailable ? (
+              <span className="text-ink-muted">
+                Could not reach the registry to check this name. Creation will still be rejected on
+                chain if it is taken.
+              </span>
+            ) : nameCheck.isTaken ? (
+              <span className="text-critical">
+                Taken. Names ignore case and extra spaces, so a variant of an existing name counts as
+                the same one.
+              </span>
+            ) : (
+              <span className="text-good">
+                Available · {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH} characters
+              </span>
+            )}
+          </p>
+        </div>
+      </Card>
+
+      <Card>
         <CardHeader title="Token & Pool" subtitle="ERC-20 token used for rewards" />
         <div className="space-y-3">
           <Field
@@ -175,7 +223,7 @@ export function CreateCampaignPage() {
             ) : token.isUnreadable ? (
               <span className="text-critical">
                 No ERC-20 metadata at this address on the connected network. Amounts cannot be
-                scaled safely, so creation is blocked.
+                scaled safely, so campaign creation is blocked.
               </span>
             ) : (
               <span className="text-good">
@@ -514,7 +562,6 @@ function EventSourceFields({
               >
                 <option value="count">Count events</option>
                 <option value="dataWord0">First data word</option>
-                  <option value="dataWord0">First data word</option>
               </select>
             </div>
             <Field
@@ -776,18 +823,10 @@ function Field({
 function defaultDraft(): CampaignDraft {
   const now = Math.floor(Date.now() / 1000);
   return {
-    // Empty, not the zero address: the field starts blank so `useTokenMeta` sits idle instead of
-    // reporting the zero address as an unreadable token before anything has been typed.
+    name: "",
+    
     token: "",
     rewardPool: "",
-    // Open the window immediately. `startTime` is immutable once constructed (`Campaign.sol:92`)
-    // and `reportUserAction` calls `_requireWindow()`, so a start in the future is dead time during
-    // which a funded, Active campaign silently rejects every report with `OutsideWindow` — the
-    // failure reads as a broken indexer rather than a campaign that has not opened yet.
-    //
-    // Deliberately in the past by the time this is submitted, and that is valid: the constructor
-    // only requires `endTime > startTime` and `endTime > block.timestamp` (`Campaign.sol:164`), and
-    // nothing rejects a window that is already open.
     startTime: now,
     endTime: now + 86400 * 30,
     // [bscoretest] Shortened from 7 days so a touch visibly expires within a testing session.
