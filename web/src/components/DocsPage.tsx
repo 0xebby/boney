@@ -28,13 +28,26 @@ export function DocsPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <header>
-        <h1 className="font-display text-2xl text-ink">How Boney works</h1>
-        <p className="mt-0.5 text-xs text-ink-muted">
-          Escrowed, Performance-based Campaigns between Projects and Promoters.
-        </p>
+        <h1 className="font-display text-2xl text-ink">Boneyard Docs</h1>
+        <Section title="What is Boneyard" >
+          <p>
+            Boneyard is a performance-based growth marketplace for Base. 
+            
+            Projects create campaigns around the onchain activity like <Term>
+              swaps, deposits, volume, mints, transfers, sign-ups, bridges, liquidity, etc.  
+              </Term>that they need and escrow rewards for promoters who generate it. 
+            
+            Promoters discover campaigns, refer users, and earn based on verified activity. 
+            
+            Boney, the protocol underneath Boneyard, handles attribution, KPI verification and reward settlement. 
+            
+            Instead of paying KOLs for attention and guessing what converted, Boneyard help projects pay for measurable outcomes. 
+            </p>
+        </Section>
+        
       </header>
 
-      <Section title="The shape of a campaign">
+      <Section title="How Campaigns Work">
         <p>
           A project escrows a reward pool and defines one or more <Term>KPIs</Term> — the outcomes
           it will pay for. Each KPI carries a ladder of <Term>tiers</Term>: thresholds that release
@@ -47,7 +60,7 @@ export function DocsPage() {
         </p>
       </Section>
 
-      <Section title="Lifecycle">
+      <Section title="Campaign Lifecycle">
         <p>
           A campaign moves through <Term>Pending</Term> → <Term>Active</Term> →{" "}
           <Term>Ended</Term>, with <Term>Paused</Term> and <Term>Cancelled</Term>  as off-ramps.
@@ -80,21 +93,15 @@ export function DocsPage() {
           purchasable, vouches are not.
         </p>
         <p>
-          Reach is scaled logarithmically rather than counted directly. Follower counts are
-          power-law distributed, so counting them linearly would let a single large account
-          outweigh every genuine mid-tier promoter combined, turning the reach into a whale
-          detector instead of an audience signal.
-        </p>
-        <p>
           Verifying reads both figures and records them through the protocol&rsquo;s attestation
           registry, so a campaign can require a track record without the project vetting anyone by
-          hand. Only the numbers reach the chain — social handles stay off it. <Term>A claimed Ethos
+          hand. <Term>A claimed Ethos
             profile is required:</Term> Ethos returns a baseline score for any address it has never seen,
           and accepting those would let a freshly generated wallet clear a gate it never earned.
         </p>
       </Section>
 
-      <Section title="BoneyScore ranks">
+      <Section title="BoneyScore Ranks">
         <p>
           BoneyScore is a <Term>rank</Term> system to differentiate promoters based on calculated <Term>credibility </Term>. it ranges from <Term>0 to {MAX_BONEY_SCORE.toLocaleString("en-US")}.</Term>
         </p>
@@ -126,7 +133,7 @@ export function DocsPage() {
         </p>
       </Section>
 
-      <Section title="What the weighting does, on two real accounts">
+      <Section title="Comparing Two Real Accounts [Promoters] ">
         <p>
           Both accounts below hold a claimed Ethos profile, so both are attestable and both scores
           are ones the protocol would actually issue. Figures were read from Ethos and X in August
@@ -157,7 +164,7 @@ export function DocsPage() {
         </p>
       </Section>
 
-      <Section title="Choosing a minimum score [Campaign Creators]">
+      <Section title="Choosing a Minimum Boneyscore [Campaign Creators]">
         <p>
           The gate is immutable once the campaign is created. It cannot be lowered afterwards, so a
           number chosen carelessly is a campaign nobody can join.
@@ -202,9 +209,9 @@ export function DocsPage() {
         </p>
       </Section>
 
-      <Section title="Attribution">
+      <Section title="Referrals Attribution">
         <p>
-          Each promoter gets a <Term>tracking link</Term> carrying the campaign address and their
+          Each promoter gets a <Term>boney link</Term> carrying the campaign address and their
           promoter id. A <Term>referral</Term> — someone who arrives through that link — signs an
           EIP-712 <Term>Touch</Term>: an explicit, wallet-signed statement that they were referred
           by that promoter.
@@ -230,14 +237,7 @@ export function DocsPage() {
         </p>
       </Section>
 
-      <Section title="What this Interface is">
-        <p>
-          Boneyard is the Marketplace-facing facade for the Boney accountability protocol.
-          It represents the front over the deployed contracts, plus the write paths a project or
-          promoter needs. 
-          Boneyard It holds no keys, runs no backend, and stores nothing about you: every
-          number comes from a chain read, and every action is a transaction you sign.
-        </p>
+      <Section title="Disclaimer">
         <b>
           <p className="text-ink">
           In beta (testnet) and unaudited. Do not point it at REAL funds.

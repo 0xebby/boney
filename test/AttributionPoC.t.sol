@@ -78,6 +78,7 @@ contract AttributionPoCTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Attribution PoC",
             token: address(token),
             rewardPool: POOL,
             startTime: uint64(block.timestamp),

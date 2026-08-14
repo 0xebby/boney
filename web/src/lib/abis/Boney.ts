@@ -63,6 +63,11 @@ export const BoneyAbi = [
             "internalType": "address"
           },
           {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
             "name": "token",
             "type": "address",
             "internalType": "address"
@@ -190,6 +195,11 @@ export const BoneyAbi = [
             "internalType": "address"
           },
           {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
             "name": "token",
             "type": "address",
             "internalType": "address"
@@ -270,6 +280,11 @@ export const BoneyAbi = [
             "name": "project",
             "type": "address",
             "internalType": "address"
+          },
+          {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
           },
           {
             "name": "token",

@@ -116,7 +116,7 @@ constant carries a `[bscoretest]` comment with its protocol value.
 | `DeployBoney.UNSTAKE_DELAY` | 2 days | 10 minutes |
 | `DeployBoney.MAX_TOUCH_DURATION` | 30 days | 30 days (unchanged — see below) |
 | `attributionWindow` (`SeedLocal`, `SeedGated`, `SeedEventKpi`, create form) | 7–14 days | 30 minutes – 1 hour |
-| `attributionWindow` (`SeedExpiry`) | — | equal to each campaign's own length |
+| `attributionWindow` (`SeedExpiry`, `SeedDemo`) | — | equal to each campaign's own length |
 
 `MAX_TOUCH_DURATION` is deliberately **not** shortened. It is a per-touch ceiling the attribution
 registry applies as `min(campaign.attributionWindow, maxTouchDuration)`, and it applies *silently* —
@@ -131,9 +131,50 @@ redeploy (`DeployBoney`) and regenerating `web/src/lib/deployments.ts` (`pnpm de
 `web/`). The deploy script defaults `BONEY_INITIAL_ATTESTOR` to the dev wallet so the
 stub-driven attestation path keeps working on the new deployment.
 
-Campaign `endTime` (30–60 days) and the reputation freshness windows (`ETHOS_MAX_AGE` /
-`REACH_MAX_AGE`, 180/90 days) are intentionally **not** shortened: a shortened freshness window
-would expire seeded attestations mid-session and drop wallets below their campaign gates.
+The reputation freshness windows (`ETHOS_MAX_AGE` / `REACH_MAX_AGE`, 180/90 days) are intentionally
+**not** shortened: a shortened freshness window would expire seeded attestations mid-session and
+drop wallets below their campaign gates.
+
+Campaign `endTime` is a per-fixture choice rather than a constant. `SeedLocal`, `SeedGated`, and
+`SeedEventKpi` run 30–60 days out, which puts expiry out of reach of a testing session; the
+Base Sepolia fixture is seeded by `script/SeedDemo.s.sol` instead, whose six campaigns expire at
+24 hours and 3/5/7/10/14 days so the window-closed → `end()` → grace → `reclaimUnspent` path is
+reachable without warping a chain.
+
+`SeedDemo` is a **whole-fixture** seed, not an append: it asserts `campaignCount() == 0`, because
+`CampaignRegistry` is append-only and `Campaign.cancel()` is reachable only from `Pending`, so an
+activated campaign can never be retired. `minReputation` is immutable too, so changing a gate is
+also a reseed. Replacing the fixture therefore means redeploying, in this order:
+
+```bash
+# 1. fresh contracts
+PRIVATE_KEY=0x… forge script script/DeployBoney.s.sol:DeployBoney --rpc-url … --broadcast --slow
+# 2. point the app at them
+cd web && pnpm deployments 84532
+# 3. schemas + dev wallet score — MUST precede step 4
+PRIVATE_KEY=0x… REPUTATION_ADDRESS=0x… \
+  forge script script/SeedDevRep.s.sol:SeedDevRep --rpc-url … --broadcast --slow
+# 4. the six campaigns
+PRIVATE_KEY=0x… REGISTRY_ADDRESS=0x… VAULT_ADDRESS=0x… ATTRIBUTION_ADDRESS=0x… TOKEN_ADDRESS=0x… \
+  forge script script/SeedDemo.s.sol:SeedDemo --rpc-url … --broadcast --slow
+```
+
+Step 3 is not optional. `DeployBoney` registers no reputation schemas, so a fresh
+`ReputationRegistry` scores every wallet 0 **and** reports `maxScore() == 0` — and `Campaign`'s
+constructor rejects any `minReputation` above that ceiling with `UnreachableReputation`, so step 4's
+gated campaigns cannot even be created until the schemas exist. `SeedDevRep` registers
+`ETHOS_SCORE`/`X_REACH`/`X_FOLLOWERS` at weights 7/3/0 with the same windows and ceilings
+`SeedLocal` uses (fixing `maxScore()` at 28,000) and restores the dev wallet's 24,620 BoneyScore,
+asserting that total rather than assuming it.
+
+Three of the six campaigns are gated, placed around that score: 10,000 (cleared comfortably),
+24,000 (cleared by 620, so a decayed record drops the wallet below it) and 26,000 (not clearable by
+that wallet, so `InsufficientReputation` and the gate-blocked UI stay reachable). The 24-hour
+campaign is deliberately ungated — it is the one a tester reaches for to watch an expiry.
+
+`TOKEN_ADDRESS` is an existing mock bUSD rather than a fresh one: unlike `SeedLocal`, `SeedDemo`
+deploys no token, so the fixture does not add another rival bUSD for the pool totals to split
+across.
 
 ## Security
 

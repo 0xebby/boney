@@ -115,6 +115,14 @@ export function ReportPanel({
     enabled: isProject,
   });
 
+  // The simulate opt-in only applies where it is offered: to a KPI with no event source. Checking
+  // the toggle state alone let it latch — `simulate` survives a KPI change, and `SimulateToggle`
+  // hides itself once a source exists, so ticking it on an unobservable KPI and then switching to an
+  // observable one left the invented-amount path running with no affordance to turn it off. Every
+  // consumer reads this rather than `simulate` so the readout and the plan cannot disagree about
+  // which path is live.
+  const simulating = simulate && activity.source === null;
+
   // Display only, both paths: which tier the KOL is standing in front of, so the breakdown can say
   // whether this report happens to release a payout. Never the reported amount — deriving the amount
   // from this is precisely the bug this panel was fixed for.
@@ -122,7 +130,7 @@ export function ReportPanel({
 
   const plan = useMemo(() => {
     if (!kol || !kpi) return null;
-    if (simulate) {
+    if (simulating) {
       return planKolReport({
         kol,
         amount: seed?.delta ?? BigInt(0),
@@ -139,7 +147,7 @@ export function ReportPanel({
       hasSource: activity.source !== null,
       progress: promoterProgress,
     });
-  }, [kol, kpi, simulate, seed, promoterProgress, creditedMap, activity.observed, activity.source]);
+  }, [kol, kpi, simulating, seed, promoterProgress, creditedMap, activity.observed, activity.source]);
 
   if (!isProject) return null;
 
@@ -187,20 +195,24 @@ export function ReportPanel({
 
           {loading ? (
             <p className="text-xs text-ink-muted">Reading progress and scanning KPI events…</p>
-          ) : plan?.ok && kol ? (
-            <PlanBreakdown
-              plan={plan}
-              progress={promoterProgress}
-              kol={kol}
-              seed={seed}
-              simulate={simulate}
-              unitLabel={kpi ? KPI_KIND_LABEL[kpi.spec.kind] : ""}
-              decimals={token.decimals}
-              symbol={token.symbol}
-            />
-          ) : plan ? (
+          ) : plan === null ? null : plan.ok ? (
+            // Narrowed on `plan.ok` directly rather than `plan?.ok && kol`: the conjunction leaves
+            // `plan` as the full union in the else branch, so `plan.reason` below does not compile.
+            kol ? (
+              <PlanBreakdown
+                plan={plan}
+                progress={promoterProgress}
+                kol={kol}
+                seed={seed}
+                simulate={simulate}
+                unitLabel={kpi ? KPI_KIND_LABEL[kpi.spec.kind] : ""}
+                decimals={token.decimals}
+                symbol={token.symbol}
+              />
+            ) : null
+          ) : (
             <p className="text-xs text-warning">Cannot report: {plan.reason}</p>
-          ) : null}
+          )}
 
           <SimulateToggle
             checked={simulate}

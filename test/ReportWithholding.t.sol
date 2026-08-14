@@ -112,6 +112,7 @@ contract ReportWithholdingTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Report Withholding",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,

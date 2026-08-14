@@ -177,7 +177,10 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         return _domainSeparatorV4();
     }
 
-    function domain() external view returns(
+    function domain()
+        external
+        view
+        returns (
             bytes1 fields,
             string memory name,
             string memory version,
@@ -185,7 +188,8 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
             address verifyingContract,
             bytes32 salt,
             uint256[] memory extensions
-    ) {
+        )
+    {
         return eip712Domain();
     }
 }

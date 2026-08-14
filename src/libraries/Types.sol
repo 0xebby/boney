@@ -64,6 +64,8 @@ library Types {
 
     /// @notice Immutable campaign parameters, fixed at deployment.
     /// @param project Owner of the campaign; receives unspent escrow on end/cancel.
+    /// @param name Human-readable campaign name, shown wherever the campaign is listed. 
+    ///        the normalized form exists only as the registry's lookup key.
     /// @param token ERC20 used for escrow and payouts.
     /// @param rewardPool Total escrow required before the campaign can be activated.
     /// @param startTime Earliest timestamp at which the campaign may be activated.
@@ -72,6 +74,7 @@ library Types {
     /// @param minReputation Minimum reputation score required for a promoter to join.
     struct CampaignConfig {
         address project;
+        string name;
         address token;
         uint256 rewardPool;
         uint64 startTime;

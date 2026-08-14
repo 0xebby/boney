@@ -23,6 +23,8 @@ export const KPI_KIND = [
   "Tvl",
   "Volume",
   "ActiveUser",
+  "signUps",
+  "downloads",
 ] as const;
 
 export type KpiKind = (typeof KPI_KIND)[number];
@@ -39,6 +41,10 @@ export const KPI_KIND_LABEL: Record<KpiKind, string> = {
   Tvl: "TVL generated",
   Volume: "Volume generated",
   ActiveUser: "Active users",
+  // Lower-camel because the Solidity enum spells them that way (`Types.KpiKind.signUps`), and this
+  // array's job is to mirror it exactly. Renaming here would silently shift every index above 9.
+  signUps: "Sign-ups",
+  downloads: "Downloads",
 };
 
 export function statusFromIndex(index: number): CampaignStatus {
@@ -67,6 +73,7 @@ export type RewardTier = {
 /** Mirrors `Types.CampaignConfig`. */
 export type CampaignConfig = {
   project: `0x${string}`;
+  name: string;
   token: `0x${string}`;
   rewardPool: bigint;
   startTime: bigint;
@@ -80,6 +87,7 @@ export type CampaignView = {
   campaignId: bigint;
   campaign: `0x${string}`;
   project: `0x${string}`;
+  name: string;
   token: `0x${string}`;
   rewardPool: bigint;
   paidOut: bigint;
@@ -101,6 +109,16 @@ export function toCampaignView(raw: RawCampaignView): CampaignView {
 export const MAX_KPIS = 32;
 export const MAX_TIERS_PER_KPI = 32;
 export const MAX_SCHEMAS = 64;
+
+/**
+ * `Names.MAX_NAME_BYTES` — longest campaign name the contract accepts.
+ *
+ * Bytes on chain, characters here: `Names` rejects every byte outside printable ASCII, so the two
+ * counts are the same and a character counter in the form cannot promise a name the chain refuses.
+ * That restriction is also why a name cannot contain emoji or accented letters — see
+ * `src/libraries/Names.sol` for why folding Unicode on chain was not worth the impersonation risk.
+ */
+export const MAX_CAMPAIGN_NAME_LENGTH = 32;
 
 /**
  * `Campaign.CLAIM_GRACE` — seconds after a campaign ends before the project may reclaim.

@@ -116,7 +116,7 @@ export function CampaignsPage() {
           Boneyard
         </h1>
         <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-brand sm:text-base">
-          The Marketplace for verifiable Web3 Growth.
+          The Marketplace for Verifiable Web3 Growth.
         </p>
 
         {/*
@@ -126,7 +126,7 @@ export function CampaignsPage() {
         */}
         <div className="mx-auto mt-6 max-w-lg">
           <label className="sr-only" htmlFor="campaign-search">
-            Search campaigns, projects, or campaign IDs
+            Search campaigns, project names, or campaign IDs
           </label>
           <input
             id="campaign-search"
@@ -144,7 +144,7 @@ export function CampaignsPage() {
           to spell out what a project is actually signing up for.
         */}
         <p className="mt-5 text-xs text-ink-secondary">
-          Set your KPIs. Escrow Reward Pool. Pay for verified results.
+          Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
         </p>
 
         <p className="mt-2 text-xs text-ink-muted">
@@ -181,10 +181,7 @@ export function CampaignsPage() {
           //accent="var(--series-3)"
         />
         {/*
-          Gated on a single unit like the two tiles beside it. A percentage looks unitless, but
-          this one divides one sum of token amounts by another, so a mixed list makes it exactly
-          as meaningless as the totals above — and more misleading, because nothing in "15.7%"
-          hints that it added two different tokens together to get there.
+
         */}
         <StatTile
           label="Pool Utilization across all campaigns"

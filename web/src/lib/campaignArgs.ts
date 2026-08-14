@@ -64,8 +64,16 @@ export function buildCreateCampaignArgs(
     ? requireCount(draft.minReputation, "minReputation")
     : BigInt(0);
 
+  // Trimmed, not normalized: the chain stores the display string verbatim and only *compares* on a
+  // normalized form, so folding case or collapsing inner spaces here would quietly rewrite the name
+  // the project chose. Trimming is safe because `Names.key` ignores surrounding space anyway, and it
+  // keeps a name that is nothing but spaces from reaching `EmptyName` at the contract.
+  const name = draft.name.trim();
+  if (!name) throw new DraftEncodingError("name", "must not be empty");
+
   const cfg: CampaignConfig = {
     project,
+    name,
     token: draft.token as `0x${string}`,
     rewardPool,
     startTime: BigInt(draft.startTime),

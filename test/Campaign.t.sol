@@ -56,6 +56,12 @@ contract CampaignTest is Test {
     ReputationRegistry internal reputation;
     Campaign internal campaign;
 
+    /// @dev Campaign names are unique per registry, so fixtures cannot share one. Incremented per
+    ///      config built. A plain storage counter rather than `registry.campaignCount()`: that would
+    ///      be an external call, and an external call inside an argument list consumes the pending
+    ///      `vm.prank` or `vm.expectRevert` before the call under test ever runs.
+    uint256 private _nameNonce;
+
     address internal admin = address(0xA11CE);
     address internal project = address(0xC0DE);
     address internal oracle = address(0x0BAC);
@@ -93,9 +99,10 @@ contract CampaignTest is Test {
 
     // ── fixtures ─────────────────────────────────────────────────
 
-    function _defaultConfig(uint256 minReputation) internal view returns (Types.CampaignConfig memory) {
+    function _defaultConfig(uint256 minReputation) internal returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: string.concat("Campaign Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,
@@ -208,7 +215,7 @@ contract CampaignTest is Test {
         Campaign c = Campaign(addr);
 
         assertEq(c.project(), project, "project is whoever the config names");
-         _fund(c, POOL);
+        _fund(c, POOL);
 
         // The creator cannot drive it.
         vm.prank(outsider);
@@ -714,7 +721,7 @@ contract CampaignTest is Test {
         _activate(campaign);
         bytes32 id = _join(campaign, kol);
         _touch(campaign, userPk, user, id, 7 days);
-//
+        //
         _report(campaign, project, user, 10);
 
         assertEq(token.balanceOf(kol), 1_000 ether, "tier 0 auto-paid");

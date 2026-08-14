@@ -153,4 +153,9 @@ interface ICampaign {
     /// @notice Rewards released from the pool so far.
     /// @return The cumulative amount paid out.
     function paidOut() external view returns (uint256);
+
+
+    function getProject() external view returns(address);
+
+    function getOracle() external view returns(address);
 }

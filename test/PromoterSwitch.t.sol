@@ -217,6 +217,7 @@ contract PromoterSwitchTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Promoter Switch Test",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,
