@@ -6,12 +6,23 @@
  */
 
 import {reachFromFollowers} from "./boneyscore";
+import {isStubbedWallet} from "./stubWallets";
 
-const ETHOS_API = process.env.ETHOS_API ?? "https://api.ethos.network";
+const DEFAULT_ETHOS_API = "https://api.ethos.network";
+const DEFAULT_ETHOS_STUB_API = "http://127.0.0.1:8787/ethos";
 /** FixTweet's public JSON API. Primary follower source. */
-const FXTWITTER_API = process.env.FXTWITTER_API ?? "https://api.fxtwitter.com";
+const DEFAULT_FXTWITTER_API = "https://api.fxtwitter.com";
+const DEFAULT_FXTWITTER_STUB_API = "http://127.0.0.1:8787/fx";
 /** vxTwitter's public JSON API. Independent implementation, used when FixTweet is down. */
-const VXTWITTER_API = process.env.VXTWITTER_API ?? "https://api.vxtwitter.com";
+const DEFAULT_VXTWITTER_API = "https://api.vxtwitter.com";
+const DEFAULT_VXTWITTER_STUB_API = "http://127.0.0.1:8787/vx";
+
+const ETHOS_API = () => process.env.ETHOS_API ?? DEFAULT_ETHOS_API;
+const ETHOS_STUB_API = () => process.env.ETHOS_STUB_API ?? DEFAULT_ETHOS_STUB_API;
+const FXTWITTER_API = () => process.env.FXTWITTER_API ?? DEFAULT_FXTWITTER_API;
+const FXTWITTER_STUB_API = () => process.env.FXTWITTER_STUB_API ?? DEFAULT_FXTWITTER_STUB_API;
+const VXTWITTER_API = () => process.env.VXTWITTER_API ?? DEFAULT_VXTWITTER_API;
+const VXTWITTER_STUB_API = () => process.env.VXTWITTER_STUB_API ?? DEFAULT_VXTWITTER_STUB_API;
 /**
  * Kaito's crypto-Twitter index, reached through gomtu's proxy.
  *
@@ -101,9 +112,11 @@ export async function fetchEthosProfile(wallet: string): Promise<EthosProfile> {
     throw new EthosError("invalid_address", "Not a valid Ethereum address.", 400);
   }
 
+  const base = isStubbedWallet(wallet) ? ETHOS_STUB_API() : ETHOS_API();
+
   let raw: unknown;
   try {
-    raw = await getJson(`${ETHOS_API}/api/v2/user/by/address/${wallet.toLowerCase()}`);
+    raw = await getJson(`${base}/api/v2/user/by/address/${wallet.toLowerCase()}`);
   } catch (cause) {
     if (cause instanceof HttpError && cause.status === 404) {
       throw new EthosError("no_ethos_profile", NO_PROFILE_MESSAGE, 400);
@@ -159,17 +172,21 @@ export function xHandleOf(profile: EthosProfile): string | null {
 export type FollowerSource = {
   /** Stable identifier, used in health-check output. */
   name: string;
-  url: (encodedHandle: string) => string;
+  url: (encodedHandle: string, wallet?: string) => string;
   /** Pull the count out of a parsed response, or return null when the payload carries none. */
   read: (raw: unknown) => number | null;
 };
+
+function sourceBaseForWallet(wallet: string | undefined, production: string, stub: string) {
+  return isStubbedWallet(wallet) ? stub : production;
+}
 
 export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
   {
     // FixTweet reads X's public GraphQL layer, so its count is the live one. Verified against
     // handles from 718 to 241M followers.
     name: "fxtwitter",
-    url: (h) => `${FXTWITTER_API}/${h}`,
+    url: (h, wallet) => `${sourceBaseForWallet(wallet, FXTWITTER_API(), FXTWITTER_STUB_API())}/${h}`,
     read: (raw) => {
       const body = raw as {code?: number; user?: {followers?: unknown}};
       const count = body?.user?.followers;
@@ -180,7 +197,7 @@ export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
     // Independent implementation of the same idea. Runs a few thousand followers behind FixTweet on
     // large accounts, which is well inside the log curve's noise floor.
     name: "vxtwitter",
-    url: (h) => `${VXTWITTER_API}/${h}`,
+    url: (h, wallet) => `${sourceBaseForWallet(wallet, VXTWITTER_API(), VXTWITTER_STUB_API())}/${h}`,
     read: (raw) => {
       const count = (raw as {followers_count?: unknown})?.followers_count;
       return typeof count === "number" ? count : null;
@@ -201,12 +218,12 @@ export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
  * empty account, and falling through costs one request while trusting it costs the promoter 30% of their
  * score.
  */
-export async function fetchFollowers(handle: string): Promise<number> {
+export async function fetchFollowers(handle: string, wallet?: string): Promise<number> {
   const encoded = encodeURIComponent(handle);
 
   for (const source of FOLLOWER_SOURCES) {
     try {
-      const count = source.read(await getJson(source.url(encoded)));
+      const count = source.read(await getJson(source.url(encoded, wallet)));
       if (typeof count === "number" && count > 0) return count;
     } catch {
       // Try the next source. A 404 here means "no such handle" and every source will agree, but
@@ -230,11 +247,15 @@ export async function fetchFollowers(handle: string): Promise<number> {
  * sybil-resistant of the two counts and a plausible future input, but it is also sparse — most
  * handles return 0 — so weighting it today would penalise everyone Kaito has not indexed.
  */
-export async function fetchSmartFollowers(handle: string): Promise<number> {
+export async function fetchSmartFollowers(handle: string, wallet?: string): Promise<number> {
+  const base = isStubbedWallet(wallet)
+    ? (process.env.KAITO_STUB_API ?? "http://127.0.0.1:8787/smart")
+    : (process.env.KAITO_API ?? "https://gomtu.xyz/api");
+
   try {
-    const raw = (await getJson(
-      `${KAITO_API}/kaito/user_status?username=${encodeURIComponent(handle)}`,
-    )) as {data?: {smart_follower_count?: unknown}};
+    const raw = (await getJson(`${base}/kaito/user_status?username=${encodeURIComponent(handle)}`)) as {
+      data?: {smart_follower_count?: unknown};
+    };
     const count = raw?.data?.smart_follower_count;
     return typeof count === "number" && count > 0 ? count : 0;
   } catch {
@@ -260,7 +281,7 @@ export async function buildScoreReport(wallet: string): Promise<ScoreReport> {
   const handle = xHandleOf(profile);
   // Independent lookups against different hosts, so run them together rather than serially.
   const [followers, smartFollowers] = handle
-    ? await Promise.all([fetchFollowers(handle), fetchSmartFollowers(handle)])
+    ? await Promise.all([fetchFollowers(handle, wallet), fetchSmartFollowers(handle, wallet)])
     : [0, 0];
 
   return {

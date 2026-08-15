@@ -1,0 +1,48 @@
+# Netlify build configuration.
+#
+# The Next.js app is not at the repository root — the root is a Foundry project (src/, script/,
+# test/, foundry.toml) and `web/` is a self-contained pnpm package with its own lockfile. So the
+# base directory is set here rather than left at the default; Netlify installs dependencies and
+# runs the build from `web/`, and every other path below is relative to it.
+#
+# Deliberately absent:
+#
+#   - `publish`. The Next.js runtime (OpenNext adapter) sets it, along with the function that
+#     serves SSR and the /api/attest route handler.
+#   - `[[plugins]] @netlify/plugin-nextjs`. Netlify installs the adapter itself and updates it on
+#     every build; pinning it here would opt out of that, which their docs advise against.
+
+[build]
+  base = "web"
+
+  # Not `pnpm build`. That script hardcodes `NODE_OPTIONS=--max-old-space-size=8192` inline, which
+  # a child process inherits *over* anything set in [build.environment] — so the heap ceiling below
+  # would be silently ignored. Calling `next` directly is what lets the environment win. The local
+  # script keeps its 8 GB because a laptop has it to give and Netlify does not.
+  command = "pnpm exec next build"
+
+[build.environment]
+  # Matches the local toolchain (v24.8.0). Without this, Netlify pins whatever the build image
+  # defaulted to on the project's first build and keeps using it regardless of what we develop on.
+  NODE_VERSION = "24"
+
+  # Netlify's non-Enterprise build container is documented by their support team as roughly 3 GB
+  # usable — not the 8 GB this project's local build script assumes. Left uncapped, V8 sizes its
+  # heap against the host's memory rather than the container's, grows past the limit, and the
+  # container is OOM-killed; that surfaces as a bare "command failed" with no memory error, which
+  # is why this is set explicitly rather than left to default.
+  #
+  # If the build still dies for memory, the next lever is lowering this further (more GC pressure,
+  # slower build, but it fits) before reaching for Netlify's high-performance build tier.
+  NODE_OPTIONS = "--max-old-space-size=2560"
+
+# The pnpm version comes from `packageManager` in web/package.json — Corepack reads it, and Netlify
+# honours it. There is no PNPM_VERSION variable; only PNPM_FLAGS exists.
+#
+# If dependency resolution fails at build time with a module that resolves fine locally, Netlify
+# documents `PNPM_FLAGS = "--shamefully-hoist"` as the fix for Next.js specifically. Not set
+# preemptively: it flattens node_modules and would hide a genuinely missing dependency.
+
+# Deploy previews and branch deploys run this same build. They differ only in the environment
+# variables set per-context in the Netlify UI — a preview should not necessarily point at the same
+# RPC endpoint or attestor key as production.
