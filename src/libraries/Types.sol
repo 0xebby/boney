@@ -22,7 +22,8 @@ library Types {
         Volume,
         ActiveUser,
         signUps,
-        downloads
+        downloads,
+        withdraw
     }
 
     /// @notice Campaign lifecycle.

@@ -166,7 +166,7 @@ export function CreateCampaignPage() {
       ) : null}
 
       <Card>
-        <CardHeader title="Identity" subtitle="How this campaign is listed" />
+        <CardHeader title="Campaign Title" subtitle="How this campaign is listed" />
         <div className="space-y-3">
           <Field
             label="Campaign name"

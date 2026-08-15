@@ -75,5 +75,5 @@ export function useKolReportState({
   };
 }
 
-/** Stable identity so a consumer's `useMemo` does not re-run on every render while loading. */
+/** Stable Campaign Title so a consumer's `useMemo` does not re-run on every render while loading. */
 const EMPTY: ReadonlyMap<string, bigint> = new Map();
