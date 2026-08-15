@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import {usePathname} from "next/navigation";
-import type {ReactNode} from "react";
+import {useEffect, useState, type ReactNode} from "react";
 import {useAccount, useConnect, useDisconnect} from "wagmi";
 import {RankBadge} from "@/components/ui/RankBadge";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useIsPromoter} from "@/hooks/useIsPromoter";
 import {rankOf} from "@/lib/ranks";
 import {describeTxError} from "@/lib/txErrors";
+import {DEV_STUB_WALLET} from "@/lib/stubWallets";
 
 /**
  * AppShell — a persistent top bar over a single full-width content column.
@@ -162,6 +163,111 @@ function WalletRank() {
   );
 }
 
+function DevStubWalletManager() {
+  const {address} = useAccount();
+  const [wallet, setWallet] = useState("");
+  const [wallets, setWallets] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/stub-wallets", {cache: "no-store"});
+        const body = (await response.json()) as {wallets?: string[]};
+        setWallets(body.wallets ?? []);
+      } catch {
+        setWallets([]);
+      }
+    })();
+  }, []);
+
+  if (!address || address.toLowerCase() !== DEV_STUB_WALLET.toLowerCase()) return null;
+
+  const updateWallets = async (nextWallet: string, action: "add" | "remove") => {
+    const trimmed = nextWallet.trim();
+    if (!trimmed) {
+      setError("Enter a wallet address.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/stub-wallets", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({wallet: trimmed, action}),
+      });
+
+      const body = (await response.json()) as {wallets?: string[]; error?: string};
+      if (!response.ok) {
+        throw new Error(body.error ?? "Failed to update allowlist.");
+      }
+
+      setWallets(body.wallets ?? []);
+      setWallet("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to update allowlist.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border border-dashed border-hairline bg-surface-2 px-3 py-2 text-left">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+        Dev stub allowlist
+      </p>
+
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <input
+          value={wallet}
+          onChange={(event) => setWallet(event.target.value)}
+          placeholder="0x..."
+          className="w-full rounded border border-hairline bg-surface-1 px-2 py-1.5 text-[11px] text-ink placeholder:text-ink-muted"
+        />
+
+        <button
+          type="button"
+          onClick={() => void updateWallets(wallet, "add")}
+          disabled={busy}
+          className="rounded-md bg-brand px-2.5 py-1.5 text-[11px] font-semibold text-plane disabled:opacity-50"
+        >
+          Add
+        </button>
+
+        <button
+          type="button"
+          onClick={() => void updateWallets(wallet, "remove")}
+          disabled={busy || !wallet.trim()}
+          className="rounded-md border border-hairline bg-surface-1 px-2.5 py-1.5 text-[11px] font-medium text-ink disabled:opacity-50"
+        >
+          Remove
+        </button>
+      </div>
+
+      {wallets.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {wallets.map((entry) => (
+            <span
+              key={entry}
+              className="rounded-full border border-hairline bg-surface-1 px-2 py-0.5 text-[10px] text-ink-muted"
+            >
+              {entry.slice(0, 6)}…{entry.slice(-4)}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-[10px] text-ink-muted">No stub wallets currently allowed.</p>
+      )}
+
+      {error ? <p className="mt-2 text-[10px] text-critical">{error}</p> : null}
+    </div>
+  );
+}
+
 export function AppShell({children}: {children: ReactNode}) {
   const pathname = usePathname();
   const {isConnected} = useAccount();
@@ -219,20 +325,10 @@ export function AppShell({children}: {children: ReactNode}) {
           </nav>
 
           <div className="flex shrink-0 items-center gap-2.5">
-            {/*
-              Brand yellow rather than the amber `--status-warning`: this is a badge on the product
-              itself, not a status on a campaign row, and borrowing the warning hue here would put
-              it in the same visual language as a Paused pill.
-            */}
             <span className="animate-blink hidden text-[10px] font-bold uppercase tracking-wider text-brand xl:inline">
               beta
             </span>
 
-            {/*
-              The one filled control in the bar. Brand fill takes dark ink, not the light-yellow
-              body ink — a yellow button with yellow text is unreadable. The label shortens on
-              narrow screens so the CTA never squeezes the nav out of the row.
-            */}
             <Link
               href="/create"
               aria-current={pathname === "/create" ? "page" : undefined}
@@ -248,6 +344,10 @@ export function AppShell({children}: {children: ReactNode}) {
             <WalletRank />
             <WalletButton />
           </div>
+        </div>
+
+        <div className="mx-auto w-full max-w-6xl px-4 pb-3 sm:px-6 lg:px-8">
+          <DevStubWalletManager />
         </div>
       </header>
 

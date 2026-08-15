@@ -25,6 +25,9 @@ export const CONTRACTS = [
   {name: "ReputationRegistry", artifact: "ReputationRegistry.sol/ReputationRegistry.json"},
   {name: "AttestationVerifier", artifact: "AttestationVerifier.sol/AttestationVerifier.json"},
   {name: "OracleCoordinator", artifact: "OracleCoordinator.sol/OracleCoordinator.json"},
+  {name: "EventVerifier", artifact: "EventVerifier.sol/EventVerifier.json"},
+  {name: "DepositVerifier", artifact: "DepositVerifier.sol/DepositVerifier.json"},
+  {name: "TransferVerifier", artifact: "TransferVerifier.sol/TransferVerifier.json"},
   {name: "IERC20", artifact: "IERC20.sol/IERC20.json"},
   {name: "IERC20Metadata", artifact: "IERC20Metadata.sol/IERC20Metadata.json"},
 ] as const;

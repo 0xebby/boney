@@ -8,5 +8,8 @@ export {AttributionRegistryAbi} from "./AttributionRegistry";
 export {ReputationRegistryAbi} from "./ReputationRegistry";
 export {AttestationVerifierAbi} from "./AttestationVerifier";
 export {OracleCoordinatorAbi} from "./OracleCoordinator";
+export {EventVerifierAbi} from "./EventVerifier";
+export {DepositVerifierAbi} from "./DepositVerifier";
+export {TransferVerifierAbi} from "./TransferVerifier";
 export {IERC20Abi} from "./IERC20";
 export {IERC20MetadataAbi} from "./IERC20Metadata";

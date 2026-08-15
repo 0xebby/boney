@@ -339,8 +339,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         uint256 already = _userCredited[user][kpiIndex];
         if (newTotal < already) revert NonMonotonic(already, newTotal);
-        uint256 delta = newTotal - already;
-        if (delta == 0) return; // idempotent replay
+        if (newTotal == already) return; // idempotent replay
 
         // Resolve attribution before crediting: unattributed actions have no payee.
         bytes32 promoterId = _resolvePromoterId(user);
@@ -348,19 +347,23 @@ contract Campaign is ICampaign, ReentrancyGuard {
         address promoter = _promoterOf[promoterId];
         if (promoter == address(0)) revert NoAttribution(user);
 
-        uint256 credited = delta;
+        uint256 verifiedTotal = newTotal;
         if (spec.verifier != address(0)) {
-            credited = IKpiVerifier(spec.verifier).verify(
-                address(this), kpiIndex, user, delta, evidence, spec.params
+            // Verifier receives the cumulative total and returns what may be credited.
+            // This allows verifiers to validate against on-chain state (e.g., actual event counts).
+            verifiedTotal = IKpiVerifier(spec.verifier).verify(
+                address(this), kpiIndex, user, newTotal, evidence, spec.params
             );
             // A verifier may discount a claim but must never inflate it.
-            if (credited > delta) revert VerifierOvercredit(credited, delta);
-            if (credited == 0) return;
+            if (verifiedTotal > newTotal) revert VerifierOvercredit(verifiedTotal, newTotal);
         }
 
-        // Credit only the verified portion, so a discounted report can be retried later with
-        // better evidence rather than being permanently burned.
-        _userCredited[user][kpiIndex] = already + credited;
+        // Credit only the newly verified portion (verified total minus what was already credited).
+        if (verifiedTotal <= already) return;
+        uint256 credited = verifiedTotal - already;
+
+        // Update cumulative credited amount and propagate credit to the promoter.
+        _userCredited[user][kpiIndex] = verifiedTotal;
         _progress[promoter][kpiIndex] += credited;
         _totalProgress[kpiIndex] += credited;
 
