@@ -7,6 +7,7 @@ import {Campaign} from "../src/campaign/Campaign.sol";
 import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
 import {EscrowVault} from "../src/escrow/EscrowVault.sol";
 import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
+import {EventVerifier} from "../src/verifiers/EventVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
 
 /// @title SeedDemo
@@ -74,11 +75,12 @@ contract SeedDemo is Script {
     uint64 constant LONGEST = 14 days;
 
     uint256 PROJECT_PK;
+    address project;
     CampaignRegistry registry;
     EscrowVault vault;
     IERC20 token;
     AttributionRegistry attribution;
-    address project;
+    EventVerifier eventVerifier;
 
     function run() external {
         PROJECT_PK = vm.envUint("PRIVATE_KEY");
@@ -86,6 +88,7 @@ contract SeedDemo is Script {
         vault = EscrowVault(vm.envAddress("VAULT_ADDRESS"));
         token = IERC20(vm.envAddress("TOKEN_ADDRESS"));
         attribution = AttributionRegistry(vm.envAddress("ATTRIBUTION_ADDRESS"));
+        eventVerifier = EventVerifier(vm.envAddress("EVENT_VERIFIER_ADDRESS"));
         project = vm.addr(PROJECT_PK);
 
         // Both checks fail before spending gas rather than producing a fixture that looks right and
@@ -146,7 +149,12 @@ contract SeedDemo is Script {
         address[COUNT] memory created;
         uint256 funded;
         for (uint256 i = 0; i < COUNT; i++) {
-            created[i] = _createFunded(names[i], durations[i], pools[i], kinds[i], gates[i]);
+            if (i == 1) {
+                // Campaign 1 (3d) uses 2 KPIs to test multi-KPI support
+                created[i] = _createFundedMultiKpi(names[i], durations[i], pools[i], gates[i], 2);
+            } else {
+                created[i] = _createFunded(names[i], durations[i], pools[i], kinds[i], gates[i]);
+            }
             funded += pools[i];
         }
 
@@ -200,7 +208,27 @@ contract SeedDemo is Script {
         });
 
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](1);
-        kpis[0] = Types.KpiSpec({kind: kind, verifier: address(0), target: 100, aggregate: false, params: ""});
+        
+        // Configure event source to track Transfer events from the token contract.
+        // Transfer(address indexed from, address indexed to, uint256 value)
+        // Actor is "to" (topics[2]), amount is value (from data)
+        // Scale by 1e18 to convert from token base units to display units
+        bytes32 transferSignature = keccak256("Transfer(address,address,uint256)");
+        bytes memory eventSourceParams = abi.encode(
+            address(token),           // source: token contract where Transfer events come from
+            transferSignature,        // topic0: Transfer event signature
+            uint8(2),                 // actorTopic: 2 (the "to" indexed parameter, 1-based from topic[0])
+            uint8(0),                 // amountMode: 0 = extract amount from data
+            uint256(1e18)             // scale: divide by 1e18 to normalize token decimals
+        );
+        
+        kpis[0] = Types.KpiSpec({
+            kind: kind,
+            verifier: address(eventVerifier),
+            target: 100,
+            aggregate: false,
+            params: eventSourceParams
+        });
 
         // Three rungs at 10/50/100 units paying 5%/10%/20% of the pool: a promoter who tops the
         // ladder takes 35%, so the pool supports roughly three full-ladder promoters before it is
@@ -218,5 +246,65 @@ contract SeedDemo is Script {
         vault.deposit(campaign, pool);
         Campaign(campaign).activate();
         vm.stopBroadcast();
+
+        return campaign;
+    }
+
+    /// @dev Creates a campaign with multiple event-based KPIs to test multi-KPI support.
+    function _createFundedMultiKpi(
+        string memory name,
+        uint64 duration,
+        uint256 pool,
+        uint256 gate,
+        uint256 numKpis
+    ) internal returns (address campaign) {
+        Types.CampaignConfig memory cfg = Types.CampaignConfig({
+            project: project,
+            name: name,
+            token: address(token),
+            rewardPool: pool,
+            startTime: uint64(block.timestamp),
+            endTime: uint64(block.timestamp) + duration,
+            attributionWindow: duration,
+            minReputation: gate
+        });
+
+        Types.KpiSpec[] memory kpis = new Types.KpiSpec[](numKpis);
+        Types.RewardTier[][] memory tiers = new Types.RewardTier[][](numKpis);
+
+        bytes32 transferSignature = keccak256("Transfer(address,address,uint256)");
+
+        for (uint256 i = 0; i < numKpis; i++) {
+            bytes memory eventSourceParams = abi.encode(
+                address(token),
+                transferSignature,
+                uint8(2),
+                uint8(0),
+                uint256(1e18)
+            );
+
+            kpis[i] = Types.KpiSpec({
+                kind: Types.KpiKind.Deposit, // All are Deposit for simplicity
+                verifier: address(eventVerifier),
+                target: 100,
+                aggregate: false,
+                params: eventSourceParams
+            });
+
+            // Equal tier structure for each KPI
+            tiers[i] = new Types.RewardTier[](3);
+            tiers[i][0] = Types.RewardTier({threshold: 10, reward: pool / (20 * numKpis)});
+            tiers[i][1] = Types.RewardTier({threshold: 50, reward: pool / (10 * numKpis)});
+            tiers[i][2] = Types.RewardTier({threshold: 100, reward: pool / (5 * numKpis)});
+        }
+
+        vm.startBroadcast(PROJECT_PK);
+        (, campaign) = registry.createCampaign(cfg, kpis, tiers);
+        token.approve(address(vault), pool);
+        vault.deposit(campaign, pool);
+        Campaign(campaign).activate();
+        vm.stopBroadcast();
+
+        return campaign;
     }
 }

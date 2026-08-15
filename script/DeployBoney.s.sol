@@ -9,6 +9,7 @@ import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
 import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
+import {EventVerifier} from "../src/verifiers/EventVerifier.sol";
 
 /// @title DeployBoney
 /// @notice Full-stack Boney deployment script.
@@ -81,6 +82,9 @@ contract DeployBoney is Script {
         coordinator.setCampaignRegistry(address(registry));
         boney = new Boney(address(registry));
 
+        // 5. Deploy event verifier for KPI verification against oracle.
+        EventVerifier eventVerifier = new EventVerifier(address(coordinator));
+
         vm.stopBroadcast();
 
         console.log("Boney deployed");
@@ -91,5 +95,6 @@ contract DeployBoney is Script {
         console.log("  AttestationVerifier:    ", address(attestations));
         console.log("  ReputationRegistry:     ", address(reputation));
         console.log("  OracleCoordinator:      ", address(coordinator));
+        console.log("  EventVerifier:          ", address(eventVerifier));
     }
 }
