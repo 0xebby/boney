@@ -25,6 +25,7 @@ export const KPI_KIND = [
   "ActiveUser",
   "signUps",
   "downloads",
+  "withdraw" 
 ] as const;
 
 export type KpiKind = (typeof KPI_KIND)[number];
@@ -45,6 +46,7 @@ export const KPI_KIND_LABEL: Record<KpiKind, string> = {
   // array's job is to mirror it exactly. Renaming here would silently shift every index above 9.
   signUps: "Sign-ups",
   downloads: "Downloads",
+  withdraw: "Withdrawals"
 };
 
 export function statusFromIndex(index: number): CampaignStatus {
