@@ -30,7 +30,7 @@
 
 import {createServer, type IncomingMessage, type ServerResponse} from "node:http";
 
-/** One wallet's pinned upstream identity. */
+/** One wallet's pinned upstream Campaign Title. */
 type Pin = {score: number; followers: number; handle: string};
 
 /**

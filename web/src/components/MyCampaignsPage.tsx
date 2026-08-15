@@ -166,9 +166,9 @@ export function MyCampaignsPage() {
 function Header() {
   return (
     <header>
-      <h1 className="font-display text-2xl text-ink">My campaigns</h1>
+      <h1 className="font-display text-2xl text-ink">My Campaigns</h1>
       <p className="mt-0.5 text-xs text-ink-muted">
-        Campaigns you created. Open one to fund, activate, pause, end, or reclaim unspent escrow.
+        Campaigns you created. Open one to <b>Fund, Activate, Pause, End, or Reclaim Unspent Escrow</b> funds.
       </p>
     </header>
   );

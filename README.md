@@ -8,7 +8,7 @@ automatically as verified milestones are achieved. The first application is a KO
 but the protocol generalizes to any workflow where funds should move only after objectively
 verifiable work.
 
-- **Wallet-first identity** — projects see reputation scores and attestations, never social handles.
+- **Wallet-first Campaign Title** — projects see reputation scores and attestations, never social handles.
 - **Performance-based payouts** — tiered rewards released from escrow as attributed KPIs are met.
 - **User-signed attribution** — the end user consents to attribution; consent expires.
 - **Extensible KPIs** — mints, swaps, deposits, TVL, volume, or any custom metric via an
