@@ -16,6 +16,12 @@ plan.md
 future.md
 changes.md
 
+# Internal code reviews and the unpublished protocol spec. Both live in boneyMd/ alongside the
+# published docs, and this repo is public — findings.md details unfixed high-severity bugs, so it
+# must never be staged. Drop the spec/ rule when the spec is ready to publish.
+boneyMd/findings.md
+boneyMd/spec/
+
 # Web app
 web/node_modules/
 web/.next/
