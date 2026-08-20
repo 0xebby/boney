@@ -9,6 +9,12 @@ import {IAttributionRegistry} from "./interfaces/IAttributionRegistry.sol";
 /// @dev The facade holds no funds and no campaign state; it routes to the modules and provides
 ///      the aggregated views a marketplace UI needs. Protocol logic lives in the modules.
 interface IBoney {
+    // ── errors ───────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error NotProject(address project, address caller);
+    error CampaignMismatch(address expected, address provided);
+
     /// @notice A campaign summarized for listing pages.
     /// @param campaignId Sequential id assigned by the registry.
     /// @param campaign Address of the campaign contract.

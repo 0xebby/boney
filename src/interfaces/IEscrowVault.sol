@@ -5,6 +5,20 @@ pragma solidity ^0.8.30;
 /// @notice Custody for campaign funds. Holds no business logic: it tracks a per-campaign balance
 ///         and only the campaign itself may move its own funds.
 interface IEscrowVault {
+    // ── errors ───────────────────────────────────────────────────
+
+    error NotRegistrar();
+    error NotAdmin();
+    error ZeroAddress();
+    error AlreadyRegistered();
+    error CampaignNotRegistered();
+    error ZeroAmount();
+    error InsufficientBalance(uint256 available, uint256 requested);
+    error RegistrarAlreadySet();
+    error RegistrarNotSet();
+
+    // ── events ───────────────────────────────────────────────────
+
     /// @notice Emitted when a campaign is bound to its escrow token. Must precede any deposit.
     /// @param campaign The campaign being bound.
     /// @param token ERC20 it escrows and pays out in.

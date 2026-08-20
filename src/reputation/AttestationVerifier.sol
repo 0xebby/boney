@@ -21,18 +21,6 @@ import {IAttestationVerifier} from "../interfaces/IAttestationVerifier.sol";
 ///      - `ECDSA.tryRecover` rejects malleable (high-s) signatures and never returns
 ///        `address(0)` as a valid signer.
 contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
-    error LengthMismatch();
-    error BelowThreshold(uint256 provided, uint256 required);
-    error TooManyAttestations();
-    error AttestationMismatch(uint256 index);
-    error AttestationExpired(uint256 index);
-    error NotAnAttestor(address attestor);
-    error DuplicateAttestor(address attestor);
-    error InvalidNonce(address attestor, uint256 expected, uint256 provided);
-    error InvalidSignature(uint256 index);
-    error InvalidThreshold(uint256 threshold, uint256 attestorCount);
-    error ZeroAddress();
-
     /// @notice EIP-712 type hash for `Attestation`. Exposed so signers can build the digest
     ///         off-chain without duplicating the struct definition.
     bytes32 public constant ATTESTATION_TYPEHASH = keccak256(

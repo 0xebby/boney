@@ -2,7 +2,7 @@
 
 import {useQuery} from "@tanstack/react-query";
 import {usePublicClient} from "wagmi";
-import {parseAbiItem, type PublicClient} from "viem";
+import {type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {
@@ -13,15 +13,7 @@ import {
   type CampaignPromoters,
 } from "@/lib/promoters";
 import type {CampaignView} from "@/lib/types";
-
-/**
- * Parsed from a signature string rather than pulled from `CampaignAbi`, so viem infers the exact
- * arg types (`promoter`, `promoterId`, `reputation`) instead of a union over every campaign event.
- * The signature must stay identical to `ICampaign.PromoterJoined`.
- */
-const PROMOTER_JOINED = parseAbiItem(
-  "event PromoterJoined(address indexed promoter, bytes32 indexed promoterId, uint256 reputation)",
-);
+import {PROMOTER_JOINED} from "@/lib/events";
 
 export type PromoterDirectory = {
   groups: CampaignPromoters[];

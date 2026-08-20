@@ -16,6 +16,7 @@ import {IOracleCoordinator} from "../src/interfaces/IOracleCoordinator.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IAttestationVerifier} from "../src/interfaces/IAttestationVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -204,7 +205,7 @@ contract BoneyTest is Test {
 
         // 4. KOL cannot join without reputation.
         vm.prank(kol);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.InsufficientReputation.selector, 0, 5_000));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 0, 5_000));
         c.join();
 
         // 5. Attestor vouches for the KOL's follower count; now they qualify.
@@ -281,7 +282,7 @@ contract BoneyTest is Test {
     function test_Facade_revertsForeignProject() public {
         Types.CampaignConfig memory cfg = _config(0);
         vm.prank(outsider);
-        vm.expectRevert(abi.encodeWithSelector(Boney.NotProject.selector, project, outsider));
+        vm.expectRevert(abi.encodeWithSelector(IBoney.NotProject.selector, project, outsider));
         boney.createCampaign(cfg, _kpis(), _tiers());
     }
 
@@ -336,7 +337,7 @@ contract BoneyTest is Test {
         });
 
         vm.prank(kol);
-        vm.expectRevert(abi.encodeWithSelector(Boney.CampaignMismatch.selector, address(c), address(0xDEAD)));
+        vm.expectRevert(abi.encodeWithSelector(IBoney.CampaignMismatch.selector, address(c), address(0xDEAD)));
         boney.registerAttribution(id, user, t, "");
     }
 

@@ -19,16 +19,6 @@ import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 contract EscrowVault is IEscrowVault, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    error NotRegistrar();
-    error NotAdmin();
-    error ZeroAddress();
-    error AlreadyRegistered();
-    error CampaignNotRegistered();
-    error ZeroAmount();
-    error InsufficientBalance(uint256 available, uint256 requested);
-    error RegistrarAlreadySet();
-    error RegistrarNotSet();
-
     /// @notice Account that may wire the registrar, exactly once.
     address public immutable admin;
 

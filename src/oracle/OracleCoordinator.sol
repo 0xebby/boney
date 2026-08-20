@@ -20,28 +20,6 @@ import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
 ///      Reports are keyed by content hash including the reporter and a per-reporter sequence, so
 ///      two reporters can make the same claim independently and neither can overwrite the other.
 contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
-    error ZeroAddress();
-    error NotAReporter(address who);
-    error NothingStaked();
-    error StakeLocked(uint256 until);
-    error UnknownReport(bytes32 reportId);
-    error ReportAlreadyExists(bytes32 reportId);
-    error DisputeWindowOpen(uint256 until);
-    error DisputeWindowClosed(uint256 until);
-    error ReportIsDisputed(bytes32 reportId);
-    error ReportAlreadyApplied(bytes32 reportId);
-    error UnknownCampaign(address campaign);
-    error NotUserReport(bytes32 reportId);
-    error NotAggregateReport(bytes32 reportId);
-    error TransferFailed();
-    error RegistryAlreadySet();
-    error RegistryNotSet();
-
-    /// @notice Emitted once the campaign registry is wired.
-    /// @notice Emitted once when the campaign registry is wired, enabling report submission.
-    /// @param registry The campaign registry used to validate report targets.
-    event RegistrySet(address indexed registry);
-
     /// @notice Lifecycle state of a submitted report.
     /// @param reporter Account that submitted the report.
     /// @param campaign Campaign the report targets.

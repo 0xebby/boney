@@ -24,36 +24,6 @@ import {Names} from "../libraries/Names.sol";
 ///      tier the contract pays what remains and emits `PoolExhausted`; it never reverts, because
 ///      reverting would let one exhausted tier block all further reporting for everyone.
 contract Campaign is ICampaign, ReentrancyGuard {
-    error NotProject();
-    error NotReporter();
-    error NotOracle();
-    error WrongStatus(Types.CampaignStatus actual);
-    error AlreadyJoined();
-    error NotJoined();
-    error InsufficientReputation(uint256 score, uint256 required);
-    error UnreachableReputation(uint256 required, uint256 maxScore);
-    error UnknownKpi(uint256 kpiIndex);
-    error AggregateKpi(uint256 kpiIndex);
-    error NotAggregateKpi(uint256 kpiIndex);
-    error NoAttribution(address user);
-    error NonMonotonic(uint256 current, uint256 provided);
-    error VerifierOvercredit(uint256 credited, uint256 max);
-    error OutsideWindow(uint64 startTime, uint64 endTime);
-    error NotFunded(uint256 balance, uint256 required);
-    error ClaimWindowOpen(uint64 until);
-    error NothingToReclaim();
-    error ZeroAddress();
-    error InvalidWindow();
-    error ZeroRewardPool();
-    error NoKpis();
-    error TierLengthMismatch();
-    error EmptyTiers(uint256 kpiIndex);
-    error TiersNotAscending(uint256 kpiIndex, uint256 tierIndex);
-    error ZeroTierReward(uint256 kpiIndex, uint256 tierIndex);
-    error CustomKpiNeedsVerifier(uint256 kpiIndex);
-    error TooManyKpis(uint256 provided, uint256 max);
-    error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
-
     /// @notice Window after a campaign ends during which promoters may still settle earned tiers,
     ///         before the project can reclaim what is left.
     uint64 public constant CLAIM_GRACE = 20 minutes;
@@ -233,8 +203,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
         status = Types.CampaignStatus.Pending;
     }
 
-
-
     // ── lifecycle ────────────────────────────────────────────────
 
     /// @inheritdoc ICampaign
@@ -408,7 +376,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     }
 
     /// @dev Walks the tier ladder for one `(promoter, kpi)` pair and pays every newly crossed
-    ///      tier. 
+    ///      tier.
 
     ///      The ladder is per-promoter by design (each KOL earns their own tiers), so the loop is bounded by the number of tiers, not the number of promoters.
     /// @param promoter Wallet receiving the payouts.
@@ -444,7 +412,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     // ── escrow return ────────────────────────────────────────────
 
     /// @inheritdoc ICampaign
-    /// @dev Cancelled campaigns return funds immediately (nobody earned anything). 
+    /// @dev Cancelled campaigns return funds immediately (nobody earned anything).
     ///      Ended campaigns wait out `CLAIM_GRACE` so promoters can settle first.
     function reclaimUnspent() external nonReentrant onlyProject {
         if (status == Types.CampaignStatus.Ended) {
@@ -481,11 +449,15 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ///      protect. So once the campaign is Ended, and only then, the stored touch is honoured even
     ///      if expired.
     ///
-    ///      That relaxation cannot be used to steal credit. `storeTouch` overwrites only with a
-    ///      strictly newer `signedAt`, so the stored touch is always the user's latest signed
-    ///      intent; it rejects an already-expired `expiresAt`, so no one can backfill a stale touch
-    ///      after the fact; and it is bounded to `CLAIM_GRACE`, after which reporting closes
-    ///      entirely.
+    ///      That relaxation cannot be used to steal credit, but only because `storeTouch` bounds
+    ///      touch creation to the campaign's life. Four things hold together: the registry rejects
+    ///      a touch once this campaign is past `endTime` or terminal, so a post-end signature
+    ///      cannot displace the promoter who did the work; it overwrites only on a strictly newer
+    ///      `signedAt`, so the stored touch is the user's latest in-campaign intent; it rejects an
+    ///      already-expired `expiresAt`, so no one can backfill a stale touch after the fact; and
+    ///      reporting is bounded to `CLAIM_GRACE`, after which it closes entirely. Drop the first
+    ///      and the rest do not save it — a promoter who did nothing could collect a withheld
+    ///      report by having the user re-sign during the grace window.
     function _resolvePromoterId(address user) private view returns (bytes32) {
         bytes32 live = attributionRegistry.activePromoter(address(this), user);
         if (live != bytes32(0)) return live;
@@ -592,12 +564,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
         return rewardPool - paidOut;
     }
 
-    function getProject() external view returns(address) {
+    function getProject() external view returns (address) {
         return project;
     }
 
-    function getOracle() external view returns(address) {
+    function getOracle() external view returns (address) {
         return oracleCoordinator;
     }
-
 }

@@ -11,6 +11,8 @@ import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {Types} from "../src/libraries/Types.sol";
 import {Names} from "../src/libraries/Names.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
+import {ICampaignRegistry} from "../src/interfaces/ICampaignRegistry.sol";
 
 contract NameToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -167,20 +169,22 @@ contract CampaignNamesTest is Test {
 
     function test_Create_revertsOnExactDuplicate() public {
         Campaign first = _create("Aave");
-        vm.expectRevert(abi.encodeWithSelector(CampaignRegistry.NameTaken.selector, "Aave", address(first)));
+        vm.expectRevert(abi.encodeWithSelector(ICampaignRegistry.NameTaken.selector, "Aave", address(first)));
         _create("Aave");
     }
 
     function test_Create_revertsOnCaseVariant() public {
         Campaign first = _create("Aave");
-        vm.expectRevert(abi.encodeWithSelector(CampaignRegistry.NameTaken.selector, "AAVE", address(first)));
+        vm.expectRevert(abi.encodeWithSelector(ICampaignRegistry.NameTaken.selector, "AAVE", address(first)));
         _create("AAVE");
     }
 
     function test_Create_revertsOnWhitespaceVariant() public {
         Campaign first = _create("Aave Protocol");
         vm.expectRevert(
-            abi.encodeWithSelector(CampaignRegistry.NameTaken.selector, "  Aave   Protocol  ", address(first))
+            abi.encodeWithSelector(
+                ICampaignRegistry.NameTaken.selector, "  Aave   Protocol  ", address(first)
+            )
         );
         _create("  Aave   Protocol  ");
     }
@@ -206,7 +210,7 @@ contract CampaignNamesTest is Test {
         cfg.rewardPool = 0; // Campaign's constructor: ZeroRewardPool
 
         vm.prank(project);
-        vm.expectRevert(Campaign.ZeroRewardPool.selector);
+        vm.expectRevert(ICampaign.ZeroRewardPool.selector);
         registry.createCampaign(cfg, _kpis(), _tiers());
 
         assertTrue(registry.isNameAvailable("Aave"), "a name must survive a failed creation");
@@ -222,7 +226,7 @@ contract CampaignNamesTest is Test {
         c.end();
 
         assertFalse(registry.isNameAvailable("Aave"), "an ended campaign keeps its name");
-        vm.expectRevert(abi.encodeWithSelector(CampaignRegistry.NameTaken.selector, "Aave", address(c)));
+        vm.expectRevert(abi.encodeWithSelector(ICampaignRegistry.NameTaken.selector, "Aave", address(c)));
         _create("Aave");
     }
 

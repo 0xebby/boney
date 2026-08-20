@@ -294,13 +294,13 @@ contract MultiKpiTest is Test {
         _joinAndAttribute(campaign);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.AggregateKpi.selector, TVL_KPI));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AggregateKpi.selector, TVL_KPI));
         campaign.reportUserAction(TVL_KPI, user, 500_000, "");
     }
 
     function test_AttributedKpi_refusesAnAggregateUpdate() public {
         vm.prank(oracle);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NotAggregateKpi.selector, MINT_KPI));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotAggregateKpi.selector, MINT_KPI));
         campaign.applyAggregateUpdate(MINT_KPI, 100);
     }
 

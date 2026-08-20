@@ -184,7 +184,7 @@ contract AttributionPoCTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                AttributionRegistry.PromoterNotRegistered.selector, address(campaign), victimId
+                IAttributionRegistry.PromoterNotRegistered.selector, address(campaign), victimId
             )
         );
         attribution.storeTouch(user, t, sig, attacker);
@@ -235,7 +235,7 @@ contract AttributionPoCTest is Test {
         vm.prank(kol);
         vm.expectRevert(
             abi.encodeWithSelector(
-                AttributionRegistry.TouchNotNewer.selector, first.signedAt, second.signedAt
+                IAttributionRegistry.TouchNotNewer.selector, first.signedAt, second.signedAt
             )
         );
         attribution.storeTouch(user, first, firstSig, kol);
@@ -273,7 +273,7 @@ contract AttributionPoCTest is Test {
             vm.prank(kol);
             vm.expectRevert(
                 abi.encodeWithSelector(
-                    AttributionRegistry.TouchNotNewer.selector, stale.signedAt, fresh.signedAt
+                    IAttributionRegistry.TouchNotNewer.selector, stale.signedAt, fresh.signedAt
                 )
             );
             attribution.storeTouch(user, stale, staleSig, kol);
@@ -319,7 +319,7 @@ contract AttributionPoCTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                AttributionRegistry.TouchNotYetValid.selector, future, uint64(block.timestamp)
+                IAttributionRegistry.TouchNotYetValid.selector, future, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t, sig, kol);

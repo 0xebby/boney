@@ -6,6 +6,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {IAttestationVerifier} from "../src/interfaces/IAttestationVerifier.sol";
+import {IReputationRegistry} from "../src/interfaces/IReputationRegistry.sol";
 
 contract ReputationRegistryTest is Test {
     AttestationVerifier internal verifier;
@@ -105,14 +106,14 @@ contract ReputationRegistryTest is Test {
     function test_RegisterSchema_revertsDuplicate() public {
         vm.prank(admin);
         vm.expectRevert(
-            abi.encodeWithSelector(ReputationRegistry.SchemaAlreadyRegistered.selector, followersId)
+            abi.encodeWithSelector(IReputationRegistry.SchemaAlreadyRegistered.selector, followersId)
         );
         registry.registerSchema("FOLLOWERS", 2);
     }
 
     function test_RegisterSchema_revertsEmptyName() public {
         vm.prank(admin);
-        vm.expectRevert(ReputationRegistry.EmptyName.selector);
+        vm.expectRevert(IReputationRegistry.EmptyName.selector);
         registry.registerSchema("", 1);
     }
 
@@ -126,7 +127,7 @@ contract ReputationRegistryTest is Test {
         }
         assertEq(registry.schemaCount(), max);
 
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.TooManySchemas.selector, max));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.TooManySchemas.selector, max));
         registry.registerSchema("ONE_TOO_MANY", 1);
         vm.stopPrank();
     }
@@ -141,7 +142,7 @@ contract ReputationRegistryTest is Test {
     function test_SetSchemaWeight_revertsUnknown() public {
         bytes32 unknown = keccak256("NOPE");
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.UnknownSchema.selector, unknown));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.UnknownSchema.selector, unknown));
         registry.setSchemaWeight(unknown, 1);
     }
 
@@ -183,7 +184,7 @@ contract ReputationRegistryTest is Test {
         bytes32 unknown = keccak256("NOPE");
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) = _bundle(kol, unknown, 1, 0);
 
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.UnknownSchema.selector, unknown));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.UnknownSchema.selector, unknown));
         registry.submitAttestation(kol, unknown, 1, as_, sigs);
     }
 
@@ -193,7 +194,7 @@ contract ReputationRegistryTest is Test {
             _bundle(kol, followersId, 5_230, 0);
         registry.submitAttestation(kol, followersId, 5_230, as_, sigs);
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidNonce.selector, attestor, 1, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidNonce.selector, attestor, 1, 0));
         registry.submitAttestation(kol, followersId, 5_230, as_, sigs);
     }
 
@@ -202,7 +203,7 @@ contract ReputationRegistryTest is Test {
             _bundle(kol, followersId, 5_230, 0);
 
         // Claim a higher value than was signed.
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.AttestationMismatch.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.AttestationMismatch.selector, 0));
         registry.submitAttestation(kol, followersId, 999_999, as_, sigs);
     }
 
@@ -229,14 +230,14 @@ contract ReputationRegistryTest is Test {
         registry.storeAttestation(kol, followersId, 100, attId);
 
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.AttestationAlreadyUsed.selector, attId));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.AttestationAlreadyUsed.selector, attId));
         registry.storeAttestation(kol, followersId, 200, attId);
     }
 
     function test_StoreAttestation_revertsUnknownSchema() public {
         bytes32 unknown = keccak256("NOPE");
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.UnknownSchema.selector, unknown));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.UnknownSchema.selector, unknown));
         registry.storeAttestation(kol, unknown, 1, keccak256("x"));
     }
 
@@ -292,7 +293,7 @@ contract ReputationRegistryTest is Test {
     function test_SetSchemaMaxValue_revertsUnknown() public {
         bytes32 unknown = keccak256("NOPE");
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.UnknownSchema.selector, unknown));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.UnknownSchema.selector, unknown));
         registry.setSchemaMaxValue(unknown, 2_800);
     }
 
@@ -309,7 +310,7 @@ contract ReputationRegistryTest is Test {
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) =
             _bundle(kol, followersId, 2_801, 0);
         vm.expectRevert(
-            abi.encodeWithSelector(ReputationRegistry.ValueExceedsMax.selector, followersId, 2_801, 2_800)
+            abi.encodeWithSelector(IReputationRegistry.ValueExceedsMax.selector, followersId, 2_801, 2_800)
         );
         registry.submitAttestation(kol, followersId, 2_801, as_, sigs);
     }
@@ -328,7 +329,7 @@ contract ReputationRegistryTest is Test {
         vm.startPrank(admin);
         registry.setSchemaMaxValue(followersId, 2_800);
         vm.expectRevert(
-            abi.encodeWithSelector(ReputationRegistry.ValueExceedsMax.selector, followersId, 9_999, 2_800)
+            abi.encodeWithSelector(IReputationRegistry.ValueExceedsMax.selector, followersId, 9_999, 2_800)
         );
         registry.storeAttestation(kol, followersId, 9_999, keccak256("over"));
         vm.stopPrank();
@@ -412,7 +413,7 @@ contract ReputationRegistryTest is Test {
     function test_SetSchemaMaxAge_revertsUnknown() public {
         bytes32 unknown = keccak256("NOPE");
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(ReputationRegistry.UnknownSchema.selector, unknown));
+        vm.expectRevert(abi.encodeWithSelector(IReputationRegistry.UnknownSchema.selector, unknown));
         registry.setSchemaMaxAge(unknown, 30 days);
     }
 

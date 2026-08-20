@@ -12,7 +12,7 @@ import {IAttributionRegistry} from "./interfaces/IAttributionRegistry.sol";
 import {Types} from "./libraries/Types.sol";
 
 /// @title Boney - web3 rewards  accountability protocol.
-/// @dev Deliberately thin and stateless (decision D9). It holds no funds, owns no campaign state,
+/// @dev Deliberately thin and stateless. It holds no funds, owns no campaign state,
 ///      and has no privileged role in any module — every call it makes could be made directly.
 ///      Its job is ergonomics: resolve campaign ids to addresses, batch the token approval dance,
 ///      and assemble the aggregate views a marketplace[boneyard] UI needs.
@@ -21,10 +21,6 @@ import {Types} from "./libraries/Types.sol";
 ///      parallel for different frontends) requires no migration of escrow or campaign state.
 contract Boney is IBoney {
     using SafeERC20 for IERC20;
-
-    error ZeroAddress();
-    error NotProject(address project, address caller);
-    error CampaignMismatch(address expected, address provided);
 
     /// @notice Factory and directory the facade resolves campaign ids through.
     ICampaignRegistry public immutable registry;
