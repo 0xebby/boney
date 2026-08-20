@@ -1,0 +1,19 @@
+{
+  "name": "boney-subgraph",
+  "private": true,
+  "license": "MIT",
+  "description": "Boney — attributed campaign KPIs, promoter attribution, and credited progress.",
+  "scripts": {
+    "codegen": "graph codegen",
+    "build": "graph build",
+    "auth": "graph auth",
+    "deploy": "graph deploy boney-indexer",
+    "create:local": "graph create --node http://localhost:8020/ boney-local",
+    "deploy:local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 boney-local",
+    "test": "graph test"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.97.0",
+    "@graphprotocol/graph-ts": "^0.38.0"
+  }
+}

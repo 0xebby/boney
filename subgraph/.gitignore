@@ -1,0 +1,7 @@
+# graph codegen output — regenerate with `pnpm codegen`, never edit or commit.
+generated/
+
+# graph build output.
+build/
+
+node_modules/

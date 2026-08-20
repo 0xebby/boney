@@ -1,0 +1,183 @@
+# Boney's indexed state.
+#
+# ## What this schema deliberately does NOT do
+#
+# It does not compute creditable progress. `KpiAction` stores raw decoded events and `Touch` stores raw
+# attribution, and the join between them — "only activity at or after this user's own `signedAt`
+# counts" — stays in `web/src/lib/relayCore.ts:aggregateDeltas`, where it is already fixture-tested and
+# shared by the relayer and the browser.
+#
+# That is a correctness decision, not laziness. The pre-attribution filter is the rule most likely to
+# silently credit the wrong promoter, and reimplementing it here in AssemblyScript would create a
+# second implementation that can drift from the first. `relayCore`'s own header warns about exactly
+# this. The subgraph's job is to make the inputs cheap and complete; the rule stays in one place.
+#
+# For the same reason nothing here applies `Kpi.scale`. Raw values are stored and the divide happens in
+# `aggregateByActor`, mirroring `EventMetricKpiVerifier`, which also holds raw totals and scales only
+# inside `verify`.
+
+"""A campaign deployed by CampaignRegistry."""
+type Campaign @entity(immutable: false) {
+  "The campaign contract address, lowercased hex."
+  id: ID!
+  campaignId: BigInt!
+  project: Bytes!
+  token: Bytes!
+  name: String!
+  "Latest status from StatusChanged; absent until the first transition after creation."
+  status: Int
+  createdAtBlock: BigInt!
+  createdAt: BigInt!
+  kpis: [Kpi!]! @derivedFrom(field: "campaign")
+  touches: [Touch!]! @derivedFrom(field: "campaign")
+  promoters: [Promoter!]! @derivedFrom(field: "campaign")
+}
+
+"""
+One KPI of one campaign, with its event-source commitment decoded out of `KpiSpec.params`.
+
+`source`/`topic0`/`actorTopic`/`amountMode`/`scale` are null for a KPI whose params are not an event
+source blob — every campaign seeded before that feature, and any KPI carrying a
+`TouchWindowVerifier` lookback instead. Null here means "nothing observable", not an error.
+"""
+type Kpi @entity(immutable: false) {
+  "`<campaign>-<index>`."
+  id: ID!
+  campaign: Campaign!
+  index: Int!
+  kind: Int!
+  verifier: Bytes!
+  target: BigInt!
+  aggregate: Boolean!
+  "Contract whose logs credit this KPI."
+  source: Bytes
+  "`log.topics[0]` of the credited event."
+  topic0: Bytes
+  "Which indexed topic carries the acting wallet, 1-based over `topics`."
+  actorTopic: Int
+  "0 = count each log as 1, 1 = read the first data word. Mirrors `AMOUNT_MODE`."
+  amountMode: Int
+  "Divisor the consumer applies. Stored, never applied here."
+  scale: BigInt
+}
+
+"""
+The live attribution touch for a `(campaign, user)` pair.
+
+One row per pair, overwritten by any strictly newer `signedAt` — the same comparison
+`AttributionRegistry` makes on chain, so the row here is the row `_resolvePromoterId` would read.
+Superseded touches are not retained: the contract does not keep them either, and a stale row would
+read as a second live attribution.
+"""
+type Touch @entity(immutable: false) {
+  "`<campaign>-<user>`."
+  id: ID!
+  campaign: Campaign!
+  user: Bytes!
+  promoterId: Bytes!
+  signedAt: BigInt!
+  expiresAt: BigInt!
+  relayer: Bytes!
+  blockNumber: BigInt!
+}
+
+"""A promoter who joined a campaign. Replaces the `PromoterJoined` log scan."""
+type Promoter @entity(immutable: false) {
+  "`<campaign>-<promoterId>`."
+  id: ID!
+  campaign: Campaign!
+  promoterId: Bytes!
+  "Null when only `PromoterRegistered` was seen; `PromoterJoined` carries the wallet."
+  wallet: Bytes
+  reputation: BigInt
+  joinedAtBlock: BigInt
+}
+
+"""
+One decoded, credit-bearing event.
+
+Not campaign-scoped, and that is deliberate: one contract can serve many campaigns, and a user's
+attribution can change after the fact via a promoter switch. Resolving the campaign at write time
+would bake in an answer that later becomes wrong. Consumers filter by `source` + `topic0` + `user`.
+"""
+type KpiAction @entity(immutable: true) {
+  "`<txHash>-<logIndex>`."
+  id: ID!
+  source: Bytes!
+  topic0: Bytes!
+  "The acting wallet, per the preset's actor topic."
+  user: Bytes!
+  "Raw, unscaled. 1 for count-mode presets."
+  value: BigInt!
+  blockNumber: BigInt!
+  "Block timestamp — the field the pre-attribution filter compares against `Touch.signedAt`."
+  timestamp: BigInt!
+}
+
+"""
+Progress already credited on chain, from `ProgressCredited`.
+
+Lets a consumer skip a report the campaign would treat as a no-op without one `userCreditedOf` read
+per referral.
+"""
+type Credit @entity(immutable: true) {
+  "`<txHash>-<logIndex>`."
+  id: ID!
+  campaign: Campaign!
+  kpiIndex: Int!
+  promoterId: Bytes!
+  user: Bytes!
+  amount: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+"""A tier payout, from `TierSettled`."""
+type TierPayout @entity(immutable: true) {
+  "`<txHash>-<logIndex>`."
+  id: ID!
+  campaign: Campaign!
+  promoterId: Bytes!
+  promoter: Bytes!
+  kpiIndex: Int!
+  tier: Int!
+  "Amount actually released. Less than the tier's configured reward when the pool ran short."
+  paid: BigInt!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}
+
+"""
+Dedupe guard for dynamically spawned data sources.
+
+Two campaigns tracking the same contract with the same preset would otherwise spawn the same data
+source twice, and every matching log would be handled twice — double-counting every action, silently.
+graph-node does not dedupe this for us.
+"""
+type SpawnedSource @entity(immutable: true) {
+  "`<templateName>-<address>`."
+  id: ID!
+  template: String!
+  address: Bytes!
+  spawnedAtBlock: BigInt!
+}
+
+"""
+A KPI event source that no template covers.
+
+Written instead of dropping the KPI silently. A project can name any contract and event on chain, but
+a subgraph can only index signatures declared in its manifest — so an unrecognised `topic0` means
+that KPI is not observable here and its campaign will never show activity. Recorded so the gap is
+queryable rather than being mistaken for a quiet period.
+"""
+type UnsupportedSource @entity(immutable: false) {
+  "`<source>-<topic0>`."
+  id: ID!
+  source: Bytes!
+  topic0: Bytes!
+  actorTopic: Int!
+  amountMode: Int!
+  "How many KPIs across all campaigns are waiting on this shape."
+  kpiCount: Int!
+  firstSeenAtBlock: BigInt!
+}
