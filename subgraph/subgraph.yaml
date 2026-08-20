@@ -1,0 +1,224 @@
+# Boney subgraph — Base Sepolia.
+#
+# Addresses and startBlock come from `web/src/lib/deployments.ts`, generated from Foundry's broadcast
+# receipt, so they describe what actually landed on chain. Base Sepolia was redeployed and reseeded
+# 2026-08-20 (twice — 02:21 then 03:26); earlier deployments (0x0FF749bB…, 0x424b10cB…) are dead and must not be re-added.
+#
+# `startBlock` is the CampaignRegistry DEPLOYMENT block, not a recent one. Templates only spawn from
+# `CampaignCreated`, and a dynamically created data source never indexes blocks before it was
+# spawned, so starting late means the already-deployed campaigns never spawn their KPI templates at
+# all — the subgraph would sync clean and index nothing.
+specVersion: 1.2.0
+description: Boney — attributed campaign KPIs, promoter attribution, and credited progress.
+repository: https://github.com/0xcoda/boney
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum/contract
+    name: CampaignRegistry
+    network: base-sepolia
+    source:
+      address: "0xC0E30d1402818581c0e3D39C3212F972f8A43D70"
+      abi: CampaignRegistry
+      startBlock: 45714019
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/registry.ts
+      entities:
+        - Campaign
+        - Kpi
+        - SpawnedSource
+        - UnsupportedSource
+      abis:
+        - name: CampaignRegistry
+          file: ./abis/CampaignRegistry.json
+        # Needed for the eth_call that reads each new campaign's KPI specs. The registry event
+        # carries the campaign address but not its KPIs.
+        - name: Campaign
+          file: ./abis/Campaign.json
+      eventHandlers:
+        - event: CampaignCreated(indexed uint256,indexed address,indexed address,address,string)
+          handler: handleCampaignCreated
+
+  - kind: ethereum/contract
+    name: AttributionRegistry
+    network: base-sepolia
+    source:
+      address: "0xa5750748242825c7116CB9a5739F0FA558615c45"
+      abi: AttributionRegistry
+      startBlock: 45714019
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/attribution.ts
+      entities:
+        - Touch
+        - Promoter
+      abis:
+        - name: AttributionRegistry
+          file: ./abis/AttributionRegistry.json
+      eventHandlers:
+        - event: TouchStored(indexed address,indexed address,indexed bytes32,uint64,uint64,address)
+          handler: handleTouchStored
+        - event: PromoterRegistered(indexed address,indexed bytes32)
+          handler: handlePromoterRegistered
+
+templates:
+  # Spawned per campaign. Campaign addresses are unique, so no dedupe guard is needed here.
+  - kind: ethereum/contract
+    name: CampaignEvents
+    network: base-sepolia
+    source:
+      abi: Campaign
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/campaign.ts
+      entities:
+        - Campaign
+        - Promoter
+        - Credit
+        - TierPayout
+      abis:
+        - name: Campaign
+          file: ./abis/Campaign.json
+      eventHandlers:
+        - event: PromoterJoined(indexed address,indexed bytes32,uint256)
+          handler: handlePromoterJoined
+        - event: ProgressCredited(indexed uint256,indexed bytes32,indexed address,uint256)
+          handler: handleProgressCredited
+        - event: TierSettled(indexed bytes32,indexed address,indexed uint256,uint256,uint256)
+          handler: handleTierSettled
+        - event: StatusChanged(uint8,uint8)
+          handler: handleStatusChanged
+
+  # One template per entry in `EVENT_PRESETS` (web/src/lib/kpiSource.ts). A preset is identified by
+  # (topic0, actorTopic, amountMode) — which topic carries the actor and how the amount is read are
+  # baked into the handler, so two presets over the same event are two templates, not one.
+  #
+  # `TransferToActor` is ERC-20/721 `Transfer` with the recipient as actor and `value` as the amount.
+  # This is the shape every campaign in the current fixture uses.
+  - kind: ethereum/contract
+    name: TransferToActor
+    network: base-sepolia
+    source:
+      abi: ERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/transfer.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransferToActor
+
+  # Same event, count mode — the `erc721-mint` preset, where the third topic is a token id.
+  - kind: ethereum/contract
+    name: TransferToActorCount
+    network: base-sepolia
+    source:
+      abi: ERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/transfer.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransferToActorCount
+
+  # The `weth-deposit` preset. Its shape was confirmed against a real Base Sepolia log.
+  - kind: ethereum/contract
+    name: WethDeposit
+    network: base-sepolia
+    source:
+      abi: WETH
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/weth.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: WETH
+          file: ./abis/WETH.json
+      eventHandlers:
+        - event: Deposit(indexed address,uint256)
+          handler: handleWethDeposit
+
+  # `Withdrawal`'s counterpart. Present because the fixture uses it, though no preset declares it yet.
+  - kind: ethereum/contract
+    name: WethWithdrawal
+    network: base-sepolia
+    source:
+      abi: WETH
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/weth.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: WETH
+          file: ./abis/WETH.json
+      eventHandlers:
+        - event: Withdrawal(indexed address,uint256)
+          handler: handleWethWithdrawal
+
+  # Aave V3 Pool `Supply`, crediting `onBehalfOf` — the wallet that receives the aTokens, not the
+  # transaction sender. Count-only; see `protocols.ts`.
+  - kind: ethereum/contract
+    name: AaveSupply
+    network: base-sepolia
+    source:
+      abi: AavePool
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/protocols.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: AavePool
+          file: ./abis/AavePool.json
+      eventHandlers:
+        - event: Supply(indexed address,address,indexed address,uint256,indexed uint16)
+          handler: handleAaveSupply
+
+  # Sygma bridge `Deposit`. Same event *name* as WETH's, entirely different signature and topic0 —
+  # which is why templates resolve on topic0 rather than on a name.
+  - kind: ethereum/contract
+    name: SygmaDeposit
+    network: base-sepolia
+    source:
+      abi: SygmaBridge
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/protocols.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: SygmaBridge
+          file: ./abis/SygmaBridge.json
+      eventHandlers:
+        - event: Deposit(uint8,bytes32,uint64,indexed address,bytes,bytes)
+          handler: handleSygmaDeposit
