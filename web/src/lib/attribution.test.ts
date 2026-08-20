@@ -117,6 +117,8 @@ describe("canStoreTouch", () => {
       storedSignedAt: BigInt(0),
       now: 1_700_000,
       maxTouchDuration,
+      campaignEndTime: BigInt(1_700_000 + 30 * 86_400),
+      campaignStatus: 1, // Active
       ...overrides,
     };
   }
@@ -170,6 +172,47 @@ describe("canStoreTouch", () => {
     }));
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/TouchTooLong/);
+  });
+
+  // ── campaign life ────────────────────────────────────────
+
+  it("rejects a touch once the campaign window has closed", () => {
+    const r = canStoreTouch(ctx({campaignEndTime: BigInt(1_699_999)}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/CampaignOver.*1699999.*1700000/);
+  });
+
+  it("accepts a touch on the campaign's final second", () => {
+    expect(canStoreTouch(ctx({campaignEndTime: BigInt(1_700_000)}))).toEqual({ok: true});
+  });
+
+  it("rejects a touch once the campaign is Ended, even inside its window", () => {
+    // endTime is still 30 days out, so only the status check can catch an early end.
+    const r = canStoreTouch(ctx({campaignStatus: 3}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/CampaignTerminal.*3/);
+  });
+
+  it("rejects a touch once the campaign is Cancelled", () => {
+    const r = canStoreTouch(ctx({campaignStatus: 4}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/CampaignTerminal.*4/);
+  });
+
+  it("accepts Pending, Active and Paused", () => {
+    for (const status of [0, 1, 2]) {
+      expect(canStoreTouch(ctx({campaignStatus: status}))).toEqual({ok: true});
+    }
+  });
+
+  it("fails closed on an unrecognised status", () => {
+    const r = canStoreTouch(ctx({campaignStatus: 255}));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/CampaignTerminal/);
+  });
+
+  it("treats a zero endTime as no campaign window to read, like the registry", () => {
+    expect(canStoreTouch(ctx({campaignEndTime: BigInt(0)}))).toEqual({ok: true});
   });
 
   // ── unregistered promoter ────────────────────────────────

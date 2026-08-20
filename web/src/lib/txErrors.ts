@@ -92,6 +92,20 @@ function at(value: unknown): string {
   return Number.isFinite(seconds) && seconds > 0 ? formatDateTime(seconds) : "an unknown time";
 }
 
+/**
+ * The offending byte from `InvalidNameChar`, shown only when it is printable.
+ *
+ * The rejected byte is frequently a control character or one piece of a multi-byte sequence, and
+ * rendering that raw produces a mojibake glyph the user cannot match to anything they typed. Better
+ * to say nothing than to point at the wrong character.
+ */
+function nameChar(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const byte = Number.parseInt(value.replace(/^0x/, ""), 16);
+  if (!Number.isFinite(byte) || byte < 0x21 || byte > 0x7e) return "";
+  return ` ("${String.fromCharCode(byte)}")`;
+}
+
 /** A count-like uint. Reputation scores and KPI totals are counts, not token amounts. */
 function count(value: unknown): string {
   const n = Number(value);
@@ -198,6 +212,14 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   UnknownCampaign: ([which]) =>
     `Campaign ${typeof which === "bigint" || typeof which === "number" ? `#${String(which)}` : addr(which)} isn't registered on this network. Check you're on the right chain.`,
 
+  // ── Campaign: naming ──
+  NameTooLong: ([got, max]) =>
+    `That campaign name is ${count(got)} bytes — the limit is ${count(max)}. Note that accented and emoji characters cost more than one byte each.`,
+  InvalidNameChar: ([index, char]) =>
+    `The campaign name has a character it can't use at position ${Number(index) + 1}${nameChar(char)}. Letters, digits, spaces and basic punctuation only.`,
+  NameTaken: ([takenName, existing]) =>
+    `"${String(takenName)}" is already used by a campaign at ${addr(existing)}. Pick a different name.`,
+
   // ── Attribution ──
   TouchExpired: ([expiresAt]) =>
     `That referral link expired at ${at(expiresAt)}. Ask the promoter for a fresh one.`,
@@ -209,6 +231,10 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     "A more recent attribution is already stored for this wallet, so this one can't replace it.",
   PromoterNotRegistered: () =>
     "That promoter hasn't joined this campaign, so the referral can't be attributed.",
+  CampaignOver: ([endTime]) =>
+    `This campaign closed at ${at(endTime)}, so referrals can no longer be attributed to it.`,
+  CampaignTerminal: ([status]) =>
+    `This campaign is ${statusName(status).toLowerCase()}, so referrals can no longer be attributed to it.`,
   ZeroPromoterId: () => "The referral link is missing its promoter id. Ask for a fresh one.",
   ZeroWindow: () => "The attribution window can't be zero.",
   InvalidSignature: (args) =>
