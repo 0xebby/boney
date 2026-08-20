@@ -79,7 +79,7 @@ WIND-DOWN                         Active/Paused --> Ended
 
 ## 1. The happy path
 
-![Boney happy path: creation, funding, activation, promoter join, attribution, reporting and settlement, wind-down](flow/happy-path.svg)
+![Boney happy path: creation, funding, activation, promoter join, attribution, reporting and settlement, wind-down](../flow/happy-path.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -150,7 +150,7 @@ sequenceDiagram
 `Paused` blocks reporting but cannot strand anyone: `end()` is permissionless once `endTime` passes,
 which converts a parked campaign into an `Ended` one and starts the grace clock.
 
-![Campaign lifecycle state machine: Pending, Active, Paused, Ended, Cancelled](flow/lifecycle.svg)
+![Campaign lifecycle state machine: Pending, Active, Paused, Ended, Cancelled](../flow/lifecycle.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -195,7 +195,7 @@ while credit is still owed, and the two windows can never both be open.
 Everything below happens in one transaction. There is no separate claim step — `_settle` runs at
 the end of every crediting report.
 
-![Control flow inside reportUserAction, ending in the inline tier-ladder settlement](flow/report-user-action.svg)
+![Control flow inside reportUserAction, ending in the inline tier-ladder settlement](../flow/report-user-action.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -237,7 +237,7 @@ flowchart TD
 
 ### Attribution resolution
 
-![Attribution resolution: live touch, or the stored touch once Ended, else revert](flow/attribution-resolution.svg)
+![Attribution resolution: live touch, or the stored touch once Ended, else revert](../flow/attribution-resolution.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -264,7 +264,7 @@ terminal, so the stored touch is the user's latest intent *from while the campai
 
 The oracle path is what makes a promoter payable without the project's cooperation.
 
-![The two report paths: direct from the project, or staked through the OracleCoordinator](flow/report-paths.svg)
+![The two report paths: direct from the project, or staked through the OracleCoordinator](../flow/report-paths.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -294,7 +294,7 @@ flowchart TD
 A verifier may only ever shrink a claim, and can never redirect the payee. `Campaign` independently
 rejects any verifier returning more than was claimed.
 
-![Verifier composition: GuardedKpiVerifier over Boney's canonical verifier plus an optional project verifier](flow/verifier-composition.svg)
+![Verifier composition: GuardedKpiVerifier over Boney's canonical verifier plus an optional project verifier](../flow/verifier-composition.svg)
 
 <details>
 <summary>Mermaid source</summary>
@@ -320,7 +320,7 @@ time; `verify` is then a stored-value lookup and a comparison.
 
 ## 6. Off-chain: what the UI and subgraph read
 
-![Which on-chain events feed each subgraph handler and the web UI](flow/subgraph.svg)
+![Which on-chain events feed each subgraph handler and the web UI](../flow/subgraph.svg)
 
 <details>
 <summary>Mermaid source</summary>

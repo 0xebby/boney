@@ -4,7 +4,7 @@
 
 Two promoters, scored against every campaign live on Boneyard today.
 
-![The Boneyard marketplace — 12 campaigns on Base Sepolia, 8 live](web/screenshots/shill-marketplace.png)
+![The Boneyard marketplace — 12 campaigns on Base Sepolia, 8 live](../web/screenshots/shill-marketplace.png)
 
 *The live marketplace. Every row is a real `Campaign` contract on Base Sepolia — pool, status, and the* **Min. rep.** *column that decides who can join. Project names in that second column are placeholder seed labels, not real customers (see Notes).*
 
@@ -80,7 +80,7 @@ Ceiling at today's follower count: **25,363** for @leaf_swan, **25,045** for @xe
 
 Here is the campaign in question:
 
-![Campaign #10 — 100K bUSD pool, minimum reputation 15,000](web/screenshots/shill-campaign-10.png)
+![Campaign #10 — 100K bUSD pool, minimum reputation 15,000](../web/screenshots/shill-campaign-10.png)
 
 *Campaign #10: a 100,000 bUSD pool, 99.9K still unspent in escrow, running to 25 Dec 2026. The gate is the* **Min. reputation 15,000** *field. @leaf_swan clears it at 16,004. @xeverade sits at 14,937 — 63 points away from a three-tier ladder paying 100 / 500 / 1,000 bUSD.*
 
