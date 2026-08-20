@@ -285,6 +285,71 @@ export type ObservedReferral = {
 };
 
 /**
+ * Whether Boney's independently observed total will let a report credit anything.
+ *
+ * ## The failure this exists to make visible
+ *
+ * A gated KPI credits `min(project's claim, Boney's observed total)`, and Boney's total is 0 until
+ * `pnpm relay` has scanned. A report that lands first is **not** a revert — `Campaign` returns early
+ * when the verified total does not exceed what is already credited, so the transaction *succeeds* and
+ * credits nothing. Verified on Base Sepolia: a claim of 12 confirmed successfully and left progress at
+ * 0, `paidOut` at 0.
+ *
+ * That is the worst shape a failure can take. There is no revert to surface, no error to catch, and the
+ * receipt looks exactly like a working report. Without this readout the only symptom is a progress bar
+ * that never moves, and the panel that caused it says nothing.
+ *
+ * So the ceiling is read and shown *before* the click. `observedProgressOf` exists on
+ * `EventMetricKpiVerifier` for precisely this purpose and had no UI reader until now.
+ */
+export type CeilingStatus =
+  /** The KPI names no verifier, so nothing caps the claim and there is no ceiling to show. */
+  | {kind: "ungated"}
+  /**
+   * Gated, but Boney's verifier has no config for this KPI — `setKpiConfig` never ran. Every report
+   * credits nothing, permanently, and no amount of relayer uptime fixes it.
+   */
+  | {kind: "unconfigured"}
+  /** Configured, but nothing observed yet. The relayer has not caught up; a report now credits 0. */
+  | {kind: "blocked"}
+  /** Observed less than measured, so a report will be trimmed to the ceiling. */
+  | {kind: "capped"; ceiling: bigint; measured: bigint}
+  /** Observed at or above what was measured, so the ceiling will not bind. */
+  | {kind: "clear"; ceiling: bigint};
+
+/**
+ * Classifies the ceiling against what the panel measured.
+ *
+ * `measured` is the sum across the referrals a report would cover, and `ceiling` the sum of their
+ * `observedProgressOf`. Compared in aggregate rather than per referral because the panel reports a KOL
+ * as one action; per-referral capping is the contract's job, and reproducing it here would be a second
+ * implementation of the rule that decides payouts.
+ *
+ * **The two figures are not measuring quite the same thing**, which is why `capped` cannot be
+ * described as a delay. `measured` comes from the browser's log scan (`useObservedActions`), which
+ * folds every matched log for these referrals. `ceiling` comes from the relayer, which excludes
+ * activity predating each user's own `signedAt`. So a gap is either the relayer being behind — which
+ * the next run closes — or pre-attribution activity, which is excluded permanently and by design. This
+ * function cannot tell them apart, so the copy must name both rather than promising either.
+ */
+export function describeCeiling(input: {
+  /** Whether `KpiSpec.verifier` points at the guard wrapping Boney's verifier. */
+  gated: boolean;
+  /** Whether `EventMetricKpiVerifier.configOf(...).configured` is set. */
+  configured: boolean;
+  ceiling: bigint;
+  measured: bigint;
+}): CeilingStatus {
+  if (!input.gated) return {kind: "ungated"};
+  if (!input.configured) return {kind: "unconfigured"};
+  if (input.ceiling === BigInt(0)) return {kind: "blocked"};
+  if (input.ceiling < input.measured) {
+    return {kind: "capped", ceiling: input.ceiling, measured: input.measured};
+  }
+  return {kind: "clear", ceiling: input.ceiling};
+}
+
+/**
  * Turns observed on-chain activity into the calls that credit it — the honest path.
  *
  * This is what a report is *supposed* to be: the KPI's `params` name a contract and an event
