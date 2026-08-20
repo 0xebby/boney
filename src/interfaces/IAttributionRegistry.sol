@@ -11,6 +11,22 @@ pragma solidity ^0.8.30;
 ///      adversarial promoters, so the order transactions land in says nothing about what the user
 ///      intended; only the timestamp inside the signature does.
 interface IAttributionRegistry {
+    // ── errors ───────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error ZeroPromoterId();
+    error TouchExpired(uint64 expiresAt, uint64 timestamp);
+    error TouchTooLong(uint64 expiresAt, uint64 maxExpiresAt);
+    error TouchNotYetValid(uint64 signedAt, uint64 timestamp);
+    error TouchNotNewer(uint64 signedAt, uint64 storedSignedAt);
+    error InvalidSignature();
+    error PromoterNotRegistered(address campaign, bytes32 promoterId);
+    error ZeroWindow();
+    error CampaignOver(uint64 endTime, uint64 timestamp);
+    error CampaignTerminal(uint256 status);
+
+    // ── events ───────────────────────────────────────────────────
+
     /// @notice Emitted when a promoter is issued their campaign-scoped attribution id.
     /// @param campaign The campaign they joined.
     /// @param promoterId The id issued.
@@ -55,6 +71,10 @@ interface IAttributionRegistry {
     function registerPromoter(bytes32 promoterId) external;
 
     /// @notice Validate a user-signed touch and store the attribution mapping.
+    /// @dev Only while the named campaign can still accrue creditable work: a touch is refused once
+    ///      the campaign is past its `endTime` or has reached a terminal status. Attribution signed
+    ///      after the campaign is over represents no in-campaign work, and would otherwise displace
+    ///      the promoter who earned it during the post-end reporting grace window.
     /// @param user The end user (signer of `touch`).
     /// @param touch The attribution message.
     /// @param signature EIP-712 signature over `touch` by `user`.

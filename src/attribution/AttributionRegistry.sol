@@ -4,13 +4,20 @@ pragma solidity ^0.8.30;
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
+import {Types} from "../libraries/Types.sol";
 
-/// @dev The one thing this registry reads back from a campaign. Declared locally, and read through
-///      a low-level staticcall rather than a typed call, so the registry keeps working for
+/// @dev What this registry reads back from a campaign. Declared locally, and read through
+///      low-level staticcalls rather than typed calls, so the registry keeps working for
 ///      registrants that are not campaigns at all — see `_effectiveMaxDuration`.
 interface ICampaignWindow {
     /// @notice The campaign's configured attribution horizon, in seconds.
     function attributionWindow() external view returns (uint64);
+
+    /// @notice Timestamp after which the campaign accepts no further reports.
+    function endTime() external view returns (uint64);
+
+    /// @notice The campaign's lifecycle state.
+    function status() external view returns (Types.CampaignStatus);
 }
 
 /// @title AttributionRegistry
@@ -23,6 +30,10 @@ interface ICampaignWindow {
 ///      This is the anti-abuse primitive: a promoter cannot attribute a wallet without that
 ///      wallet's consent, and consent expires — so a KOL who goes quiet loses attribution for
 ///      users who stop interacting.
+///
+///      Consent is also bounded to the campaign's life. A touch may only be created while the
+///      campaign named in it can still accrue creditable work — see `_requireCampaignOpen`, which
+///      is what keeps `Campaign`'s post-end attribution fallback from being farmable.
 ///
 ///      Recency is taken from the signed `signedAt`, not from relay order. Relayers are the
 ///      promoters competing for the credit, so whoever transacts last would otherwise win: a
@@ -37,16 +48,6 @@ interface ICampaignWindow {
 ///      can deny a campaign an id by claiming it first.
 contract AttributionRegistry is IAttributionRegistry, EIP712 {
     using ECDSA for bytes32;
-
-    error ZeroAddress();
-    error ZeroPromoterId();
-    error TouchExpired(uint64 expiresAt, uint64 timestamp);
-    error TouchTooLong(uint64 expiresAt, uint64 maxExpiresAt);
-    error TouchNotYetValid(uint64 signedAt, uint64 timestamp);
-    error TouchNotNewer(uint64 signedAt, uint64 storedSignedAt);
-    error InvalidSignature();
-    error PromoterNotRegistered(address campaign, bytes32 promoterId);
-    error ZeroWindow();
 
     /// @notice EIP-712 type hash for `Touch`. Exposed so wallets and frontends can build the
     ///         digest a user signs without duplicating the struct definition.
@@ -99,6 +100,10 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         if (touch.expiresAt > maxExpiresAt) {
             revert TouchTooLong(touch.expiresAt, maxExpiresAt);
         }
+
+        // A touch records in-campaign work, so it cannot be created once the campaign can no
+        // longer accrue any.
+        _requireCampaignOpen(touch.campaign, nowTs);
 
         // The campaign named in the signed payload must have registered the id itself.
         if (!_registered[touch.campaign][touch.promoterId]) {
@@ -153,6 +158,50 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         // surprise from bricking every touch for that address.
         if (window == 0 || window > maxTouchDuration) return maxTouchDuration;
         return window;
+    }
+
+    /// @dev Reverts unless `campaign` can still accrue creditable work.
+    ///
+    ///      Two bounds, and both are load-bearing. `endTime` catches a campaign whose window has
+    ///      closed but which nobody has called `end()` on yet — reports are refused in that state,
+    ///      but a touch stored there goes live the instant the permissionless `end()` lands. The
+    ///      terminal-status check catches the opposite case: a project may `end()` early, and then
+    ///      `block.timestamp` never reaches `endTime` at all.
+    ///
+    ///      Without both, `Campaign`'s post-end attribution fallback is a credit-stealing vector.
+    ///      That fallback honours the stored touch during `CLAIM_GRACE` even when expired, so a
+    ///      promoter who did nothing could have the user sign a fresh touch after the campaign was
+    ///      over, displace the promoter who actually delivered them, and collect a withheld
+    ///      report's payout. Bounding touch *creation* to the campaign's life is what makes that
+    ///      fallback safe: the stored touch is not just the user's latest intent, it is their
+    ///      latest intent from while the campaign was running.
+    ///
+    ///      Read through low-level staticcalls for the same reason as `_effectiveMaxDuration`: a
+    ///      registrant need not be a `Campaign`, and one that answers neither call is simply
+    ///      unbounded here rather than unusable.
+    /// @param campaign The campaign named in the touch.
+    /// @param nowTs The current block timestamp, narrowed once by the caller.
+    function _requireCampaignOpen(address campaign, uint64 nowTs) private view {
+        (bool okEnd, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
+        if (okEnd && endData.length == 32) {
+            uint64 end = abi.decode(endData, (uint64));
+            // Campaign.sol rejects `endTime <= block.timestamp` at construction, so zero is "not a
+            // campaign" rather than "already over" — the same reading as a zero window above.
+            if (end != 0 && nowTs > end) revert CampaignOver(end, nowTs);
+        }
+
+        (bool okStatus, bytes memory statusData) =
+            campaign.staticcall(abi.encodeCall(ICampaignWindow.status, ()));
+        if (okStatus && statusData.length == 32) {
+            // Decoded as uint256, not as the enum: `abi.decode` into an enum panics on an
+            // out-of-range value, which would let a hostile campaign brick every touch naming it.
+            // Comparing numerically instead means any unknown value above the terminal ones fails
+            // closed, and `Ended`/`Cancelled` are the last two members by construction. The error
+            // carries the full word for the same reason — a truncated one could report a garbage
+            // status as `Pending`.
+            uint256 state = abi.decode(statusData, (uint256));
+            if (state >= uint256(Types.CampaignStatus.Ended)) revert CampaignTerminal(state);
+        }
     }
 
     /// @inheritdoc IAttributionRegistry
