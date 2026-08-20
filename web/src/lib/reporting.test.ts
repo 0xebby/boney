@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 import {
   latestTouches,
   buildKolTargets,
+  describeCeiling,
   splitAmount,
   nextTierSeed,
   planKolReport,
@@ -395,5 +396,51 @@ describe("planObservedReport", () => {
       kol: kol({live: [], blocked: "attribution expired"}),
     });
     expect(plan).toMatchObject({ok: false, reason: "attribution expired"});
+  });
+});
+
+/**
+ * The ceiling readout exists for one specific failure: a gated KPI whose relayer has not run credits
+ * nothing, and `Campaign` returns early rather than reverting — so the report transaction *succeeds*
+ * and the only symptom is a progress bar that never moves. Verified on Base Sepolia: a claim of 12
+ * confirmed successfully and left progress at 0.
+ */
+describe("describeCeiling", () => {
+  const base = {gated: true, configured: true, ceiling: BigInt(50), measured: BigInt(12)};
+
+  it("stays quiet for a KPI nothing caps", () => {
+    expect(describeCeiling({...base, gated: false})).toEqual({kind: "ungated"});
+  });
+
+  /** A relayer delay is temporary; a missing config never resolves. The panel must not conflate them. */
+  it("separates a missing config from an idle relayer", () => {
+    expect(describeCeiling({...base, configured: false, ceiling: BigInt(0)})).toEqual({
+      kind: "unconfigured",
+    });
+    expect(describeCeiling({...base, ceiling: BigInt(0)})).toEqual({kind: "blocked"});
+  });
+
+  it("reports a ceiling below the measurement as capped, with both figures", () => {
+    expect(describeCeiling({...base, ceiling: BigInt(5), measured: BigInt(12)})).toEqual({
+      kind: "capped",
+      ceiling: BigInt(5),
+      measured: BigInt(12),
+    });
+  });
+
+  it("clears when the ceiling covers the measurement", () => {
+    expect(describeCeiling(base)).toEqual({kind: "clear", ceiling: BigInt(50)});
+  });
+
+  /** `min(claim, ceiling)` credits the claim in full at equality, so this must not read as capped. */
+  it("treats an exactly-equal ceiling as clear, not capped", () => {
+    const r = describeCeiling({...base, ceiling: BigInt(12), measured: BigInt(12)});
+    expect(r).toEqual({kind: "clear", ceiling: BigInt(12)});
+  });
+
+  /** An ungated KPI is quiet even with no config, since no ceiling applies either way. */
+  it("prefers ungated over unconfigured when both hold", () => {
+    expect(describeCeiling({gated: false, configured: false, ceiling: BigInt(0), measured: BigInt(9)}))
+      .toEqual({kind: "ungated"});
   });
 });

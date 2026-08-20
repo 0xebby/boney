@@ -11,9 +11,11 @@ import {useKolReportState} from "@/hooks/useKolReportState";
 import {useObservedActions} from "@/hooks/useObservedActions";
 import {
   buildKolTargets,
+  describeCeiling,
   planKolReport,
   planObservedReport,
   nextTierSeed,
+  type CeilingStatus,
   type KolTarget,
   type ObservedReferral,
   type TierSeed,
@@ -95,6 +97,9 @@ export function ReportPanel({
   const {
     progress: promoterProgress,
     credited: creditedMap,
+    ceiling,
+    configured: verifierConfigured,
+    gated,
     isLoading: stateLoading,
     refetch: refetchState,
   } = useKolReportState({
@@ -102,6 +107,7 @@ export function ReportPanel({
     promoter: kol?.promoter,
     referrals: liveReferrals,
     kpiIndex,
+    kpiVerifier: kpi?.spec.verifier,
     enabled: isProject,
   });
 
@@ -148,6 +154,26 @@ export function ReportPanel({
       progress: promoterProgress,
     });
   }, [kol, kpi, simulating, seed, promoterProgress, creditedMap, activity.observed, activity.source]);
+
+  // What the report would actually be allowed to credit, against what was measured. Computed on the
+  // observed path only: the simulate path credits an invented figure that Boney never saw, so its
+  // ceiling is always 0 and saying so would just be noise on top of the warning it already carries.
+  const measured = useMemo(
+    () =>
+      liveReferrals.reduce(
+        (sum, r) => sum + (activity.observed.get(r.toLowerCase())?.observed ?? BigInt(0)),
+        BigInt(0),
+      ),
+    [liveReferrals, activity.observed],
+  );
+
+  const ceilingStatus = useMemo(
+    () =>
+      simulating
+        ? null
+        : describeCeiling({gated, configured: verifierConfigured, ceiling, measured}),
+    [simulating, gated, verifierConfigured, ceiling, measured],
+  );
 
   if (!isProject) return null;
 
@@ -212,6 +238,10 @@ export function ReportPanel({
             ) : null
           ) : (
             <p className="text-xs text-warning">Cannot report: {plan.reason}</p>
+          )}
+
+          {loading || ceilingStatus === null ? null : (
+            <CeilingNotice status={ceilingStatus} unitLabel={kpi ? KPI_KIND_LABEL[kpi.spec.kind] : ""} />
           )}
 
           <SimulateToggle
@@ -555,6 +585,68 @@ function PlanBreakdown({
         )}
       </p>
     </div>
+  );
+}
+
+/**
+ * Boney's ceiling, stated before the click.
+ *
+ * The gap this closes: a gated KPI credits `min(claim, ceiling)`, and a report that lands before the
+ * relayer has scanned **succeeds and credits nothing**. No revert, no error, a clean receipt, and a
+ * progress bar that does not move. Confirmed on Base Sepolia — a claim of 12 confirmed successfully and
+ * left progress at 0.
+ *
+ * Every other warning in this panel describes something the contract would *reject*. This one
+ * describes something it will silently accept and discard, which is why it renders even when the plan
+ * is otherwise fine.
+ *
+ * `clear` still renders. A quiet "will credit in full" is what makes the other states legible as
+ * exceptions rather than as the panel having noticed nothing.
+ */
+function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: string}) {
+  const unit = unitLabel.toLowerCase();
+
+  if (status.kind === "ungated") return null;
+
+  if (status.kind === "unconfigured") {
+    return (
+      <p className="text-xs text-warning">
+        Boney&rsquo;s verifier has no config for this KPI, so every report will credit nothing —
+        permanently. This is not a relayer delay: <code>setKpiConfig</code> has never run for it, and no
+        amount of waiting fixes it.
+      </p>
+    );
+  }
+
+  if (status.kind === "blocked") {
+    return (
+      <p className="text-xs text-warning">
+        Boney has observed <span className="font-mono">0</span> {unit} for these referrals, so this
+        report will confirm successfully and credit nothing. Usually the relayer has not scanned yet —
+        run <code>pnpm relay</code>. If it has, the activity predates these referrals&rsquo; attribution
+        and is not creditable to this promoter at all. Nothing reverts either way.
+      </p>
+    );
+  }
+
+  if (status.kind === "capped") {
+    return (
+      <p className="text-xs text-warning">
+        Boney has observed <span className="font-mono">{status.ceiling.toString()}</span> of the{" "}
+        <span className="font-mono">{status.measured.toString()}</span> {unit} measured here, so this
+        report will be trimmed to the smaller figure. Two different causes: the relayer may not have
+        scanned the newest activity yet, or the difference happened before the referral was attributed —
+        the scan above counts that, and Boney deliberately does not. The first resolves on the next
+        relayer run; the second never becomes creditable.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-xs text-ink-muted">
+      Boney has independently observed <span className="font-mono">{status.ceiling.toString()}</span>{" "}
+      {unit}, so this report will credit in full.
+    </p>
   );
 }
 
