@@ -6,6 +6,22 @@ pragma solidity ^0.8.30;
 /// @dev Phase 1 uses a single attestor (`threshold = 1`). The contract is threshold-ready so
 ///      moving to multi-attestor operation only requires `setThreshold`.
 interface IAttestationVerifier {
+    // ── errors ───────────────────────────────────────────────────
+
+    error LengthMismatch();
+    error BelowThreshold(uint256 provided, uint256 required);
+    error TooManyAttestations();
+    error AttestationMismatch(uint256 index);
+    error AttestationExpired(uint256 index);
+    error NotAnAttestor(address attestor);
+    error DuplicateAttestor(address attestor);
+    error InvalidNonce(address attestor, uint256 expected, uint256 provided);
+    error InvalidSignature(uint256 index);
+    error InvalidThreshold(uint256 threshold, uint256 attestorCount);
+    error ZeroAddress();
+
+    // ── events ───────────────────────────────────────────────────
+
     /// @notice Emitted when an attestor becomes authorized to sign.
     /// @param attestor The attestor added.
     event AttestorAdded(address indexed attestor);

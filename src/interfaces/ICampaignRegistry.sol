@@ -7,6 +7,17 @@ import {Types} from "../libraries/Types.sol";
 /// @notice Factory and directory for campaigns. Deploys each campaign, registers it with the
 ///         escrow vault, and indexes it for marketplace discovery.
 interface ICampaignRegistry {
+    // ── errors ───────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error UnknownCampaign(uint256 campaignId);
+
+    /// @dev Raised when a name is already claimed. Carries the holder so a UI can link to it rather
+    ///      than only saying "taken".
+    error NameTaken(string name, address existing);
+
+    // ── events ───────────────────────────────────────────────────
+
     /// @notice Emitted for every campaign this registry deploys. The canonical discovery feed —
     ///         a campaign address that never appears here was not deployed by this registry.
     /// @param campaignId Sequential id assigned to the campaign.

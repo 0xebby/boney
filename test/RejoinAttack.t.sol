@@ -11,6 +11,7 @@ import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -159,7 +160,7 @@ contract RejoinAttackTest is Test {
 
         // Attempt to join again — this is the actual attack step
         vm.prank(kol);
-        vm.expectRevert(Campaign.AlreadyJoined.selector);
+        vm.expectRevert(ICampaign.AlreadyJoined.selector);
         campaign.join();
     }
 
@@ -312,7 +313,7 @@ contract RejoinAttackTest is Test {
 
         // 5. KOL attempts to rejoin to generate a "new link"
         vm.prank(kol);
-        vm.expectRevert(Campaign.AlreadyJoined.selector);
+        vm.expectRevert(ICampaign.AlreadyJoined.selector);
         campaign.join();
 
         // Attack blocked. Even if the above succeeded, the promoterId would be identical (layer 2)

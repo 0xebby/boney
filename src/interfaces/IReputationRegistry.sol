@@ -5,6 +5,20 @@ pragma solidity ^0.8.30;
 /// @notice Wallet-based reputation built from attested metrics (e.g. X followers, Kaito yaps,
 ///         ENS history). Projects see scores and attestation hashes, never social handles.
 interface IReputationRegistry {
+    // ── errors ───────────────────────────────────────────────────
+
+    error UnknownSchema(bytes32 schemaId);
+    error SchemaDisabled(bytes32 schemaId);
+    error SchemaAlreadyRegistered(bytes32 schemaId);
+    error AttestationAlreadyUsed(bytes32 attestationId);
+    error StaleValue(uint256 storedAt, uint256 incomingAt);
+    error ValueExceedsMax(bytes32 schemaId, uint256 value, uint256 maxValue);
+    error ZeroAddress();
+    error EmptyName();
+    error TooManySchemas(uint256 max);
+
+    // ── events ───────────────────────────────────────────────────
+
     /// @notice Emitted when a new metric becomes attestable.
     /// @param schemaId Stable id derived from the name.
     /// @param name Human-readable name (e.g. "FOLLOWERS").

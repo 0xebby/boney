@@ -14,16 +14,8 @@ import {Names} from "../libraries/Names.sol";
 ///      address against the wrong token. Deployment is permissionless — anyone may run a campaign
 ///      — but every campaign that exists came from here.
 ///
-///      Campaigns are deployed in full rather than cloned (D8): a campaign holding escrowed funds
-///      should not share code that anyone can later point elsewhere.
+///      Campaigns are deployed in full rather than cloned.
 contract CampaignRegistry is ICampaignRegistry {
-    error ZeroAddress();
-    error UnknownCampaign(uint256 campaignId);
-
-    /// @dev Raised when a name is already claimed. Carries the holder so a UI can link to it rather
-    ///      than only saying "taken".
-    error NameTaken(string name, address existing);
-
     /// @inheritdoc ICampaignRegistry
     address public immutable escrowVault;
     /// @inheritdoc ICampaignRegistry

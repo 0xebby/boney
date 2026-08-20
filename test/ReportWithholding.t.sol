@@ -13,6 +13,7 @@ import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IOracleCoordinator} from "../src/interfaces/IOracleCoordinator.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -251,7 +252,7 @@ contract ReportWithholdingTest is Test {
 
         vm.warp(uint256(campaign.endedAt()) + campaign.CLAIM_GRACE() + 1);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Ended));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Ended));
         campaign.reportUserAction(0, user, DELIVERED, "");
     }
 
@@ -292,7 +293,7 @@ contract ReportWithholdingTest is Test {
         campaign.pause();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Paused));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Paused));
         campaign.reportUserAction(0, user, DELIVERED, "");
 
         // A promoter waits out the window and ends it themselves.
@@ -328,7 +329,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NotAggregateKpi.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotAggregateKpi.selector, 0));
         coordinator.applyReport(reportId);
     }
 
@@ -362,10 +363,10 @@ contract ReportWithholdingTest is Test {
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
 
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotAggregateReport.selector, userReport));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAggregateReport.selector, userReport));
         coordinator.applyReport(userReport);
 
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotUserReport.selector, aggReport));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotUserReport.selector, aggReport));
         coordinator.applyUserReport(aggReport);
     }
 
@@ -392,7 +393,7 @@ contract ReportWithholdingTest is Test {
         assertEq(coordinator.stakeOf(reporter), 0, "reporter slashed");
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.ReportIsDisputed.selector, reportId));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportIsDisputed.selector, reportId));
         coordinator.applyUserReport(reportId);
 
         assertEq(campaign.progressOf(promoter, 0), 0, "nothing credited");
@@ -417,7 +418,7 @@ contract ReportWithholdingTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                OracleCoordinator.DisputeWindowOpen.selector, coordinator.reportDeadline(reportId)
+                IOracleCoordinator.DisputeWindowOpen.selector, coordinator.reportDeadline(reportId)
             )
         );
         coordinator.applyUserReport(reportId);
@@ -428,7 +429,7 @@ contract ReportWithholdingTest is Test {
         _joinAndTouch();
 
         vm.prank(reporter);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotAReporter.selector, reporter));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAReporter.selector, reporter));
         coordinator.submitUserReport(
             IOracleCoordinator.UserReport({
                 campaign: address(campaign),
@@ -446,7 +447,7 @@ contract ReportWithholdingTest is Test {
         _stake(reporter);
 
         vm.prank(reporter);
-        vm.expectRevert(OracleCoordinator.ZeroAddress.selector);
+        vm.expectRevert(IOracleCoordinator.ZeroAddress.selector);
         coordinator.submitUserReport(
             IOracleCoordinator.UserReport({
                 campaign: address(campaign),
@@ -478,7 +479,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, stranger));
         coordinator.applyUserReport(reportId);
     }
 
@@ -513,7 +514,7 @@ contract ReportWithholdingTest is Test {
         skip(1 days + 1);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, DELIVERED, "");
     }
 

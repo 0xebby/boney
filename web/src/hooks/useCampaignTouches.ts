@@ -2,20 +2,12 @@
 
 import {useQuery} from "@tanstack/react-query";
 import {usePublicClient} from "wagmi";
-import {parseAbiItem, type PublicClient} from "viem";
+import {type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {planWindows} from "@/lib/promoters";
 import {latestTouches, type TouchEntry} from "@/lib/reporting";
-
-/**
- * Parsed from a signature string rather than pulled from `AttributionRegistryAbi`, so viem infers
- * the exact arg types instead of a union over every registry event. Must stay identical to
- * `IAttributionRegistry.TouchStored`.
- */
-const TOUCH_STORED = parseAbiItem(
-  "event TouchStored(address indexed campaign, address indexed user, bytes32 indexed promoterId, uint64 signedAt, uint64 expiresAt, address relayer)",
-);
+import {TOUCH_STORED} from "@/lib/events";
 
 export type CampaignTouches = {
   touches: TouchEntry[];

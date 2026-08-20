@@ -36,27 +36,27 @@ contract EscrowVaultTest is Test {
     }
 
     function test_SetRegistrar_onlyOnce() public {
-        vm.expectRevert(EscrowVault.RegistrarAlreadySet.selector);
+        vm.expectRevert(IEscrowVault.RegistrarAlreadySet.selector);
         vault.setRegistrar(address(0x1234));
     }
 
     function test_SetRegistrar_onlyAdmin() public {
         EscrowVault fresh = new EscrowVault(address(this));
         vm.prank(OTHER);
-        vm.expectRevert(EscrowVault.NotAdmin.selector);
+        vm.expectRevert(IEscrowVault.NotAdmin.selector);
         fresh.setRegistrar(REGISTRAR);
     }
 
     function test_SetRegistrar_revertsZero() public {
         EscrowVault fresh = new EscrowVault(address(this));
-        vm.expectRevert(EscrowVault.ZeroAddress.selector);
+        vm.expectRevert(IEscrowVault.ZeroAddress.selector);
         fresh.setRegistrar(address(0));
     }
 
     /// @dev Before wiring, registration must fail closed rather than matching a zero caller.
     function test_RegisterCampaign_revertsBeforeRegistrarSet() public {
         EscrowVault fresh = new EscrowVault(address(this));
-        vm.expectRevert(EscrowVault.RegistrarNotSet.selector);
+        vm.expectRevert(IEscrowVault.RegistrarNotSet.selector);
         fresh.registerCampaign(CAMPAIGN, address(token));
     }
 
@@ -83,24 +83,24 @@ contract EscrowVaultTest is Test {
 
     function test_RegisterCampaign_revertsNonRegistrar() public {
         vm.prank(OTHER);
-        vm.expectRevert(EscrowVault.NotRegistrar.selector);
+        vm.expectRevert(IEscrowVault.NotRegistrar.selector);
         vault.registerCampaign(CAMPAIGN, address(token));
     }
 
     function test_RegisterCampaign_revertsDoubleRegister() public {
         _registerCampaign(CAMPAIGN);
         vm.prank(REGISTRAR);
-        vm.expectRevert(EscrowVault.AlreadyRegistered.selector);
+        vm.expectRevert(IEscrowVault.AlreadyRegistered.selector);
         vault.registerCampaign(CAMPAIGN, address(token));
     }
 
     function test_RegisterCampaign_revertsZeroAddresses() public {
         vm.prank(REGISTRAR);
-        vm.expectRevert(EscrowVault.ZeroAddress.selector);
+        vm.expectRevert(IEscrowVault.ZeroAddress.selector);
         vault.registerCampaign(address(0), address(token));
 
         vm.prank(REGISTRAR);
-        vm.expectRevert(EscrowVault.ZeroAddress.selector);
+        vm.expectRevert(IEscrowVault.ZeroAddress.selector);
         vault.registerCampaign(CAMPAIGN, address(0));
     }
 
@@ -121,7 +121,7 @@ contract EscrowVaultTest is Test {
 
     function test_Deposit_revertsUnregistered() public {
         vm.prank(OTHER);
-        vm.expectRevert(EscrowVault.CampaignNotRegistered.selector);
+        vm.expectRevert(IEscrowVault.CampaignNotRegistered.selector);
         vault.deposit(CAMPAIGN, 100);
     }
 
@@ -131,7 +131,7 @@ contract EscrowVaultTest is Test {
         vm.prank(OTHER);
         token.approve(address(vault), type(uint256).max);
         vm.prank(OTHER);
-        vm.expectRevert(EscrowVault.ZeroAmount.selector);
+        vm.expectRevert(IEscrowVault.ZeroAmount.selector);
         vault.deposit(CAMPAIGN, 0);
     }
 
@@ -162,7 +162,7 @@ contract EscrowVaultTest is Test {
         _fund(CAMPAIGN, OTHER, 1_000 ether);
 
         vm.prank(OTHER);
-        vm.expectRevert(EscrowVault.CampaignNotRegistered.selector);
+        vm.expectRevert(IEscrowVault.CampaignNotRegistered.selector);
         vault.release(OTHER, 100 ether);
     }
 
@@ -171,20 +171,20 @@ contract EscrowVaultTest is Test {
         _fund(CAMPAIGN, OTHER, 100);
 
         vm.prank(CAMPAIGN);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.InsufficientBalance.selector, 100, 101));
+        vm.expectRevert(abi.encodeWithSelector(IEscrowVault.InsufficientBalance.selector, 100, 101));
         vault.release(OTHER, 101);
     }
 
     function test_Release_revertsUnregisteredCampaign() public {
         vm.prank(CAMPAIGN);
-        vm.expectRevert(EscrowVault.CampaignNotRegistered.selector);
+        vm.expectRevert(IEscrowVault.CampaignNotRegistered.selector);
         vault.release(OTHER, 1);
     }
 
     function test_Release_revertsZeroAmount() public {
         _registerCampaign(CAMPAIGN);
         vm.prank(CAMPAIGN);
-        vm.expectRevert(EscrowVault.ZeroAmount.selector);
+        vm.expectRevert(IEscrowVault.ZeroAmount.selector);
         vault.release(OTHER, 0);
     }
 
@@ -206,7 +206,7 @@ contract EscrowVaultTest is Test {
         _fund(CAMPAIGN, OTHER, 500);
 
         vm.prank(OTHER);
-        vm.expectRevert(EscrowVault.CampaignNotRegistered.selector);
+        vm.expectRevert(IEscrowVault.CampaignNotRegistered.selector);
         vault.reclaim(OTHER, 1);
     }
 
@@ -215,7 +215,7 @@ contract EscrowVaultTest is Test {
         _fund(CAMPAIGN, OTHER, 10);
 
         vm.prank(CAMPAIGN);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.InsufficientBalance.selector, 10, 11));
+        vm.expectRevert(abi.encodeWithSelector(IEscrowVault.InsufficientBalance.selector, 10, 11));
         vault.reclaim(OTHER, 11);
     }
 
@@ -230,7 +230,7 @@ contract EscrowVaultTest is Test {
         // otherCampaign is registered but never funded: it sees a zero balance of its own and
         // cannot reach into CAMPAIGN's escrow.
         vm.prank(otherCampaign);
-        vm.expectRevert(abi.encodeWithSelector(EscrowVault.InsufficientBalance.selector, 0, 1));
+        vm.expectRevert(abi.encodeWithSelector(IEscrowVault.InsufficientBalance.selector, 0, 1));
         vault.release(OTHER, 1);
 
         assertEq(vault.balanceOf(CAMPAIGN), 1_000);
