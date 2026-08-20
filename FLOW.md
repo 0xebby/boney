@@ -16,6 +16,61 @@ Cast of contracts:
 | `OracleCoordinator` | Staked reporting with an optimistic dispute window. |
 | `*KpiVerifier` | Optional adapters that may only ever *reduce* a claim. |
 
+<details>
+<summary>Plain-text version of the whole flow (no rendering required)</summary>
+
+```
+CREATION                          Pending
+  Project --createCampaign--> CampaignRegistry
+                                |  Names.key(name) -> NameTaken if claimed
+                                |  new Campaign(...) validates window/tiers/minReputation
+                                +- EscrowVault.registerCampaign(campaign, token)
+                                   only the registry may bind a campaign to a token
+
+FUNDING + ACTIVATION              Pending --> Active
+  Project --approve+deposit--> EscrowVault    credits what ACTUALLY arrived
+  Project --activate()--> Campaign            balanceOf >= rewardPool, else NotFunded
+
+PROMOTER                          join() allowed while Pending too
+  KOL --join()--> Campaign --scoreOf--> ReputationRegistry   (read once, at join)
+                     +- registerPromoter(keccak(campaign, promoter)) --> AttributionRegistry
+
+ATTRIBUTION  <- the consent step, and the anti-abuse primitive
+  KOL -link(promoterId)-> End user --signs EIP-712 Touch--+
+  anyone relays --storeTouch()--> AttributionRegistry <---+
+     lands only if: signedAt <= now < expiresAt <= now + min(attributionWindow, cap)
+                    campaign not past endTime and not terminal
+                    signedAt STRICTLY newer than stored          (LAST_TOUCH)
+
+REPORTING --> SETTLEMENT          one transaction, no separate claim
+  Project -------------+
+                       +--> Campaign.reportUserAction(kpi, user, newTotal, evidence)
+  Reporter -stake-> OracleCoordinator -submitUserReport-> [dispute window] -apply-+
+                       +- governor disputes -> slashed, never applied
+
+     resolve promoter --> live touch? yes -> them
+                          no + Ended -> stored touch (expired OK)
+                          no          -> revert NoAttribution
+     verifier? --> GuardedKpiVerifier --always--> EventMetricKpiVerifier (relayer scan)
+                                      +-optional-> project verifier
+                    AGREE: diverge over tolerance -> revert   CAP: min(boney, project)
+                    may only SHRINK a claim, never redirect the payee
+     credit = verifiedTotal - alreadyCredited     (cumulative, so replay is a no-op)
+     _settle() walks the tier ladder INLINE --> EscrowVault.release(promoter, tierPay)
+                    tierPay = min(reward, pool - paidOut); tier marked settled either way
+                    short -> PoolExhausted, never reverts
+
+WIND-DOWN                         Active/Paused --> Ended
+  end()            project anytime, or ANYONE once past endTime
+  |- CLAIM_GRACE = 20 min: reporting still open
+  +- reclaimUnspent()  only after grace -> EscrowVault.reclaim(project, remainder)
+
+  reporting closes exactly where reclaim opens - never both, so escrow is never
+  reclaimable while credit is still owed
+```
+
+</details>
+
 ---
 
 ## 1. The happy path
@@ -32,61 +87,49 @@ sequenceDiagram
     participant A as AttributionRegistry
     participant Rep as ReputationRegistry
 
-    rect rgb(238, 244, 255)
-    note over P,V: Creation — status: Pending
+    note over P,V: CREATION — status Pending
     P->>R: createCampaign(cfg, kpis, tiers)
-    R->>R: Names.key(name) → reverts NameTaken if claimed
+    R->>R: Names.key(name) — reverts NameTaken if claimed
     R->>C: new Campaign(...) validates window, tiers, minReputation
     R->>V: registerCampaign(campaign, token)
     V-->>V: emit CampaignRegistered
     R-->>R: emit CampaignCreated
-    end
 
-    rect rgb(240, 249, 240)
-    note over P,V: Funding + activation — Pending → Active
+    note over P,V: FUNDING + ACTIVATION — Pending to Active
     P->>V: approve + deposit(campaign, rewardPool)
-    V-->>V: credits amount *actually received*, emit Deposited
+    V-->>V: credits amount actually received, emit Deposited
     P->>C: activate()
-    C->>V: balanceOf(this) ≥ rewardPool ? else NotFunded
+    C->>V: balanceOf(this) at least rewardPool, else NotFunded
     C-->>C: emit Activated, StatusChanged
-    end
 
-    rect rgb(255, 249, 235)
-    note over K,A: Promoter onboarding
+    note over K,A: PROMOTER ONBOARDING
     K->>C: join()
-    C->>Rep: scoreOf(promoter) ≥ minReputation ? else InsufficientReputation
+    C->>Rep: scoreOf(promoter) clears minReputation, else InsufficientReputation
     C->>A: registerPromoter(promoterId = keccak(campaign, promoter))
     C-->>C: emit PromoterJoined
-    end
 
-    rect rgb(252, 240, 250)
-    note over U,A: Attribution — the consent step
+    note over U,A: ATTRIBUTION — the consent step
     K-->>U: tracking link carrying promoterId
     U->>U: sign EIP-712 Touch{campaign, promoterId, signedAt, expiresAt}
     K->>A: storeTouch(user, touch, sig, relayer)
     A->>C: staticcall attributionWindow / endTime / status
-    A-->>A: emit TouchStored (only if strictly newer signedAt)
-    end
+    A-->>A: emit TouchStored, only if strictly newer signedAt
 
-    rect rgb(240, 240, 248)
-    note over P,V: Reporting → settlement, in one call
+    note over P,V: REPORTING to SETTLEMENT — one call
     P->>C: reportUserAction(kpiIndex, user, newTotal, evidence)
     C->>A: resolve promoter (activePromoter, or stored touch once Ended)
-    C->>C: verifier.verify(...) → may only reduce
-    C-->>C: credit newTotal − alreadyCredited, emit ProgressCredited
+    C->>C: verifier.verify(...) may only reduce
+    C-->>C: credit newTotal minus alreadyCredited, emit ProgressCredited
     C->>C: _settle() walks the tier ladder inline
     C->>V: release(promoter, tierPay)
     V-->>V: emit Released
-    C-->>C: emit TierSettled (+ PoolExhausted if pool ran short)
-    end
+    C-->>C: emit TierSettled, plus PoolExhausted if pool ran short
 
-    rect rgb(250, 240, 240)
-    note over P,V: Wind-down
+    note over P,V: WIND-DOWN
     P->>C: end() — or anyone, once past endTime
-    note over C: CLAIM_GRACE = 20 min: reporting still open
+    note over C: CLAIM_GRACE = 20 min, reporting still open
     P->>C: reclaimUnspent() — only after grace
     C->>V: reclaim(project, remainder)
-    end
 ```
 
 ---
@@ -136,33 +179,33 @@ the end of every crediting report.
 
 ```mermaid
 flowchart TD
-    S([reportUserAction]) --> ST{status reportable?}
+    S([reportUserAction]) --> ST{"status reportable?"}
     ST -->|"not Active, and not Ended-in-grace"| XW[revert WrongStatus]
-    ST --> AU{caller is project<br/>or oracleCoordinator?}
+    ST --> AU{"caller is project or oracleCoordinator?"}
     AU -->|no| XR[revert NotReporter]
     AU --> W{"inside [startTime, endTime]?<br/>(skipped once Ended)"}
     W -->|no| XO[revert OutsideWindow]
-    W --> AG{aggregate KPI?}
+    W --> AG{"aggregate KPI?"}
     AG -->|yes| XA[revert AggregateKpi]
     AG --> M{"newTotal ≥ alreadyCredited?"}
     M -->|no| XM[revert NonMonotonic]
-    M -->|equal| NOOP([no-op: replay])
-    M --> AT{attribution resolves?}
+    M -->|equal| NOOP(["no-op: replay"])
+    M --> AT{"attribution resolves?"}
     AT -->|no| XN[revert NoAttribution]
-    AT --> VF{verifier configured?}
+    AT --> VF{"verifier configured?"}
     VF -->|no| CR[credit raw newTotal]
-    VF -->|yes| VC["verify() → verifiedTotal<br/>reverts VerifierOvercredit if &gt; claim"]
+    VF -->|yes| VC["verify() → verifiedTotal<br/>reverts VerifierOvercredit if above claim"]
     VC --> CR
-    CR --> D{"credited = verifiedTotal − already<br/>&gt; 0?"}
+    CR --> D{"credited above zero?"}
     D -->|no| NOOP2([no-op])
     D --> UP["update _userCredited, _progress,<br/>_totalProgress → emit ProgressCredited"]
-    UP --> SET[["_settle: walk tier ladder"]]
+    UP --> SET["_settle: walk tier ladder"]
     SET --> L{"progress ≥ next tier<br/>threshold?"}
     L -->|no| DONE([done])
-    L -->|yes| PAY["tierPay = min(reward, pool − paidOut)<br/>mark tier settled either way"]
+    L -->|yes| PAY["tierPay = min(reward, pool minus paidOut)<br/>mark tier settled either way"]
     PAY --> REL["escrowVault.release → emit TierSettled"]
-    REL --> EX{"tierPay &lt; reward?"}
-    EX -->|yes| PE[emit PoolExhausted — never reverts]
+    REL --> EX{"tierPay below reward?"}
+    EX -->|yes| PE["emit PoolExhausted, never reverts"]
     EX --> L
     PE --> L
 ```
@@ -171,9 +214,9 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    Q([who gets paid for this user?]) --> LIVE{live touch?<br/>expiresAt &gt; now}
+    Q(["who gets paid for this user?"]) --> LIVE{"live touch? expiresAt after now"}
     LIVE -->|yes| PAY([that promoter])
-    LIVE -->|no| E{status == Ended?}
+    LIVE -->|no| E{"status == Ended?"}
     E -->|no| NONE([revert NoAttribution])
     E -->|yes| STORED([stored touch, expired or not])
 ```
@@ -197,8 +240,8 @@ flowchart TD
 
     subgraph oracle["Oracle — staked, optimistic"]
         REP([Reporter]) -->|stake ETH ≥ minStake| OC[OracleCoordinator]
-        OC -->|submitUserReport| PEND[["pending, deadline = now + disputeWindow"]]
-        PEND -->|governor disputes| SLASH[["slashed; never applied"]]
+        OC -->|submitUserReport| PEND["pending, deadline = now + disputeWindow"]
+        PEND -->|governor disputes| SLASH["slashed, never applied"]
         PEND -->|window elapsed| AUR[applyUserReport → Campaign.reportUserAction]
         AUR --> RUA
         OC -->|"submitReport → applyReport"| AGG["applyAggregateUpdate<br/>(analytics only, credits nobody)"]
@@ -217,9 +260,9 @@ flowchart LR
     C([Campaign]) --> G[GuardedKpiVerifier]
     G -->|always| B["EventMetricKpiVerifier<br/>relayer-pushed observed totals,<br/>capped by eth_getLogs scan"]
     G -->|optional| PV["project's own IKpiVerifier<br/>e.g. TouchWindowVerifier"]
-    B --> CMP{mode}
+    B --> CMP{"mode"}
     PV --> CMP
-    CMP -->|AGREE| AG["divergence &gt; toleranceBps → revert<br/>VerifierDisagreement; else Boney's value"]
+    CMP -->|AGREE| AG["divergence over toleranceBps reverts<br/>VerifierDisagreement; else Boney's value"]
     CMP -->|CAP| CP["credit min(boney, project)"]
 ```
 
