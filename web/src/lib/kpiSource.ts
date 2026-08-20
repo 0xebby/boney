@@ -23,9 +23,16 @@ import {isAddress as isViemAddress} from "viem/utils";
  * `campaignArgs.ts`: a campaign encodes successfully, deploys, and then credits progress from the
  * wrong contract's events.
  *
- * The chain never reads this blob — `Campaign` forwards `params` to the verifier and otherwise
- * ignores it, and our event KPIs run with `verifier: address(0)`. It is a commitment published on
- * chain for indexers and UIs to agree on, not a consensus rule.
+ * The chain does not read this blob as a consensus rule — `Campaign` forwards `params` to the
+ * verifier and otherwise ignores it. It is a commitment published on chain so the off-chain halves
+ * agree on what a campaign measures.
+ *
+ * It is no longer the *only* such commitment, though. `EventMetricKpiVerifier` keeps its own copy of
+ * the watched contract, event and scale in its own storage (`setKpiConfig`), because a verifier
+ * reading its config from this same field could not coexist with `TouchWindowVerifier`, which reads
+ * `params` as a bare `uint64` lookback. That means two descriptions of the same event now exist, and
+ * they can drift — so the relayer refuses to run when they disagree
+ * (`relayCore.describeConfigDrift`). Change one side and you must change the other.
  */
 
 /** How the credited amount is taken from a matched log. */

@@ -1,0 +1,22 @@
+{
+  "//": "Scoped typecheck for the off-chain scripts and the pure lib modules they use.",
+  "//why": "`pnpm typecheck` covers the whole app including every page and .next/types, and peaks around 8 GB — enough to take down a WSL session. This covers the non-React half, which is where the chain-facing logic lives, at a fraction of the cost. Run it with `pnpm typecheck:scripts`.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "scripts/relay-kpi-metric.ts",
+    "scripts/compute-report-window.ts",
+    "scripts/indexer.ts",
+    "scripts/generate-deployments.ts",
+    "scripts/extract-abis.ts",
+    "src/lib/relayCore.ts",
+    "src/lib/relayCore.test.ts",
+    "src/lib/indexerCore.ts",
+    "src/lib/kpiSource.ts",
+    "src/lib/chains.ts",
+    "src/lib/deployments.ts"
+  ]
+}

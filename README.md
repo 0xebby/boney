@@ -56,12 +56,22 @@ verifiable work.
 | `ReputationRegistry` | Weighted score from attested metrics. Stores numbers and schema ids only. |
 | `AttestationVerifier` | k-of-n threshold EIP-712 attestations, per-attestor nonce replay protection. |
 | `OracleCoordinator` | Staked reporters submit aggregate updates through an optimistic dispute window. |
+| `EventMetricKpiVerifier` | Caps a KPI claim at a metric an independent relayer observed in the real event logs. |
+| `GuardedKpiVerifier` | Composes Boney's reading with an optional second verifier — reject on divergence, or take the stricter. |
+| `TouchWindowVerifier` | Credits only actions performed while the current promoter held attribution. |
 
 ### KPI extensibility
 
 KPIs are `KpiSpec { kind, verifier, target, aggregate, params }`. A `Custom` KPI **must** name an
 `IKpiVerifier`; the adapter returns the credited amount and the campaign caps it at the amount
 claimed — an adapter can discount a report but never inflate one.
+
+The verifier a campaign should point at is `GuardedKpiVerifier`, which consults Boney's
+`EventMetricKpiVerifier` — fed by an independent relayer that scans the real event logs — and
+optionally cross-checks a second verifier such as `TouchWindowVerifier`. That means a project cannot
+credit itself more than an independent observer saw. It also means **two off-chain processes have to
+run**: `pnpm index` for the project's claim and `pnpm relay` for Boney's observation. See
+`KPI_VERIFICATION.md` for the design and `KPI_VERIFICATION_WALKTHROUGH.md` for a worked example.
 
 Aggregate KPIs (TVL, volume) are campaign-level and oracle-reported. They advance totals for
 display but do not credit individual promoters; per-promoter aggregate attribution is tracked

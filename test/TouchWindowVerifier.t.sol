@@ -12,6 +12,7 @@ import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {TouchWindowVerifier} from "../src/verifiers/TouchWindowVerifier.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ITouchWindowVerifier} from "../src/interfaces/ITouchWindowVerifier.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -293,7 +294,9 @@ contract TouchWindowVerifierTest is Test {
 
         vm.prank(project);
         vm.expectRevert(
-            abi.encodeWithSelector(TouchWindowVerifier.FutureAction.selector, future, uint64(block.timestamp))
+            abi.encodeWithSelector(
+                ITouchWindowVerifier.FutureAction.selector, future, uint64(block.timestamp)
+            )
         );
         campaign.reportUserAction(0, user, 10, _one(future, 10));
     }
@@ -304,7 +307,7 @@ contract TouchWindowVerifierTest is Test {
         _touch(campaign, id);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(TouchWindowVerifier.EvidenceExceedsClaim.selector, 11, 10));
+        vm.expectRevert(abi.encodeWithSelector(ITouchWindowVerifier.EvidenceExceedsClaim.selector, 11, 10));
         campaign.reportUserAction(0, user, 10, _one(uint64(block.timestamp), 11));
     }
 

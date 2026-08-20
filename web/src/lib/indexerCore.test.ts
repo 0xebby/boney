@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 import {decodeAbiParameters, pad, toHex} from "viem";
 import {
   actorFromTopic,
+  aggregateActions,
   aggregateByActor,
   blockChunks,
   decideReport,
@@ -171,6 +172,115 @@ describe("aggregateByActor", () => {
     );
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
   });
+
+  /**
+   * The bug this pins: `apportion` used to re-read each log's data word regardless of amount mode, so
+   * a count-mode KPI split a total of *n events* across shares derived from token amounts. These two
+   * logs produced `[999, -997]` — the sum was right, which is why the assertion above never caught it,
+   * but a negative `uint256` cannot be encoded and the evidence was unusable on chain.
+   */
+  it("apportions count-mode evidence as whole events, never negatively", () => {
+    const total = aggregateByActor(
+      [depositLog(ALICE, BigInt(999), BigInt(10)), depositLog(ALICE, BigInt(888), BigInt(11))],
+      source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+    ).get(ALICE.toLowerCase())!;
+
+    expect(total.actions.map((a) => a.amount)).toEqual([BigInt(1), BigInt(1)]);
+    for (const action of total.actions) expect(action.amount >= BigInt(0)).toBe(true);
+    // Still exactly the claim, or `TouchWindowVerifier` reverts `EvidenceExceedsClaim`.
+    expect(total.actions.reduce((a, b) => a + b.amount, BigInt(0))).toBe(total.amount);
+  });
+
+  /** Count-mode evidence has to survive the encoder a real report would put it through. */
+  it("produces count-mode evidence that actually encodes", () => {
+    const total = aggregateByActor(
+      [depositLog(ALICE, BigInt(999), BigInt(10)), depositLog(ALICE, BigInt(888), BigInt(11))],
+      source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+    ).get(ALICE.toLowerCase())!;
+
+    expect(() => encodeActions(total.actions)).not.toThrow();
+  });
+});
+
+/**
+ * The indexed path must agree with the log-scanning path.
+ *
+ * Not a nice-to-have: the report panel and `pnpm index` can each take either route, and a referral
+ * credited one figure by one and a different figure by the other is the silent-corruption failure this
+ * module exists to prevent. Both funnel into the same fold, and these tests are what hold that.
+ */
+describe("aggregateActions", () => {
+  const decoded = (value: bigint, blockNumber: bigint, timestamp: bigint) => ({
+    user: ALICE,
+    value,
+    blockNumber,
+    timestamp,
+  });
+
+  it("matches aggregateByActor on the same activity", () => {
+    const src = source();
+    const wads = [BigInt(1_500_000_000_000_000), BigInt(1_500_000_000_000_000)];
+
+    const fromLogs = aggregateByActor(
+      [depositLog(ALICE, wads[0]!, BigInt(10)), depositLog(ALICE, wads[1]!, BigInt(11))],
+      src,
+    ).get(ALICE.toLowerCase())!;
+
+    const fromIndexer = aggregateActions(
+      [
+        decoded(wads[0]!, BigInt(10), BigInt(1_700_000_000)),
+        decoded(wads[1]!, BigInt(11), BigInt(1_700_000_000)),
+      ],
+      src,
+    ).get(ALICE.toLowerCase())!;
+
+    expect(fromIndexer.amount).toBe(fromLogs.amount);
+    expect(fromIndexer.actions).toEqual(fromLogs.actions);
+    expect(fromIndexer.lastBlock).toBe(fromLogs.lastBlock);
+  });
+
+  it("applies count mode to the KPI, not to the stored value", () => {
+    const totals = aggregateActions(
+      [decoded(BigInt(999), BigInt(10), BigInt(1)), decoded(BigInt(888), BigInt(11), BigInt(2))],
+      source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+    );
+
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
+  });
+
+  /** Same reason the log path sorts: out-of-order evidence verifies but reads as corrupt. */
+  it("orders actions chronologically regardless of the order returned", () => {
+    const totals = aggregateActions(
+      [
+        decoded(BigInt(1e15), BigInt(30), BigInt(3_000)),
+        decoded(BigInt(1e15), BigInt(10), BigInt(1_000)),
+        decoded(BigInt(1e15), BigInt(20), BigInt(2_000)),
+      ],
+      source({scale: BigInt(1e15)}),
+    );
+
+    expect(totals.get(ALICE.toLowerCase())!.actions.map((a) => a.timestamp)).toEqual([
+      BigInt(1_000),
+      BigInt(2_000),
+      BigInt(3_000),
+    ]);
+  });
+
+  /** Sub-scale activity accumulates rather than flooring away — the fixture's original bug. */
+  it("accumulates sub-scale activity instead of dropping it", () => {
+    const totals = aggregateActions(
+      [
+        decoded(BigInt(6e14), BigInt(10), BigInt(1)),
+        decoded(BigInt(6e14), BigInt(11), BigInt(2)),
+      ],
+      source({scale: BigInt(1e15)}),
+    );
+
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
+  });
+});
+
+describe("aggregateByActor — log-shape edge cases", () => {
 
   it("skips logs whose actor topic is missing", () => {
     const orphan: IndexedLog = {

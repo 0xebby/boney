@@ -7,7 +7,10 @@ import {Campaign} from "../src/campaign/Campaign.sol";
 import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
 import {EscrowVault} from "../src/escrow/EscrowVault.sol";
 import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
-import {EventVerifier} from "../src/verifiers/EventVerifier.sol";
+import {EventMetricKpiVerifier} from "../src/verifiers/EventMetricKpiVerifier.sol";
+import {GuardedKpiVerifier} from "../src/verifiers/GuardedKpiVerifier.sol";
+import {IEventMetricKpiVerifier} from "../src/interfaces/IEventMetricKpiVerifier.sol";
+import {IGuardedKpiVerifier} from "../src/interfaces/IGuardedKpiVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
 
 /// @title SeedDemo
@@ -48,6 +51,19 @@ import {Types} from "../src/libraries/Types.sol";
 ///      Campaigns are funded and activated rather than left Pending: a Pending campaign never
 ///      reaches its window, so it cannot show expiry.
 ///
+///      **Every KPI is gated by `GuardedKpiVerifier`, so the relayer has to run for progress to
+///      move.** A gated KPI credits `min(project's claim, Boney's independently observed total)`, and
+///      Boney's total is 0 until `pnpm relay` has scanned. Reports that land first are silent no-ops,
+///      not reverts — `Campaign` returns early when the verified total does not exceed what is
+///      already credited. So the fixture needs both off-chain halves running: `pnpm index` to claim
+///      as the project, and `pnpm relay` to observe as Boney. Running only the indexer leaves every
+///      progress bar at zero, which is the verification layer working, not a bug.
+///
+///      Campaign 1 (the multi-KPI one) additionally cross-checks `TouchWindowVerifier` under
+///      `Mode.CAP`, so the fixture exercises both shapes: five campaigns on Boney alone, one with a
+///      second on-chain lens layered on. Note that `TouchWindowVerifier` credits nothing without
+///      `evidence`, so campaign 1 only moves for reporters that send it — the indexer does.
+///
 ///      **Three of the six are reputation-gated, so `SeedDevRep` must run first.** `Campaign`'s
 ///      constructor reads `maxScore()` and rejects any `minReputation` above it, and a freshly
 ///      deployed `ReputationRegistry` has no schemas — so its ceiling is 0 and every gate below
@@ -56,7 +72,8 @@ import {Types} from "../src/libraries/Types.sol";
 ///
 ///      Usage (Base Sepolia), after redeploying and regenerating `web/src/lib/deployments.ts`:
 ///        PRIVATE_KEY=… REGISTRY_ADDRESS=… VAULT_ADDRESS=… TOKEN_ADDRESS=… \
-///        ATTRIBUTION_ADDRESS=… \
+///        ATTRIBUTION_ADDRESS=… KPI_VERIFIER_ADDRESS=… GUARDED_VERIFIER_ADDRESS=… \
+///        TOUCH_VERIFIER_ADDRESS=… \
 ///        forge script script/SeedDemo.s.sol:SeedDemo --rpc-url … --broadcast --slow
 contract SeedDemo is Script {
     /// @dev Raised when the registry's global cap would silently shorten these windows.
@@ -66,6 +83,12 @@ contract SeedDemo is Script {
     ///      produce a list of old + new rather than the exact six this fixture promises.
     error RegistryNotEmpty(uint256 existing);
 
+    /// @dev Raised when the seeding key does not own the KPI verifiers. `setKpiConfig` and
+    ///      `setGuardConfig` are `onlyOwner`, and both are owned by whoever ran `DeployBoney` — the
+    ///      same key in this fixture. Checked up front so a mismatch fails before any campaign is
+    ///      created, rather than leaving half a fixture behind.
+    error VerifierNotOwned(address verifier, address owner, address seeder);
+
     /// @dev The number of campaigns in the fixture. Named so the arrays below cannot drift.
     uint256 constant COUNT = 6;
 
@@ -74,13 +97,33 @@ contract SeedDemo is Script {
     ///      cannot drift apart.
     uint64 constant LONGEST = 14 days;
 
+    /// @dev Seconds per block on Base Sepolia, used to project a campaign's reporting close onto a
+    ///      block number for `windowEndBlock`.
+    uint256 constant BLOCK_TIME = 2;
+
+    /// @dev Extra blocks added to that projection. The estimate is deliberately biased **high**,
+    ///      because the two directions are not symmetric: `windowEndBlock` only bounds how far the
+    ///      relayer may checkpoint, while `Campaign` independently enforces its own report window. An
+    ///      over-estimate therefore costs a little wasted scanning after a campaign closes, whereas an
+    ///      under-estimate stops the relayer early and under-credits promoters. `pnpm report-window`
+    ///      derives the exact value, and `setKpiConfig` can be re-run to tighten it.
+    uint256 constant BLOCK_MARGIN = 10_000;
+
+    /// @dev The event all six campaigns track, in the human-readable form `EventMetricKpiVerifier`
+    ///      stores and the relayer decodes against. Declaration order is (from, to, value), so the
+    ///      user param is index 1 and the summed param is index 2 — matching the `actorTopic: 2`
+    ///      (topics[2] == `to`) in the event-source blob written into `KpiSpec.params` below.
+    string constant TRANSFER_EVENT = "Transfer(address indexed from, address indexed to, uint256 value)";
+
     uint256 PROJECT_PK;
     address project;
     CampaignRegistry registry;
     EscrowVault vault;
     IERC20 token;
     AttributionRegistry attribution;
-    EventVerifier eventVerifier;
+    EventMetricKpiVerifier kpiVerifier;
+    GuardedKpiVerifier guardedVerifier;
+    address touchVerifier;
 
     function run() external {
         PROJECT_PK = vm.envUint("PRIVATE_KEY");
@@ -88,13 +131,22 @@ contract SeedDemo is Script {
         vault = EscrowVault(vm.envAddress("VAULT_ADDRESS"));
         token = IERC20(vm.envAddress("TOKEN_ADDRESS"));
         attribution = AttributionRegistry(vm.envAddress("ATTRIBUTION_ADDRESS"));
-        eventVerifier = EventVerifier(vm.envAddress("EVENT_VERIFIER_ADDRESS"));
+        kpiVerifier = EventMetricKpiVerifier(vm.envAddress("KPI_VERIFIER_ADDRESS"));
+        guardedVerifier = GuardedKpiVerifier(vm.envAddress("GUARDED_VERIFIER_ADDRESS"));
+        touchVerifier = vm.envAddress("TOUCH_VERIFIER_ADDRESS");
         project = vm.addr(PROJECT_PK);
 
         // Both checks fail before spending gas rather than producing a fixture that looks right and
         // behaves differently.
         uint256 existing = registry.campaignCount();
         if (existing != 0) revert RegistryNotEmpty(existing);
+
+        if (kpiVerifier.owner() != project) {
+            revert VerifierNotOwned(address(kpiVerifier), kpiVerifier.owner(), project);
+        }
+        if (guardedVerifier.owner() != project) {
+            revert VerifierNotOwned(address(guardedVerifier), guardedVerifier.owner(), project);
+        }
 
         uint64 cap = attribution.maxTouchDuration();
         if (cap < LONGEST) revert TouchCapTooLow(cap, LONGEST);
@@ -111,16 +163,23 @@ contract SeedDemo is Script {
         uint256[COUNT] memory pools =
             [uint256(2_000 ether), 5_000 ether, 8_000 ether, 12_000 ether, 25_000 ether, 50_000 ether];
 
-        // Varied only so the six rows are visually distinguishable. `kind` is a hint for indexers
-        // and UIs — settlement never branches on it — and every KPI here leaves `verifier` at
-        // address(0), so all six report and settle through the identical path.
+        // Uniform, and deliberately so. These six previously carried a different `kind` each purely
+        // so the marketplace rows looked distinguishable, while every one of them tracked the same
+        // thing: a bUSD `Transfer` with the referred wallet as recipient. The UI renders `kind`
+        // alongside the decoded event source, so a campaign named "Aave" labelled `Stake` while
+        // actually measuring token transfers reads as a bug in the app — the panels disagreed
+        // because the fixture made them disagree.
+        //
+        // `kind` is only a hint (settlement never branches on it), which is exactly why it must not
+        // contradict the event source: it is the one part of a KPI a reader trusts without decoding
+        // anything. `TokenPurchase` is the honest reading of "this wallet received tokens".
         Types.KpiKind[COUNT] memory kinds = [
-            Types.KpiKind.Mint,
-            Types.KpiKind.Swap,
-            Types.KpiKind.Deposit,
-            Types.KpiKind.Stake,
             Types.KpiKind.TokenPurchase,
-            Types.KpiKind.signUps
+            Types.KpiKind.TokenPurchase,
+            Types.KpiKind.TokenPurchase,
+            Types.KpiKind.TokenPurchase,
+            Types.KpiKind.TokenPurchase,
+            Types.KpiKind.TokenPurchase
         ];
 
         // Reputation gates on three of the five multi-day campaigns. The 24-hour one stays ungated:
@@ -208,23 +267,28 @@ contract SeedDemo is Script {
         });
 
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](1);
-        
+
         // Configure event source to track Transfer events from the token contract.
         // Transfer(address indexed from, address indexed to, uint256 value)
         // Actor is "to" (topics[2]), amount is value (from data)
         // Scale by 1e18 to convert from token base units to display units
         bytes32 transferSignature = keccak256("Transfer(address,address,uint256)");
         bytes memory eventSourceParams = abi.encode(
-            address(token),           // source: token contract where Transfer events come from
-            transferSignature,        // topic0: Transfer event signature
-            uint8(2),                 // actorTopic: 2 (the "to" indexed parameter, 1-based from topic[0])
-            uint8(0),                 // amountMode: 0 = extract amount from data
-            uint256(1e18)             // scale: divide by 1e18 to normalize token decimals
+            address(token), // source: token contract where Transfer events come from
+            transferSignature, // topic0: Transfer event signature
+            uint8(2), // actorTopic: 2 (the "to" indexed parameter, 1-based from topic[0])
+            // amountMode: 1 = dataWord0, read `value` from the first data word. NOT 0 — that is
+            // `count` (`AMOUNT_MODE` in `web/src/lib/kpiSource.ts`), which folds 1 per log and then
+            // divides by the 1e18 scale below, flooring every referral to zero. The verifier config
+            // in `_configureVerification` folds by SUM, so 0 here also puts the two halves in
+            // disagreement about the unit itself.
+            uint8(1),
+            uint256(1e18) // scale: divide by 1e18 to normalize token decimals
         );
-        
+
         kpis[0] = Types.KpiSpec({
             kind: kind,
-            verifier: address(eventVerifier),
+            verifier: address(guardedVerifier),
             target: 100,
             aggregate: false,
             params: eventSourceParams
@@ -246,6 +310,11 @@ contract SeedDemo is Script {
         vault.deposit(campaign, pool);
         Campaign(campaign).activate();
         vm.stopBroadcast();
+
+        // Boney alone for the single-KPI campaigns. `address(0)` as the project verifier means the
+        // guard forwards Boney's number untouched, which keeps all five reportable with empty
+        // `evidence`.
+        _configureVerification(campaign, 0, duration, address(0), IGuardedKpiVerifier.Mode.AGREE);
 
         return campaign;
     }
@@ -275,17 +344,15 @@ contract SeedDemo is Script {
         bytes32 transferSignature = keccak256("Transfer(address,address,uint256)");
 
         for (uint256 i = 0; i < numKpis; i++) {
-            bytes memory eventSourceParams = abi.encode(
-                address(token),
-                transferSignature,
-                uint8(2),
-                uint8(0),
-                uint256(1e18)
-            );
+            // `uint8(1)` is `dataWord0` — see the note in `_createCampaign`. `uint8(0)` would be
+            // `count`, which the 1e18 scale then floors to zero.
+            bytes memory eventSourceParams =
+                abi.encode(address(token), transferSignature, uint8(2), uint8(1), uint256(1e18));
 
             kpis[i] = Types.KpiSpec({
-                kind: Types.KpiKind.Deposit, // All are Deposit for simplicity
-                verifier: address(eventVerifier),
+                // Same event source as every other KPI in this fixture, so the same honest `kind`.
+                kind: Types.KpiKind.TokenPurchase,
+                verifier: address(guardedVerifier),
                 target: 100,
                 aggregate: false,
                 params: eventSourceParams
@@ -305,6 +372,54 @@ contract SeedDemo is Script {
         Campaign(campaign).activate();
         vm.stopBroadcast();
 
+        // The one campaign that layers a second on-chain lens. `TouchWindowVerifier` under
+        // `Mode.CAP` credits `min(Boney, touch-window)`, so activity a promoter did not hold
+        // attribution for is denied on chain rather than only in the relayer. `CAP` and not `AGREE`
+        // because the two verifiers measure deliberately different quantities — see
+        // `GuardedKpiVerifier`'s contract docs.
+        for (uint256 i = 0; i < numKpis; i++) {
+            _configureVerification(campaign, i, duration, touchVerifier, IGuardedKpiVerifier.Mode.CAP);
+        }
+
         return campaign;
+    }
+
+    /// @dev Points a KPI's verification at the `Transfer` event this fixture tracks, and configures
+    ///      how the guard combines Boney's reading with an optional second one.
+    ///
+    ///      Run after `activate()` rather than before: nothing reads the config until a report lands,
+    ///      and configuring afterwards keeps campaign creation and verifier setup as separate
+    ///      transactions, which is also the order a real project would follow — `kpiIndex`, `startTime`
+    ///      and `endTime` do not exist until the campaign is created.
+    /// @param campaign The freshly created campaign.
+    /// @param kpiIndex Index of the KPI within it.
+    /// @param duration The campaign's length, used to project its reporting close onto a block.
+    /// @param projectVerifier Second verifier to consult, or `address(0)` for Boney alone.
+    /// @param mode How the two readings combine.
+    function _configureVerification(
+        address campaign,
+        uint256 kpiIndex,
+        uint64 duration,
+        address projectVerifier,
+        IGuardedKpiVerifier.Mode mode
+    ) internal {
+        uint256 closesIn = uint256(duration) + Campaign(campaign).CLAIM_GRACE();
+        uint256 windowEndBlock = block.number + closesIn / BLOCK_TIME + BLOCK_MARGIN;
+
+        vm.startBroadcast(PROJECT_PK);
+        kpiVerifier.setKpiConfig(
+            campaign,
+            kpiIndex,
+            address(token),
+            TRANSFER_EVENT,
+            1, // userParamIndex — `to`, the wallet receiving the transfer
+            IEventMetricKpiVerifier.Aggregation.SUM,
+            2, // valueParamIndex — `value`
+            1e18, // scale, matching the event-source blob the indexer reads
+            block.number, // campaigns start at `block.timestamp`, so tracking starts here
+            windowEndBlock
+        );
+        guardedVerifier.setGuardConfig(campaign, kpiIndex, projectVerifier, 0, mode);
+        vm.stopBroadcast();
     }
 }

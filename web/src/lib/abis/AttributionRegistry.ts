@@ -384,6 +384,33 @@ export const AttributionRegistryAbi = [
   },
   {
     "type": "error",
+    "name": "CampaignOver",
+    "inputs": [
+      {
+        "name": "endTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CampaignTerminal",
+    "inputs": [
+      {
+        "name": "status",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ECDSAInvalidSignature",
     "inputs": []
   },

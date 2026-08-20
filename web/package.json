@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit",
+    "typecheck:scripts": "node --max-old-space-size=3072 ./node_modules/typescript/bin/tsc -p tsconfig.scripts.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "abis": "tsx scripts/extract-abis.ts",
@@ -18,7 +19,9 @@
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "deployments": "tsx scripts/generate-deployments.ts",
     "seed": "tsx scripts/seed-local.ts",
-    "index": "tsx scripts/indexer.ts"
+    "index": "tsx scripts/indexer.ts",
+    "relay": "tsx scripts/relay-kpi-metric.ts",
+    "report-window": "tsx scripts/compute-report-window.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
