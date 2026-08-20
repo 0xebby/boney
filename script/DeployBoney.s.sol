@@ -9,7 +9,9 @@ import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
 import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
-import {EventVerifier} from "../src/verifiers/EventVerifier.sol";
+import {EventMetricKpiVerifier} from "../src/verifiers/EventMetricKpiVerifier.sol";
+import {GuardedKpiVerifier} from "../src/verifiers/GuardedKpiVerifier.sol";
+import {TouchWindowVerifier} from "../src/verifiers/TouchWindowVerifier.sol";
 
 /// @title DeployBoney
 /// @notice Full-stack Boney deployment script.
@@ -19,6 +21,8 @@ import {EventVerifier} from "../src/verifiers/EventVerifier.sol";
 ///         coordinator's address at construction (coordinator → registry is wired afterward).
 ///      3. The escrow vault and registry; the registry becomes the vault's registrar.
 ///      4. Wire the coordinator to the registry, then deploy the facade.
+///      5. The KPI verification layer, which depends on nothing above it — verifiers are
+///         configured per KPI after a campaign exists, not wired at deploy time.
 ///
 ///      `MAX_TOUCH_DURATION` and `MIN_STAKE` are env-configurable for testing; the rest are
 ///      protocol constants.
@@ -82,8 +86,18 @@ contract DeployBoney is Script {
         coordinator.setCampaignRegistry(address(registry));
         boney = new Boney(address(registry));
 
-        // 5. Deploy event verifier for KPI verification against oracle.
-        EventVerifier eventVerifier = new EventVerifier(address(coordinator));
+        // 5. KPI verification layer. All three are stateless-per-campaign and configured per KPI
+        //    after campaign creation, so one deployment of each serves every campaign.
+        //
+        //    `GuardedKpiVerifier` is what a campaign's `KpiSpec.verifier` should point at: it always
+        //    consults Boney's `EventMetricKpiVerifier`, and optionally cross-checks a second
+        //    verifier per KPI. `TouchWindowVerifier` is deployed here so it is available as that
+        //    second verifier under `Mode.CAP`, which is how attribution-timing enforcement stays on
+        //    chain rather than resting on the relayer alone.
+        EventMetricKpiVerifier kpiVerifier =
+            new EventMetricKpiVerifier(deployer, vm.envOr("BONEY_KPI_REPORTER", deployer));
+        GuardedKpiVerifier guardedVerifier = new GuardedKpiVerifier(deployer, address(kpiVerifier));
+        TouchWindowVerifier touchVerifier = new TouchWindowVerifier();
 
         vm.stopBroadcast();
 
@@ -95,6 +109,9 @@ contract DeployBoney is Script {
         console.log("  AttestationVerifier:    ", address(attestations));
         console.log("  ReputationRegistry:     ", address(reputation));
         console.log("  OracleCoordinator:      ", address(coordinator));
-        console.log("  EventVerifier:          ", address(eventVerifier));
+        console.log("  EventMetricKpiVerifier: ", address(kpiVerifier));
+        console.log("  GuardedKpiVerifier:     ", address(guardedVerifier));
+        console.log("  TouchWindowVerifier:    ", address(touchVerifier));
+        console.log("  KPI reporter:           ", kpiVerifier.reporter());
     }
 }

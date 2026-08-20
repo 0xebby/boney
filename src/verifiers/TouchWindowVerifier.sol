@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
+import {ITouchWindowVerifier} from "../interfaces/ITouchWindowVerifier.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 
 /// @dev Campaigns expose their registry as a public immutable of interface type; declared locally
@@ -41,10 +42,7 @@ interface ICampaignAttribution {
 ///      click-to-sign latency and far below the reporting interval. Zero means strict.
 ///
 ///      Stateless and view-only; one deployment serves every campaign.
-contract TouchWindowVerifier is IKpiVerifier {
-    error EvidenceExceedsClaim(uint256 total, uint256 amount);
-    error FutureAction(uint64 timestamp, uint64 blockTimestamp);
-
+contract TouchWindowVerifier is ITouchWindowVerifier {
     /// @param timestamp When the user performed the action.
     /// @param amount How much it contributes to the KPI.
     struct Action {
