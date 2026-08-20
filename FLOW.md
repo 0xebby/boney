@@ -1,7 +1,11 @@
 # Boney — creation to settlement
 
-The end-to-end flow as the contracts actually implement it today. Diagrams are Mermaid, so they
-render on GitHub and in most editors.
+The end-to-end flow as the contracts actually implement it today.
+
+Each diagram is a checked-in SVG with its Mermaid source collapsed underneath. The SVGs are
+generated from that source (`mermaid-cli`, `htmlLabels: false` so GitHub's SVG sanitizer cannot
+strip the labels), so they display regardless of whether a viewer renders Mermaid. Edit the source,
+re-render, commit both.
 
 Cast of contracts:
 
@@ -75,6 +79,11 @@ WIND-DOWN                         Active/Paused --> Ended
 
 ## 1. The happy path
 
+![Boney happy path: creation, funding, activation, promoter join, attribution, reporting and settlement, wind-down](flow/happy-path.svg)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -132,12 +141,19 @@ sequenceDiagram
     C->>V: reclaim(project, remainder)
 ```
 
+</details>
+
 ---
 
 ## 2. Lifecycle
 
 `Paused` blocks reporting but cannot strand anyone: `end()` is permissionless once `endTime` passes,
 which converts a parked campaign into an `Ended` one and starts the grace clock.
+
+![Campaign lifecycle state machine: Pending, Active, Paused, Ended, Cancelled](flow/lifecycle.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 stateDiagram-v2
@@ -166,6 +182,8 @@ stateDiagram-v2
     end note
 ```
 
+</details>
+
 **The key invariant:** reporting and reclaim are exact complements. Reporting closes at
 `endedAt + CLAIM_GRACE`; `reclaimUnspent` opens strictly after it. Escrow is never reclaimable
 while credit is still owed, and the two windows can never both be open.
@@ -176,6 +194,11 @@ while credit is still owed, and the two windows can never both be open.
 
 Everything below happens in one transaction. There is no separate claim step — `_settle` runs at
 the end of every crediting report.
+
+![Control flow inside reportUserAction, ending in the inline tier-ladder settlement](flow/report-user-action.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart TD
@@ -210,7 +233,14 @@ flowchart TD
     PE --> L
 ```
 
+</details>
+
 ### Attribution resolution
+
+![Attribution resolution: live touch, or the stored touch once Ended, else revert](flow/attribution-resolution.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart LR
@@ -220,6 +250,8 @@ flowchart LR
     E -->|no| NONE([revert NoAttribution])
     E -->|yes| STORED([stored touch, expired or not])
 ```
+
+</details>
 
 The post-end relaxation exists so withheld reports filed during `CLAIM_GRACE` don't all revert
 `NoAttribution` — which would hand the project back exactly the escrow the grace window protects.
@@ -231,6 +263,11 @@ terminal, so the stored touch is the user's latest intent *from while the campai
 ## 4. Two ways a report reaches the campaign
 
 The oracle path is what makes a promoter payable without the project's cooperation.
+
+![The two report paths: direct from the project, or staked through the OracleCoordinator](flow/report-paths.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart TD
@@ -250,10 +287,17 @@ flowchart TD
     RUA --> SETTLE([credit + settle inline])
 ```
 
+</details>
+
 ## 5. Verifier composition
 
 A verifier may only ever shrink a claim, and can never redirect the payee. `Campaign` independently
 rejects any verifier returning more than was claimed.
+
+![Verifier composition: GuardedKpiVerifier over Boney's canonical verifier plus an optional project verifier](flow/verifier-composition.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart LR
@@ -266,6 +310,8 @@ flowchart LR
     CMP -->|CAP| CP["credit min(boney, project)"]
 ```
 
+</details>
+
 `EventMetricKpiVerifier` exists because Solidity cannot read historical logs — there is no
 `eth_getLogs` on chain. A trusted relayer scans the real logs off-chain and pushes totals ahead of
 time; `verify` is then a stored-value lookup and a comparison.
@@ -273,6 +319,11 @@ time; `verify` is then a stored-value lookup and a comparison.
 ---
 
 ## 6. Off-chain: what the UI and subgraph read
+
+![Which on-chain events feed each subgraph handler and the web UI](flow/subgraph.svg)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart LR
@@ -305,6 +356,8 @@ flowchart LR
         PJ -.->|"useCampaignPromoters"| UI
     end
 ```
+
+</details>
 
 `startBlock` is the `CampaignRegistry` **deployment** block, not a recent one: templates only spawn
 from `CampaignCreated`, and a dynamically created data source never indexes blocks before it was
