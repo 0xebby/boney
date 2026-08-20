@@ -13,7 +13,7 @@ import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
 ///      only lands after `disputeWindow` elapses without a challenge. A successful dispute slashes
 ///      the reporter and permanently voids the report.
 ///
-///      MVP scope (tracked in todo.md): dispute authority is the governor's. Permissionless
+///      MVP scope (tracked in boneyMd/todo.md): dispute authority is the governor's. Permissionless
 ///      disputes with challenger bonds are the next step and do not change this contract's shape —
 ///      only who may call `disputeReport`.
 ///

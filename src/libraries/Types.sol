@@ -44,7 +44,7 @@ library Types {
     ///        amount is credited as-is (trusting the reporter/oracle).
     /// @param target Campaign-wide goal for this KPI. Informational; tiers drive payouts.
     /// @param aggregate If true this KPI is campaign-level and oracle-reported only; it never
-    ///        credits an individual promoter. See decision D7 in todo.md.
+    ///        credits an individual promoter. See decision D7 in boneyMd/todo.md.
     /// @param params Opaque configuration forwarded to the verifier (e.g. the contract address
     ///        and event signature being tracked).
     struct KpiSpec {

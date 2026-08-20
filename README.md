@@ -71,7 +71,8 @@ The verifier a campaign should point at is `GuardedKpiVerifier`, which consults 
 optionally cross-checks a second verifier such as `TouchWindowVerifier`. That means a project cannot
 credit itself more than an independent observer saw. It also means **two off-chain processes have to
 run**: `pnpm index` for the project's claim and `pnpm relay` for Boney's observation. See
-`KPI_VERIFICATION.md` for the design and `KPI_VERIFICATION_WALKTHROUGH.md` for a worked example.
+`boneyMd/KPI_VERIFICATION.md` for the design and `boneyMd/KPI_VERIFICATION_WALKTHROUGH.md` for a
+worked example.
 
 Aggregate KPIs (TVL, volume) are campaign-level and oracle-reported. They advance totals for
 display but do not credit individual promoters; per-promoter aggregate attribution is tracked
@@ -188,7 +189,7 @@ across.
 
 ## Security
 
-Threat-model detail is in `BoneyDocs.md`. Summary of the enforced properties:
+Threat-model detail is in `boneyMd/BoneyDocs.md`. Summary of the enforced properties:
 
 - **Fake conversions** — attribution needs a user signature; reports are cumulative so replay is
   a no-op; verifier adapters can only discount.
@@ -200,7 +201,7 @@ Threat-model detail is in `BoneyDocs.md`. Summary of the enforced properties:
   the reporter and is never applied; stake is locked while reports are in flight.
 - **Replay** — EIP-712 domain binding throughout; per-attestor nonces; used attestation ids rejected.
 
-Not yet audited. See `todo.md` for deferred work and known limitations.
+Not yet audited. See `boneyMd/todo.md` for deferred work and known limitations.
 
 ## License
 
