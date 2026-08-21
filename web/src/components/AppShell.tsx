@@ -5,8 +5,10 @@ import {usePathname} from "next/navigation";
 import {useEffect, useState, type ReactNode} from "react";
 import {useAccount, useConnect, useDisconnect} from "wagmi";
 import {RankBadge} from "@/components/ui/RankBadge";
+import {NavDrawer} from "@/components/ui/NavDrawer";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useIsPromoter} from "@/hooks/useIsPromoter";
+import {isActiveNav, navItems} from "@/lib/nav";
 import {rankOf} from "@/lib/ranks";
 import {describeTxError} from "@/lib/txErrors";
 import {DEV_STUB_WALLET} from "@/lib/stubWallets";
@@ -16,57 +18,17 @@ import {DEV_STUB_WALLET} from "@/lib/stubWallets";
  * The bar is a product directory, not a settings menu: Campaigns (the list), My Campaigns,
  * Promoters, Docs — plus the Create call to action.
  *
- * The first item is "Campaigns" rather than "Boneyard" on purpose. The brand mark beside it
- * already links to `/`, and the list page leads with a `boneyard` hero — three copies of the name
- * on one screen reads as a stutter, so only the mark and the hero carry it.
+ * **The nav has two presentations, one list.** From `sm` up it is a row of links in the bar. Below
+ * `sm` it moves into `NavDrawer`, because at phone widths the bar cannot hold the brand mark, five
+ * links and the wallet cluster at once — the previous single-bar layout resolved that by letting the
+ * nav scroll horizontally, which hides destinations behind a gesture nothing advertises. Which items
+ * appear, in what order, and which one is current all come from `lib/nav.ts` so the two
+ * presentations cannot drift apart.
  *
- * Create is deliberately NOT in this list. It is the primary action of the whole product, so it
- * sits in the right-hand cluster as a filled button rather than reading as one more peer link.
- *
- * Two entries are personal rather than public, and appear only once they have something to show.
- * A tab that can only ever render "nothing here" is a dead end that costs a navigation to discover:
- *
- *  - **My Campaigns** needs a wallet to know whose campaigns to filter to.
- *  - **Promoters** is a dashboard of memberships and tracking links, so it waits until the wallet
- *    actually holds one — see `useIsPromoter`.
- *
- * Both start hidden during the server render and the first client render, which is what keeps
- * hydration consistent: wagmi rehydrates its connection inside an effect, so there is no wallet to
- * read at markup time on either side. They appear a moment later rather than flashing wrong.
+ * Create is deliberately not in that list. It is the primary action of the whole product, so it
+ * stays in the bar's right-hand cluster as a filled button at every width rather than reading as one
+ * more peer link — and staying in the bar means it is reachable on a phone without opening anything.
  */
-const PUBLIC_NAV = [
-  {href: "/", label: "Campaigns", icon: "▦"},
-  {href: "/discover", label: "Discover", icon: "◍"},
-  {href: "/docs", label: "Docs", icon: "◌"},
-] as const;
-
-const MY_CAMPAIGNS = {href: "/my", label: "My Campaigns", icon: "◈"} as const;
-const PROMOTERS = {href: "/promoters", label: "Promoters", icon: "◎"} as const;
-
-type NavItem = {href: string; label: string; icon: string};
-
-/**
- * The nav in display order, with the personal entries spliced into the positions they occupy when
- * present — "My Campaigns" beside the marketplace it filters, "Promoters" beside Discover, and Docs
- * last either way. Building the list rather than rendering conditionals inline keeps that ordering
- * in one place instead of spread across the JSX.
- */
-function navItems({
-  isConnected,
-  isPromoter,
-}: {
-  isConnected: boolean;
-  isPromoter: boolean;
-}): NavItem[] {
-  const [campaigns, discover, docs] = PUBLIC_NAV;
-  return [
-    campaigns,
-    ...(isConnected ? [MY_CAMPAIGNS] : []),
-    discover,
-    ...(isPromoter ? [PROMOTERS] : []),
-    docs,
-  ];
-}
 
 /**
  * Wallet connect / disconnect.
@@ -275,7 +237,7 @@ export function AppShell({children}: {children: ReactNode}) {
   const nav = navItems({isConnected, isPromoter});
 
   const navLink = ({href, label, icon}: {href: string; label: string; icon: string}) => {
-    const active = pathname === href || (href !== "/" && pathname.startsWith(href));
+    const active = isActiveNav(pathname, href);
     return (
       <Link
         key={href}
@@ -306,25 +268,34 @@ export function AppShell({children}: {children: ReactNode}) {
       </a>
 
       {/*
-        One bar at every width. The nav scrolls horizontally rather than collapsing, so a tablet
-        user keeps both navigation and the wallet button — every write path stays reachable.
+        One bar at every width, but the nav inside it changes form. From `sm` up the links sit in the
+        bar; below `sm` they move into the drawer and only its trigger remains, which is what keeps
+        the brand mark, Create and the wallet button all reachable at 375px without a scrolling nav.
       */}
       <header className="sticky top-0 z-40 border-b border-hairline bg-surface-1">
-        <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 py-2.5 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2.5 sm:gap-4 sm:px-6 lg:px-8">
+          <NavDrawer items={nav} />
+
           <Link href="/" className="shrink-0">
-            <span className="font-display text-2xl lowercase leading-none text-brand">
+            <span className="font-display text-xl lowercase leading-none text-brand sm:text-2xl">
               boneyard
             </span>
           </Link>
 
           <nav
             aria-label="Main"
-            className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto px-1"
+            className="-mx-1 hidden min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 sm:flex"
           >
             {nav.map(navLink)}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-2.5">
+          {/*
+            Below `sm` the nav is gone from the bar, so nothing is left to absorb the free space and
+            push the wallet cluster right. This does that job at phone widths only.
+          */}
+          <div className="flex-1 sm:hidden" />
+
+          <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
             <span className="animate-blink hidden text-[10px] font-bold uppercase tracking-wider text-brand xl:inline">
               beta
             </span>
@@ -332,7 +303,7 @@ export function AppShell({children}: {children: ReactNode}) {
             <Link
               href="/create"
               aria-current={pathname === "/create" ? "page" : undefined}
-              className="flex shrink-0 items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-[13px] font-semibold text-plane transition-opacity hover:opacity-90"
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-md bg-brand px-3 text-[13px] font-semibold text-plane transition-opacity hover:opacity-90 sm:min-h-0 sm:py-1.5"
             >
               <span aria-hidden className="text-xs">
                 ＋
@@ -341,7 +312,14 @@ export function AppShell({children}: {children: ReactNode}) {
               <span className="sm:hidden">Create</span>
             </Link>
 
-            <WalletRank />
+            {/*
+              The rank badge is an indicator, not a control, and it is the first thing worth dropping
+              when the bar runs out of room — its full sentence is already carried in the `sr-only`
+              span inside `WalletRank`, so nothing is lost to a screen reader.
+            */}
+            <span className="hidden sm:flex">
+              <WalletRank />
+            </span>
             <WalletButton />
           </div>
         </div>

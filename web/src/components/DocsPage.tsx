@@ -457,10 +457,21 @@ function RankTable() {
             <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-ink-muted">
               BoneyScore
             </th>
-            <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-ink-muted">
+            {/*
+              The two "alone" columns are worked examples of how a threshold is reached; the ladder
+              itself and the minimum-Ethos figure are the reference. On a phone the examples yield so
+              the reference stays readable without a sideways swipe.
+            */}
+            <th
+              scope="col"
+              className="hidden px-2 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
+            >
               Ethos alone
             </th>
-            <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-ink-muted">
+            <th
+              scope="col"
+              className="hidden px-2 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
+            >
               Followers alone
             </th>
             <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-ink-muted">
@@ -494,10 +505,10 @@ function RankTable() {
                   {rank.min.toLocaleString("en-US")}
                   {rank.max > rank.min ? `–${rank.max.toLocaleString("en-US")}` : ""}
                 </td>
-                <td className="tnum px-2 py-2.5 text-right text-ink-secondary">
+                <td className="tnum hidden px-2 py-2.5 text-right text-ink-secondary md:table-cell">
                   {rank.min === 0 ? "—" : ethosAlone.toLocaleString("en-US")}
                 </td>
-                <td className="tnum px-2 py-2.5 text-right text-ink-secondary">
+                <td className="tnum hidden px-2 py-2.5 text-right text-ink-secondary md:table-cell">
                   {rank.min === 0
                     ? "—"
                     : followersAlone === null

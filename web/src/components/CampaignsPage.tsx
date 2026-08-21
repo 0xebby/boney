@@ -302,6 +302,7 @@ function buildColumns(
     {
       key: "project",
       header: "Project",
+      hideOnMobile: true,
       // Sorts on the displayed string, so the column orders the way it reads. Rows falling back
       // to an address sort among themselves under "0x" rather than being scattered by name.
       sortValue: (c) => projectName(c),
@@ -347,6 +348,9 @@ function buildColumns(
       key: "utilization",
       header: "Progress",
       sortValue: (c) => utilization(c),
+      // The fixed width is also why this is one of the first columns dropped on a phone: 140px of a
+      // 375px viewport spent on a bar whose number is already in "Paid out".
+      hideOnMobile: true,
       width: "140px",
       render: (c) => (
         <Meter
@@ -381,6 +385,7 @@ function buildColumns(
       key: "ends",
       header: "Ends",
       numeric: true,
+      hideOnMobile: true,
       sortValue: (c) => c.endTime,
       render: (c) => {
         // `now === 0` means the clock effect has not run yet; show nothing rather than

@@ -253,6 +253,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
     {
       key: "project",
       header: "Project",
+      hideOnMobile: true,
       sortValue: (r) => projectName(r.view),
       render: (r) =>
         hasProjectName(r.view) ? (
@@ -293,6 +294,9 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       key: "ends",
       header: "Ends in",
       numeric: true,
+      // The tracking link is the reason this table exists, so it keeps its slot on a phone and the
+      // countdown yields — the campaign's own page carries it.
+      hideOnMobile: true,
       sortValue: (r) => r.view.endTime,
       render: (r) => {
         if (now === 0) return <span className="text-ink-muted">—</span>;
@@ -335,6 +339,7 @@ function buildReferredColumns(now: number): Column<ReferredCampaign>[] {
     {
       key: "project",
       header: "Project",
+      hideOnMobile: true,
       sortValue: (r) => projectName(r.view),
       render: (r) =>
         hasProjectName(r.view) ? (
