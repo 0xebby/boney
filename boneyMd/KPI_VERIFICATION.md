@@ -184,6 +184,45 @@ campaign.attributionRegistry() → registry.touchOf(campaign, user).signedAt
 
 A block whose timestamp could not be resolved is excluded rather than assumed to clear the floor.
 
+### The rule belongs to every reader, not just the relayer
+
+This was written as a property of the relayer, and for a long time that is all it was. Three other
+code paths read the same logs and folded them **without** the floor, so they credited activity from
+before a user's `signedAt` — and, on a young campaign, from before the campaign existed at all:
+
+| path | what it did |
+| --- | --- |
+| `scripts/indexer.ts` | cold-start range was `head - 50_000` with no reference to the campaign, then folded every actor unfiltered — and it *writes on chain* |
+| `useObservedActions` | scanned from the **registry deployment** block and folded unfiltered, so the report panel showed a referral's whole history on the source contract |
+| `aggregateActions` | the subgraph-fed fold, which the subgraph's own handler comment explicitly defers the attribution decision *to* |
+
+The last one is the sharpest: `subgraph/src/transfer.ts` stores actions deliberately unfiltered,
+because a promoter switch moves `signedAt` afterwards and baking the answer in at index time would
+be wrong. That deferral is only sound if the consumer applies the floor.
+
+Nothing downstream caught it. `reportUserAction` receives a total, never the blocks behind it, so the
+contract cannot tell an inflated figure from an honest one. `EventMetricKpiVerifier.verify` returns
+`min(amount, observed)` and so bounds a gated KPI by the relayer's correctly-filtered ceiling — but
+with `verifier == address(0)` the campaign credits the reported number as-is, and there was nothing
+between a wide scan and a wrong credit.
+
+The fix puts the rule in the shared fold rather than in each caller. `aggregateByActor` and
+`aggregateActions` both take a **required** `floors` argument — `max(signedAt, startTime)` per actor,
+keyed lowercase — and an actor missing from the map is dropped, matching `NoAttribution`. It is
+required rather than optional so that opting out is a visible decision at the call site instead of an
+omission; `null` means "diagnostics, attribution is not the question" and is used only by the
+`scripts/__check-*` scratch tools.
+
+Two consequences worth naming:
+
+- `useObservedActions` now resolves block timestamps for **every** KPI, not just verifier-gated ones.
+  It previously skipped them when nothing would read the evidence, which is no longer true — the
+  floor is a timestamp comparison, and a log carrying `0` is dropped rather than assumed to clear it.
+  Skipping the fetch would have blanked every ungated KPI's panel.
+- The indexer's block range is now clamped to the deployment block. That is an **RPC bound, not the
+  correctness boundary** — the floor is. Clamping only stops blocks from before the protocol existed
+  being scanned; it says nothing about when any particular campaign began.
+
 ---
 
 ## 9. Why `GuardedKpiVerifier` has two modes
