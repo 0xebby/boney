@@ -8,19 +8,11 @@ out/
 /broadcast/**/dry-run/
 
 # Docs
-docs/
 BoneyDocs.md
 todo.md
 todo-frontend.md
 plan.md
 future.md
-changes.md
-
-# Internal code reviews and the unpublished protocol spec. Both live in boneyMd/ alongside the
-# published docs, and this repo is public — findings.md details unfixed high-severity bugs, so it
-# must never be staged. Drop the spec/ rule when the spec is ready to publish.
-boneyMd/findings.md
-boneyMd/spec/
 
 # Web app
 web/node_modules/
@@ -30,9 +22,6 @@ web/.vercel
 
 # Dotenv file
 .env
-# Timestamped backups of the above, written when a deploy/seed script rewrites addresses. They carry
-# the same PRIVATE_KEY / ATTESTOR_PRIVATE_KEY / ETHOS_PK, and a bare `.env` rule does not match them
-# — so `git add -A` would have staged live deployer keys into a public repo.
 .env.*
 !.env.example
 
@@ -40,10 +29,6 @@ web/.vercel
 # which is a no-op because reports are cumulative.
 .indexer-state.json
 
-# Claude Code worktrees. These are checkouts of *this* repo living inside it, so git records each
-# one as a gitlink (mode 160000) with no matching .gitmodules entry — which makes every
-# `git submodule` command abort with "no submodule mapping found". They are local scratch space
-# and must never be committed; the branches themselves carry the work.
 .claude/worktrees/
 
 # Per-machine tool settings, not shared state.

@@ -93,6 +93,16 @@ type RawTotals = Map<
 >;
 
 /**
+ * Per-actor earliest creditable block timestamp, keyed by lowercased address.
+ *
+ * The floor for a user is `max(touchOf(campaign, user).signedAt, campaign.startTime)`: activity is
+ * only creditable once the user is attributed *and* the campaign has begun tracking. An actor absent
+ * from the map has no live touch and is dropped entirely, matching `Campaign.reportUserAction`
+ * reverting `NoAttribution` for them.
+ */
+export type ActorFloors = ReadonlyMap<string, bigint>;
+
+/**
  * Folds logs into per-referral totals.
  *
  * Scaling is applied to the *running total*, not to each log, so a hundred sub-scale deposits still
@@ -102,10 +112,27 @@ type RawTotals = Map<
  * Logs are sorted by block before folding so `actions` is chronological regardless of the order the
  * RPC returned pages in; `TouchWindowVerifier` compares each action's timestamp against a floor,
  * and out-of-order evidence would still verify but reads as corrupt.
+ *
+ * ## `floors` is not optional, deliberately
+ *
+ * Per-user attribution filtering is the trickiest correctness rule in this repo
+ * (`boneyMd/KPI_VERIFICATION.md` §8): without it, activity a user performed *before* they were ever
+ * attributed credits a promoter who did not cause it, and activity from before the campaign existed
+ * credits one that was not running. `relayCore.aggregateDeltas` has enforced it since it shipped;
+ * this fold did not, so the relayer and the two callers of this function disagreed about what a
+ * referral was owed — the exact disagreement `useObservedActions` says must be impossible.
+ *
+ * Passing `null` opts out explicitly and is for diagnostics only — a scratch script asking "what is
+ * on chain at all", where attribution is not the question. It is a required argument rather than an
+ * optional one so that opting out is a visible decision at the call site instead of an omission.
+ *
+ * A log whose timestamp is unresolved (`0`) is dropped rather than assumed to clear the floor, the
+ * same way the relayer treats a block it could not resolve.
  */
 export function aggregateByActor(
   logs: readonly IndexedLog[],
   source: EventSource,
+  floors: ActorFloors | null,
 ): Map<string, ActorTotal> {
   const raw: RawTotals = new Map();
 
@@ -116,6 +143,12 @@ export function aggregateByActor(
     if (!referral) continue;
     const amount = rawAmount(log, source.amountMode);
     if (amount === null) continue;
+
+    if (floors) {
+      const floor = floors.get(referral.toLowerCase());
+      if (floor === undefined || floor === BigInt(0)) continue;
+      if (log.timestamp === BigInt(0) || log.timestamp < floor) continue;
+    }
 
     accumulate(raw, referral, {timestamp: log.timestamp, raw: amount}, log.blockNumber);
   }
@@ -134,16 +167,29 @@ export function aggregateByActor(
  * `value` is raw and unscaled, as the subgraph stores it. The amount mode is applied here rather than
  * upstream because `count` is a property of the KPI, not of the log: the same `Transfer` counts as 1
  * for one campaign and contributes its `value` for another.
+ *
+ * `floors` carries the same meaning and the same non-optionality as in `aggregateByActor`, and matters
+ * here for a specific reason: the subgraph stores actions *deliberately unfiltered* — see the
+ * "No attribution check" note in `subgraph/src/transfer.ts`, which defers the decision because a
+ * promoter switch moves `signedAt` afterwards. That deferral is only sound if the consumer actually
+ * applies the floor, and this is the consumer.
  */
 export function aggregateActions(
   actions: readonly {user: `0x${string}`; value: bigint; blockNumber: bigint; timestamp: bigint}[],
   source: EventSource,
+  floors: ActorFloors | null,
 ): Map<string, ActorTotal> {
   const raw: RawTotals = new Map();
 
   const ordered = [...actions].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : 1));
 
   for (const action of ordered) {
+    if (floors) {
+      const floor = floors.get(action.user.toLowerCase());
+      if (floor === undefined || floor === BigInt(0)) continue;
+      if (action.timestamp === BigInt(0) || action.timestamp < floor) continue;
+    }
+
     const amount = source.amountMode === AMOUNT_MODE.count ? BigInt(1) : action.value;
     accumulate(raw, action.user, {timestamp: action.timestamp, raw: amount}, action.blockNumber);
   }

@@ -40,7 +40,9 @@ async function main() {
   const logs: IndexedLog[] = filtered.map((l) => ({
     topics: l.topics, data: l.data, blockNumber: BigInt(l.blockNumber), timestamp: 0n,
   }));
-  const totals = aggregateByActor(logs, deposit);
+  // `null` floors: this asks "does the topic filter match at all", not "is it creditable". These
+  // logs carry timestamp 0 anyway, which a real floor would drop every one of.
+  const totals = aggregateByActor(logs, deposit, null);
   for (const [addr, t] of totals) console.log(`  observed ${addr} = ${t.amount} units (scale 1e15)`);
   if (totals.size === 0) console.log("  folded to zero (sub-scale deposits)");
 }

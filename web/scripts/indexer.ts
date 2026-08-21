@@ -39,12 +39,15 @@ import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, AttributionRegistryAbi, BoneyAbi} from "../src/lib/abis";
 import {decodeEventSource, knownSignature, type EventSource} from "../src/lib/kpiSource";
 import {
+  actorFromTopic,
   aggregateByActor,
   blockChunks,
   decideReport,
   encodeActions,
+  type ActorFloors,
   type IndexedLog,
 } from "../src/lib/indexerCore";
+import {GENERATED_DEPLOYMENTS} from "../src/lib/deployments";
 import {readBroadcast} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +65,12 @@ const MAX_LOG_RANGE = BigInt(2_000);
  *
  * Scanning from genesis on an L2 is thousands of requests. A campaign that needs deeper history
  * gets an explicit `--from-block`; silently scanning 40M blocks would look like a hang.
+ *
+ * This is an RPC bound, *not* the correctness boundary — see `actorFloors`. On its own it says
+ * nothing about when a campaign began: for any campaign younger than this many blocks (~28 hours on
+ * Base's 2s blocks) `head - DEFAULT_LOOKBACK` is a block from before the campaign existed, which is
+ * exactly when a freshly seeded one is being tested. The floor below keeps that from crediting
+ * anything; clamping to the deployment block just keeps it from being scanned.
  */
 const DEFAULT_LOOKBACK = BigInt(50_000);
 
@@ -158,6 +167,55 @@ async function fetchLogs(
   return out;
 }
 
+/**
+ * The earliest creditable timestamp for every actor these logs touched.
+ *
+ * This is the correctness boundary the block range is not. `reportUserAction` receives a total, never
+ * the blocks behind it, so the contract cannot tell that a figure includes activity from before the
+ * campaign existed or before the user was attributed — with `verifier == address(0)` it credits the
+ * number as-is. Only this filter stands between a wide scan and a wrong credit.
+ *
+ * `max(signedAt, startTime)` because both bounds are real and neither implies the other: a touch
+ * signed mid-campaign makes earlier activity by that user someone else's doing, and the campaign's own
+ * start rules out everything before it regardless of who was attributed when.
+ *
+ * One `touchOf` read per distinct actor, not per log — the same shape as
+ * `relayCore.aggregateDeltas`, which has always done this. Actors with no touch are left out of the
+ * map entirely, which `aggregateByActor` treats as "drop".
+ */
+async function actorFloors(
+  client: PublicClient,
+  registry: `0x${string}`,
+  campaign: `0x${string}`,
+  startTime: bigint,
+  logs: readonly IndexedLog[],
+  source: EventSource,
+): Promise<ActorFloors> {
+  const actors = new Set<string>();
+  for (const log of logs) {
+    const actor = actorFromTopic(log, source.actorTopic);
+    if (actor) actors.add(getAddress(actor));
+  }
+
+  const floors = new Map<string, bigint>();
+  await Promise.all(
+    [...actors].map(async (actor) => {
+      const touch = (await client.readContract({
+        address: registry,
+        abi: AttributionRegistryAbi,
+        functionName: "touchOf",
+        args: [campaign, actor as `0x${string}`],
+      })) as {signedAt: bigint | number};
+
+      const signedAt = BigInt(touch.signedAt);
+      if (signedAt === BigInt(0)) return; // never attributed — nothing here is creditable
+      floors.set(actor.toLowerCase(), signedAt > startTime ? signedAt : startTime);
+    }),
+  );
+
+  return floors;
+}
+
 async function main(): Promise<void> {
   const publicClient = createPublicClient({transport: http(rpcUrl)}) as PublicClient;
 
@@ -252,19 +310,31 @@ async function main(): Promise<void> {
       }
 
       const key = cursorKey(chainId, view.campaign, kpiIndex);
-      const fromBlock = fromBlockFlag
+      // Never below the deployment block: no campaign can predate the registry that created it, so a
+      // lookback reaching further is pure RPC spend. An explicit `--from-block` is honoured as given.
+      const deployedAt = GENERATED_DEPLOYMENTS[chainId]?.startBlock ?? BigInt(0);
+      const requested = fromBlockFlag
         ? BigInt(fromBlockFlag)
         : state[key]
           ? BigInt(state[key])
           : head > DEFAULT_LOOKBACK
             ? head - DEFAULT_LOOKBACK
             : BigInt(0);
+      const fromBlock = fromBlockFlag || requested > deployedAt ? requested : deployedAt;
 
       console.log(`  blocks ${fromBlock}..${head}`);
       const logs = await fetchLogs(publicClient, source, fromBlock, head);
       console.log(`  ${logs.length} matching log(s)`);
 
-      const totals = aggregateByActor(logs, source);
+      const floors = await actorFloors(
+        publicClient,
+        attributionRegistry,
+        view.campaign,
+        startTime as bigint,
+        logs,
+        source,
+      );
+      const totals = aggregateByActor(logs, source, floors);
 
       for (const total of totals.values()) {
         const [promoterId, alreadyCredited] = await Promise.all([
