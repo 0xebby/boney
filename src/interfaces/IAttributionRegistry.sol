@@ -22,7 +22,11 @@ interface IAttributionRegistry {
     error InvalidSignature();
     error PromoterNotRegistered(address campaign, bytes32 promoterId);
     error ZeroWindow();
-    error CampaignOver(uint64 endTime, uint64 timestamp);
+    /// @dev `endTime` is the full 32-byte word the campaign answered with, not a `uint64`, because the
+    ///      registry reads it from an untyped staticcall against a registrant that need not be a
+    ///      `Campaign`. Narrowing it here would either revert on a dirty word or report a garbage
+    ///      endTime as a plausible one. Same reasoning as `CampaignTerminal`.
+    error CampaignOver(uint256 endTime, uint64 timestamp);
     error CampaignTerminal(uint256 status);
 
     // ── events ───────────────────────────────────────────────────

@@ -388,8 +388,8 @@ export const AttributionRegistryAbi = [
     "inputs": [
       {
         "name": "endTime",
-        "type": "uint64",
-        "internalType": "uint64"
+        "type": "uint256",
+        "internalType": "uint256"
       },
       {
         "name": "timestamp",

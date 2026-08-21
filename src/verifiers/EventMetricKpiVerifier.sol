@@ -8,30 +8,24 @@ import {IEventMetricKpiVerifier} from "../interfaces/IEventMetricKpiVerifier.sol
 /// @title EventMetricKpiVerifier
 /// @notice Caps a campaign's claimed KPI total against an independently observed on-chain metric,
 ///         computed off-chain by a trusted relayer that scans event logs via `eth_getLogs`.
-/// @dev **Why an off-chain relayer at all.** Solidity cannot read historical event logs — there is
-///      no `eth_getLogs` on chain. So "verification" here cannot mean live computation. It means a
-///      relayer independently scans the real logs, computes the real metric, and pushes it ahead of
+/// @dev relayer independently scans the real logs, computes the real metric, and pushes it ahead of
 ///      time; `verify` is then a cheap stored-value lookup and comparison.
 ///
-///      **Trust model.** Whoever holds the `reporter` key is trusted to report honestly. This is
+///      Whoever holds the `reporter` key is trusted to report honestly. This is
 ///      not a trustless oracle, and it is not pretending to be one. The only property this contract
 ///      guarantees is the one that matters for escrow safety: a claim can never be credited above
-///      what was independently reported. A reporter can under-report (denying promoters credit) but
+///      what was independently reported. 
+
+///      A reporter can under-report (denying promoters credit) but
 ///      the same is true of a reporter that simply stops running, so overwriting a total downward is
 ///      allowed rather than blocked — it is needed for reorg corrections and grants no new power.
-///      Swapping this for Chainlink Functions later is a reporter-side change, not a redesign.
-///
-///      **Why the config lives here and not in `KpiSpec.params`.** `params` is already carrying the
-///      indexer's event-source blob and `TouchWindowVerifier`'s lookback, and those readings
-///      conflict (see `web/src/lib/validation.ts`). Keeping this verifier's config in its own
-///      storage stops it competing for that field, and lets one deployment serve every campaign.
-///
-///      **Why a full human-readable event signature.** An earlier shape assumed a fixed 32-byte
-///      word offset in `log.data`. Projects hosting campaigns emit wildly different event shapes —
+
+///      Swapping this for Chainlink Functions later.
+
+///      Projects hosting campaigns emit wildly different event shapes —
 ///      differing param counts, mixed indexed/non-indexed, different uint widths — and a manual
 ///      offset breaks silently the moment the layout differs. Storing the signature lets the relayer
-///      build a real ABI decoder, so `userParamIndex`/`valueParamIndex` are positions in declaration
-///      order rather than byte-math guesses.
+///      build a real ABI decoder.
 contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @notice What a KPI watches, and how the relayer should fold it.
     /// @param targetContract Contract emitting the event.
@@ -44,6 +38,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @param aggregation `COUNT` or `SUM`.
     /// @param scale Divisor applied to a user's observed total inside `verify`, so the number
     ///        compared against the project's claim is denominated the way the project denominates it.
+
     ///        Token-valued KPIs need this: a project reporting display units against a metric observed
     ///        in raw wei would be capped ~1e18 too high, making the cap vacuous. 0 is read as 1.
     ///        Mirrors the indexer's own `scale` (`web/src/lib/kpiSource.ts`).
@@ -52,11 +47,16 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     ///        **raw, unscaled** metric, which is what keeps the relayer stateless: it accumulates by
     ///        reading the stored total and adding a delta, so if the stored value were pre-scaled every
     ///        run would re-divide an already-divided number and sub-scale activity would floor away to
-    ///        nothing instead of accumulating. Keeping the raw total on chain means the only state the
+    ///        nothing instead of accumulating. 
+    
+    ///        Keeping the raw total on chain means the only state the
     ///        relayer needs is the state the chain already holds.
     /// @param windowStartBlock Earliest block worth scanning — typically where attribution begins.
     /// @param windowEndBlock Latest block the relayer may report up to. See `setKpiConfig`.
     /// @param configured Set once `setKpiConfig` has run; nothing may be reported or verified first.
+    /// @param epoch Generation of this config, bumped whenever `setKpiConfig` changes what is
+    ///        watched. Part of every total's storage key, so a bump abandons every figure observed
+    ///        under the previous config in one write. See `setKpiConfig`.
     struct KpiConfig {
         address targetContract;
         string eventSignature;
@@ -67,6 +67,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         uint256 windowStartBlock;
         uint256 windowEndBlock;
         bool configured;
+        uint256 epoch;
     }
 
     /// @notice Account allowed to push observed metrics. Trusted; see the contract-level notes.
@@ -75,9 +76,9 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @notice `_kpiKey(campaign, kpiIndex)` => what that KPI watches.
     mapping(bytes32 => KpiConfig) public kpiConfigs;
 
-    /// @notice `_userKey(campaign, kpiIndex, user)` => independently observed cumulative metric, in
-    ///         the event's own units. Divide by `KpiConfig.scale` for the comparable figure; `verify`
-    ///         does that, and `observedProgressOf` exposes it.
+    /// @notice `_userKey(campaign, kpiIndex, epoch, user)` => independently observed cumulative
+    ///         metric, in the event's own units. Divide by `KpiConfig.scale` for the comparable
+    ///         figure; `verify` does that, and `observedProgressOf` exposes it.
     mapping(bytes32 => uint256) public verifiedTotals;
 
     /// @notice `_userKey(...)` => `block.timestamp` of the most recent report for that user.
@@ -111,11 +112,25 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     }
 
     /// @notice Define what a KPI watches. Must run before anything can be reported or verified.
-    /// @dev Replacing an existing config is deliberate: `windowEndBlock` is often provisional at
+    /// @dev `windowEndBlock` is often provisional at
     ///      campaign-creation time, because a campaign's real reporting close depends on when
     ///      `Campaign.end()` is actually called, which is permissionless and therefore not known in
     ///      advance. Re-running this with a later `windowEndBlock` extends the relayer's reach
     ///      without disturbing the checkpoint or any stored total.
+    ///
+    ///      **Changing anything else abandons every total.** The checkpoint and the stored totals are
+    ///      both statements about a *specific* watched event, so carrying them across a change of
+    ///      contract, signature, param index, aggregation, scale or window start would leave the cap
+    ///      denominated in something nobody measured. Concretely: a KPI configured against the wrong
+    ///      contract, relayed up to block `N`, then corrected, would resume at `N+1` — so nothing in
+    ///      `[windowStartBlock, N]` is ever rescanned for the right event, while the totals folded
+    ///      from the *wrong* event stay live as the ceiling a claim is trimmed to.
+    ///
+    ///      So this bumps `epoch`, which is part of every total's storage key, and resets the
+    ///      checkpoint. Every figure observed under the old config becomes unreachable in the same
+    ///      transaction, and the relayer rescans the window from the start. Clearing `verifiedTotals`
+    ///      entry by entry is not an option — it is a mapping with no enumerable key set, so a user
+    ///      who only ever appeared under the wrong config would never be overwritten at all.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param targetContract Contract emitting the watched event.
@@ -146,7 +161,25 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         if (bytes(eventSignature).length == 0) revert EmptyEventSignature();
         if (windowStartBlock > windowEndBlock) revert BadWindow(windowStartBlock, windowEndBlock);
 
-        kpiConfigs[_kpiKey(campaign, kpiIndex)] = KpiConfig({
+        bytes32 kKey = _kpiKey(campaign, kpiIndex);
+        KpiConfig storage existing = kpiConfigs[kKey];
+
+        // A first configuration has nothing to invalidate, so it opens at epoch 0.
+        uint256 epoch = existing.epoch;
+        bool invalidates = existing.configured
+            && _watchesDifferentEvent(
+                existing,
+                targetContract,
+                eventSignature,
+                userParamIndex,
+                aggregation,
+                valueParamIndex,
+                scale,
+                windowStartBlock
+            );
+        if (invalidates) epoch += 1;
+
+        kpiConfigs[kKey] = KpiConfig({
             targetContract: targetContract,
             eventSignature: eventSignature,
             userParamIndex: userParamIndex,
@@ -155,8 +188,14 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
             scale: scale,
             windowStartBlock: windowStartBlock,
             windowEndBlock: windowEndBlock,
-            configured: true
+            configured: true,
+            epoch: epoch
         });
+
+        if (invalidates) {
+            lastScannedBlock[kKey] = 0;
+            emit KpiTotalsInvalidated(campaign, kpiIndex, epoch);
+        }
 
         emit KpiConfigured(
             campaign,
@@ -183,9 +222,10 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         external
         onlyReporter
     {
-        if (!kpiConfigs[_kpiKey(campaign, kpiIndex)].configured) revert KpiNotConfigured(campaign, kpiIndex);
+        KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
+        if (!cfg.configured) revert KpiNotConfigured(campaign, kpiIndex);
 
-        bytes32 uKey = _userKey(campaign, kpiIndex, user);
+        bytes32 uKey = _userKey(campaign, kpiIndex, cfg.epoch, user);
         verifiedTotals[uKey] = verifiedTotal;
         lastReportedAt[uKey] = block.timestamp;
 
@@ -194,7 +234,8 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
 
     /// @notice Push many users' observed totals and advance the scan checkpoint in one transaction.
     /// @dev Atomicity is the point: totals and checkpoint move together, so a crash can never leave
-    ///      a checkpoint claiming a range whose totals were not stored. Only users whose total
+    ///      a checkpoint claiming a range whose totals were not stored. 
+    ///      Only users whose total
     ///      changed in the newly scanned range need including — an untouched user's stored total is
     ///      already correct.
     ///
@@ -218,9 +259,10 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
 
         bytes32 kKey = _kpiKey(campaign, kpiIndex);
         _requireAdvanceable(campaign, kpiIndex, kKey, scannedUpToBlock);
+        uint256 epoch = kpiConfigs[kKey].epoch;
 
         for (uint256 i = 0; i < users.length; i++) {
-            bytes32 uKey = _userKey(campaign, kpiIndex, users[i]);
+            bytes32 uKey = _userKey(campaign, kpiIndex, epoch, users[i]);
             verifiedTotals[uKey] = totals[i];
             lastReportedAt[uKey] = block.timestamp;
             emit VerifiedTotalReported(campaign, kpiIndex, users[i], totals[i]);
@@ -266,7 +308,8 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
         if (!cfg.configured) revert KpiNotConfigured(campaign, kpiIndex);
 
-        uint256 observed = verifiedTotals[_userKey(campaign, kpiIndex, user)] / _effectiveScale(cfg.scale);
+        uint256 observed =
+            verifiedTotals[_userKey(campaign, kpiIndex, cfg.epoch, user)] / _effectiveScale(cfg.scale);
         return amount < observed ? amount : observed;
     }
 
@@ -288,13 +331,14 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param user End user to read.
-    /// @return The observed cumulative metric, 0 if never reported.
+    /// @return The observed cumulative metric, 0 if never reported under the current config.
     function verifiedTotalOf(address campaign, uint256 kpiIndex, address user)
         external
         view
         returns (uint256)
     {
-        return verifiedTotals[_userKey(campaign, kpiIndex, user)];
+        KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
+        return verifiedTotals[_userKey(campaign, kpiIndex, cfg.epoch, user)];
     }
 
     /// @notice The scaled ceiling a claim for this user would be capped at — what `verify` compares
@@ -311,7 +355,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         returns (uint256)
     {
         KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
-        return verifiedTotals[_userKey(campaign, kpiIndex, user)] / _effectiveScale(cfg.scale);
+        return verifiedTotals[_userKey(campaign, kpiIndex, cfg.epoch, user)] / _effectiveScale(cfg.scale);
     }
 
     /// @notice Where the relayer left off for a KPI.
@@ -323,6 +367,34 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     }
 
     // ── internals ────────────────────────────────────────────────
+
+    /// @dev Whether a replacement config describes a different measurement than the stored one.
+    ///
+    ///      Every field except `windowEndBlock` is compared, because each one changes what an
+    ///      already-stored total *means*: a different contract or signature is a different event, a
+    ///      different `userParamIndex` credits a different wallet, a different aggregation is a
+    ///      different quantity rather than a different magnitude, a different `scale` re-denominates
+    ///      every stored total retroactively, and raising `windowStartBlock` leaves totals folded from
+    ///      blocks now out of scope. `valueParamIndex` is compared even under `COUNT`, where it is
+    ///      unused: a needless rescan costs RPC, a missed one costs a wrong cap.
+    /// @param existing The stored config.
+    /// @return True when the replacement watches something else, so totals must be abandoned.
+    function _watchesDifferentEvent(
+        KpiConfig storage existing,
+        address targetContract,
+        string calldata eventSignature,
+        uint8 userParamIndex,
+        Aggregation aggregation,
+        uint8 valueParamIndex,
+        uint256 scale,
+        uint256 windowStartBlock
+    ) private view returns (bool) {
+        return existing.targetContract != targetContract
+            || keccak256(bytes(existing.eventSignature)) != keccak256(bytes(eventSignature))
+            || existing.userParamIndex != userParamIndex || existing.aggregation != aggregation
+            || existing.valueParamIndex != valueParamIndex || existing.scale != scale
+            || existing.windowStartBlock != windowStartBlock;
+    }
 
     /// @dev A scale of 0 means "no scaling". It is what an unconfigured field reads as, and a
     ///      no-scaling reading is a better answer than a division-by-zero at report time. Matches
@@ -363,12 +435,21 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         return keccak256(abi.encodePacked(campaign, kpiIndex));
     }
 
-    /// @dev Per-user-per-KPI storage key.
+    /// @dev Per-user-per-KPI storage key, scoped to a config generation.
+    ///
+    ///      `epoch` is in the preimage so a config change that invalidates past observations moves
+    ///      every one of this KPI's totals to fresh, unwritten slots — see `setKpiConfig`. It cannot
+    ///      be dropped in favour of clearing the entries: a mapping has no enumerable key set.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
+    /// @param epoch Generation of the KPI's config, from `KpiConfig.epoch`.
     /// @param user End user the metric describes.
     /// @return The hashed key.
-    function _userKey(address campaign, uint256 kpiIndex, address user) private pure returns (bytes32) {
-        return keccak256(abi.encodePacked(campaign, kpiIndex, user));
+    function _userKey(address campaign, uint256 kpiIndex, uint256 epoch, address user)
+        private
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(campaign, kpiIndex, epoch, user));
     }
 }

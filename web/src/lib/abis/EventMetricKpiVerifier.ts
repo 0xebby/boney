@@ -130,6 +130,11 @@ export const EventMetricKpiVerifierAbi = [
             "name": "configured",
             "type": "bool",
             "internalType": "bool"
+          },
+          {
+            "name": "epoch",
+            "type": "uint256",
+            "internalType": "uint256"
           }
         ]
       }
@@ -191,6 +196,11 @@ export const EventMetricKpiVerifierAbi = [
         "name": "configured",
         "type": "bool",
         "internalType": "bool"
+      },
+      {
+        "name": "epoch",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -617,6 +627,31 @@ export const EventMetricKpiVerifierAbi = [
       },
       {
         "name": "windowEndBlock",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "KpiTotalsInvalidated",
+    "inputs": [
+      {
+        "name": "campaign",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "epoch",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"

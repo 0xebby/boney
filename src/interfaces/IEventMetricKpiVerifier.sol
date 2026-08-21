@@ -52,6 +52,20 @@ interface IEventMetricKpiVerifier is IKpiVerifier {
         uint256 windowEndBlock
     );
 
+    /// @notice Emitted when a config change invalidates every total already observed for a KPI.
+    /// @dev Fires only when `setKpiConfig` changes *what is watched* — the contract, event signature,
+    ///      param indexes, aggregation, scale, or window start. Extending `windowEndBlock`, the reason
+    ///      replacement is allowed in the first place, does not fire it.
+    ///
+    ///      A bumped epoch is what makes the invalidation real rather than advisory: totals are keyed
+    ///      by it, so every figure observed under the old config becomes unreachable in the same
+    ///      transaction and the checkpoint restarts from the window. Without this, totals accumulated
+    ///      from the wrong event would stay live as the cap a claim is measured against.
+    /// @param campaign Campaign the KPI belongs to.
+    /// @param kpiIndex Index of the KPI within that campaign.
+    /// @param epoch The generation now in force. Totals reported under earlier epochs are abandoned.
+    event KpiTotalsInvalidated(address indexed campaign, uint256 indexed kpiIndex, uint256 epoch);
+
     /// @notice Emitted for each user whose observed total was pushed.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
