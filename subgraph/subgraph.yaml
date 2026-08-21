@@ -2,7 +2,8 @@
 #
 # Addresses and startBlock come from `web/src/lib/deployments.ts`, generated from Foundry's broadcast
 # receipt, so they describe what actually landed on chain. Base Sepolia was redeployed and reseeded
-# 2026-08-20 (twice — 02:21 then 03:26); earlier deployments (0x0FF749bB…, 0x424b10cB…) are dead and must not be re-added.
+# 2026-08-21 down to a two-campaign fixture (Aave Supplies, Sygma Bridge); every earlier deployment
+# (0x0FF749bB…, 0x424b10cB…, 0xC0E30d14…) is dead and must not be re-added.
 #
 # `startBlock` is the CampaignRegistry DEPLOYMENT block, not a recent one. Templates only spawn from
 # `CampaignCreated`, and a dynamically created data source never indexes blocks before it was
@@ -18,9 +19,9 @@ dataSources:
     name: CampaignRegistry
     network: base-sepolia
     source:
-      address: "0xC0E30d1402818581c0e3D39C3212F972f8A43D70"
+      address: "0xe07C214C78275d0Ec47C07ACc9Cc3f5Ca720c9E7"
       abi: CampaignRegistry
-      startBlock: 45714019
+      startBlock: 45789602
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -46,9 +47,9 @@ dataSources:
     name: AttributionRegistry
     network: base-sepolia
     source:
-      address: "0xa5750748242825c7116CB9a5739F0FA558615c45"
+      address: "0x7DF5D31e2126F404a6c8157f25c7e0CC21a460c8"
       abi: AttributionRegistry
-      startBlock: 45714019
+      startBlock: 45789602
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

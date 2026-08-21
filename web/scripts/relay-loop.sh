@@ -22,15 +22,18 @@ INTERVAL="${1:-120}"
 
 # campaign:kpiIndex.
 #
-# Campaign 3 is DELIBERATELY EXCLUDED even though it is the one with a live touch. Its KPI watches the
-# escrow token, so `Transfer` events that are not user actions at all get credited: the referral's own
-# self-transfers (`from == to == referral` still has the referral as `to`), tier payouts arriving from
-# the EscrowVault, and the Boney facade moving tokens. The payout case is self-reinforcing — a payout
-# raises the observed ceiling, which unlocks the next tier, which pays out again. Relaying it on a loop
-# feeds that. Re-add it once the KPI source points at a contract whose transfers are real user actions.
+# These are the whole fixture as of the 2026-08-21 redeploy — two campaigns, both watching a real
+# third-party protocol. Addresses change with every `DeployBoney` + reseed, and a stale one is silent:
+# the relayer reports against a dead campaign, credits nothing, and the gated KPI simply stays flat.
+#
+# The escrow-token campaign that used to be excluded here is gone with the old fixture. If one is ever
+# seeded again, keep it out: its KPI watched the escrow token, so `Transfer` events that are not user
+# actions got credited — the referral's own self-transfers, tier payouts arriving from the EscrowVault,
+# and the Boney facade moving tokens. The payout case is self-reinforcing, since a payout raises the
+# observed ceiling, which unlocks the next tier, which pays out again.
 TARGETS=(
-  "0x1E07C634F33E9B59B4c1BBceC373B379fead4Ee4:0"   # 6 Aave Supply — real Aave pool
-  "0x750b907b93136B23cdd1Fb8B988eFd3cE2038080:0"   # 7 Sygma       — real bridge
+  "0x5A6d0E8CF9df181d62Cd2D8608c93d9328678985:0"   # Aave Supplies — real Aave pool
+  "0x6225448466f97d795f363951606B5A22A93241d9:0"   # Sygma Bridge  — real bridge
 )
 
 while true; do
