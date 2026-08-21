@@ -48,6 +48,7 @@ import {
   type IndexedLog,
 } from "../src/lib/indexerCore";
 import {GENERATED_DEPLOYMENTS} from "../src/lib/deployments";
+import {TOUCH_STORED} from "../src/lib/events";
 import {readBroadcast} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -175,19 +176,28 @@ async function fetchLogs(
  * campaign existed or before the user was attributed — with `verifier == address(0)` it credits the
  * number as-is. Only this filter stands between a wide scan and a wrong credit.
  *
- * `max(signedAt, startTime)` because both bounds are real and neither implies the other: a touch
- * signed mid-campaign makes earlier activity by that user someone else's doing, and the campaign's own
- * start rules out everything before it regardless of who was attributed when.
+ * `max(firstSignedAt, startTime)` because both bounds are real and neither implies the other: activity
+ * from before the user was ever attributed is nobody's doing, and the campaign's own start rules out
+ * everything before it regardless of who was attributed when.
  *
- * One `touchOf` read per distinct actor, not per log — the same shape as
- * `relayCore.aggregateDeltas`, which has always done this. Actors with no touch are left out of the
- * map entirely, which `aggregateByActor` treats as "drop".
+ * **The first touch, not the current one.** `Campaign` credits `newTotal - _userCredited[user][kpi]`
+ * and that guard is keyed by user alone, spanning every promoter the user ever had. `newTotal` must
+ * therefore be cumulative over the user's whole attributed history — measure it from the *latest*
+ * touch and a user who switched promoters recomputes a total at or below what the previous promoter
+ * was already credited, so the new one is credited nothing, permanently. `touchOf` returns only the
+ * live touch, so the floor comes from the `TouchStored` history instead.
+ *
+ * One log scan for the whole campaign rather than a read per actor, and it also answers "was this
+ * actor ever attributed at all" — absent from the history means dropped, which `aggregateByActor`
+ * treats as "no credit", matching `Campaign` reverting `NoAttribution`.
  */
 async function actorFloors(
   client: PublicClient,
   registry: `0x${string}`,
   campaign: `0x${string}`,
   startTime: bigint,
+  fromBlock: bigint,
+  head: bigint,
   logs: readonly IndexedLog[],
   source: EventSource,
 ): Promise<{floors: ActorFloors; unattributed: string[]}> {
@@ -197,27 +207,41 @@ async function actorFloors(
     if (actor) actors.add(getAddress(actor));
   }
 
+  // Every touch this campaign ever stored, oldest kept. Scanned from the same lower bound as the
+  // activity: a touch below it would be invisible here, and crediting from a floor we cannot see
+  // would be worse than reporting nothing.
+  const firstSignedAt = new Map<string, bigint>();
+  for (const chunk of blockChunks(fromBlock, head, MAX_LOG_RANGE)) {
+    const touchLogs = await client.getLogs({
+      address: registry,
+      event: TOUCH_STORED,
+      args: {campaign},
+      fromBlock: chunk.from,
+      toBlock: chunk.to,
+    });
+    for (const log of touchLogs) {
+      const user = log.args.user;
+      const signedAt = log.args.signedAt;
+      if (!user || signedAt === undefined) continue;
+      const key = getAddress(user).toLowerCase();
+      const seen = firstSignedAt.get(key);
+      const at = BigInt(signedAt);
+      if (seen === undefined || at < seen) firstSignedAt.set(key, at);
+    }
+  }
+
   const floors = new Map<string, bigint>();
   const unattributed: string[] = [];
-  await Promise.all(
-    [...actors].map(async (actor) => {
-      const touch = (await client.readContract({
-        address: registry,
-        abi: AttributionRegistryAbi,
-        functionName: "touchOf",
-        args: [campaign, actor as `0x${string}`],
-      })) as {signedAt: bigint | number};
-
-      const signedAt = BigInt(touch.signedAt);
-      if (signedAt === BigInt(0)) {
-        // Reported rather than dropped in silence: these used to each print a "no live attribution
-        // touch" line from the loop below, and losing that would make a busy source look quiet.
-        unattributed.push(actor);
-        return;
-      }
-      floors.set(actor.toLowerCase(), signedAt > startTime ? signedAt : startTime);
-    }),
-  );
+  for (const actor of actors) {
+    const first = firstSignedAt.get(actor.toLowerCase());
+    if (first === undefined || first === BigInt(0)) {
+      // Reported rather than dropped in silence: these used to each print a "no live attribution
+      // touch" line from the loop below, and losing that would make a busy source look quiet.
+      unattributed.push(actor);
+      continue;
+    }
+    floors.set(actor.toLowerCase(), first > startTime ? first : startTime);
+  }
 
   return {floors, unattributed};
 }
@@ -337,6 +361,8 @@ async function main(): Promise<void> {
         attributionRegistry,
         view.campaign,
         startTime as bigint,
+        fromBlock,
+        head,
         logs,
         source,
       );

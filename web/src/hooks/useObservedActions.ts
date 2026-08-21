@@ -8,7 +8,7 @@ import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {planWindows} from "@/lib/promoters";
 import {decodeEventSource, type EventSource} from "@/lib/kpiSource";
 import {aggregateByActor, type IndexedLog} from "@/lib/indexerCore";
-import {AttributionRegistryAbi, CampaignAbi} from "@/lib/abis";
+import {CampaignAbi} from "@/lib/abis";
 import type {ObservedReferral} from "@/lib/reporting";
 
 /**
@@ -60,6 +60,7 @@ export function useObservedActions({
   kpiIndex,
   params,
   referrals,
+  firstSignedAt,
   enabled,
 }: {
   campaign: `0x${string}` | undefined;
@@ -67,15 +68,26 @@ export function useObservedActions({
   /** `KpiSpec.params` — the event-source commitment, or empty for a KPI that declares none. */
   params: Hex | undefined;
   referrals: readonly `0x${string}`[];
+  /**
+   * Each referral's earliest touch time, from `useCampaignTouches`. The floor activity is measured
+   * from; a referral absent from it has never been attributed and is dropped entirely.
+   */
+  firstSignedAt: ReadonlyMap<string, bigint>;
   enabled: boolean;
 }) {
   const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
   const deployment = getDeployment(chainId);
   const key = referrals.map((r) => r.toLowerCase()).join(",");
+  // The floors are part of the query's input, so they belong in its key. A referral re-signing moves
+  // nothing here — `signedAt` only ever increases — but a *first* touch landing for a referral that
+  // had none changes what is creditable, and without this the panel would serve the stale answer.
+  const floorKey = referrals
+    .map((r) => `${r.toLowerCase()}:${firstSignedAt.get(r.toLowerCase()) ?? 0n}`)
+    .join(",");
 
   const query = useQuery({
-    queryKey: ["observedActions", chainId, campaign, kpiIndex, params, key],
+    queryKey: ["observedActions", chainId, campaign, kpiIndex, params, key, floorKey],
     enabled:
       enabled && Boolean(client && campaign && deployment) && isDeployed(chainId) && key.length > 0,
     // Matches the touch scan: this backs a write panel, so an action a few seconds old should show
@@ -156,10 +168,12 @@ export function useObservedActions({
         }
       }
 
-      // The same floor the relayer and `scripts/indexer.ts` apply: activity only counts once the
-      // wallet is attributed *and* the campaign has begun tracking. Without it this panel showed a
-      // referral's whole history on the source contract as though the promoter had caused it, and
-      // disagreed with the relayer's ceiling — the disagreement this module exists to prevent.
+      // The floor the relayer and `scripts/indexer.ts` both apply: activity counts once the referral
+      // has been attributed at all and the campaign has begun tracking. It is the referral's
+      // *earliest* touch, not its current one — `Campaign` credits `newTotal - _userCredited`, and
+      // that guard spans every promoter the referral ever had, so a total measured only from the
+      // latest touch would leave a switched referral permanently uncreditable. See
+      // `earliestSignedAt`.
       const startTime = (await publicClient.readContract({
         address: campaign,
         abi: CampaignAbi,
@@ -167,26 +181,11 @@ export function useObservedActions({
       })) as bigint;
 
       const floors = new Map<string, bigint>();
-      await Promise.all(
-        referrals.map(async (referral) => {
-          try {
-            const touch = (await publicClient.readContract({
-              address: deployment.attributionRegistry,
-              abi: AttributionRegistryAbi,
-              functionName: "touchOf",
-              args: [campaign, referral],
-            })) as {signedAt: bigint | number};
-
-            const signedAt = BigInt(touch.signedAt);
-            if (signedAt === BigInt(0)) return; // no live touch — nothing creditable
-            floors.set(referral.toLowerCase(), signedAt > startTime ? signedAt : startTime);
-          } catch {
-            // Leaving the referral out of the map drops their actions. Understating is the safe
-            // direction, and `failedWindows` already frames the total as a floor rather than a fact.
-            failedWindows++;
-          }
-        }),
-      );
+      for (const referral of referrals) {
+        const first = firstSignedAt.get(referral.toLowerCase());
+        if (first === undefined || first === BigInt(0)) continue; // never attributed
+        floors.set(referral.toLowerCase(), first > startTime ? first : startTime);
+      }
 
       const totals = aggregateByActor(logs, source, floors);
       const observed = new Map<string, ObservedReferral>();

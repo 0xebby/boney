@@ -6,11 +6,17 @@ import {type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {planWindows} from "@/lib/promoters";
-import {latestTouches, type TouchEntry} from "@/lib/reporting";
+import {latestTouches, earliestSignedAt, type TouchEntry} from "@/lib/reporting";
 import {TOUCH_STORED} from "@/lib/events";
 
 export type CampaignTouches = {
   touches: TouchEntry[];
+  /**
+   * Each referral's earliest touch time, keyed lowercase — the floor observed activity is measured
+   * from. Derived from the same scan as `touches` rather than a second pass, because the raw entries
+   * are already here and `latestTouches` is about to throw the older ones away.
+   */
+  firstSignedAt: Map<string, bigint>;
   /**
    * Set when history was too long to scan within the query budget. Touches signed before this
    * block are missing, and the caller must say so — a KOL can look un-attributed purely because
@@ -18,6 +24,9 @@ export type CampaignTouches = {
    */
   scannedFrom?: bigint;
 };
+
+/** Stable empty map, so a loading render does not hand callers a fresh identity every time. */
+const EMPTY_FIRST_SIGNED: Map<string, bigint> = new Map();
 
 /**
  * Every referral attributed to any promoter on one campaign.
@@ -32,7 +41,9 @@ export type CampaignTouches = {
  * same reason: a partial list still lets the dev report for the KOLs it did find.
  *
  * The result is reduced through `latestTouches`, so a referral who re-signed under a different
- * promoter appears once, under whichever KOL the contract would actually resolve.
+ * promoter appears once, under whichever KOL the contract would actually resolve. `firstSignedAt` is
+ * taken from the same entries *before* that reduction, since the floor a report is measured from is
+ * the referral's first touch rather than its current one — see `earliestSignedAt`.
  */
 export function useCampaignTouches(campaign: `0x${string}` | undefined) {
   const client = usePublicClient({chainId: useBoneyChainId()});
@@ -46,7 +57,7 @@ export function useCampaignTouches(campaign: `0x${string}` | undefined) {
     // seconds ago should show up on the next refetch rather than after a stale window expires.
     staleTime: 15_000,
     queryFn: async (): Promise<CampaignTouches> => {
-      if (!client || !campaign || !deployment) return {touches: []};
+      if (!client || !campaign || !deployment) return {touches: [], firstSignedAt: new Map()};
 
       const head = await (client as PublicClient).getBlockNumber({cacheTime: 0});
       const {windows, skippedBefore} = planWindows(deployment.startBlock, head);
@@ -81,12 +92,16 @@ export function useCampaignTouches(campaign: `0x${string}` | undefined) {
       }
 
       const touches = latestTouches(entries);
-      return skippedBefore === undefined ? {touches} : {touches, scannedFrom: skippedBefore};
+      const firstSignedAt = earliestSignedAt(entries);
+      return skippedBefore === undefined
+        ? {touches, firstSignedAt}
+        : {touches, firstSignedAt, scannedFrom: skippedBefore};
     },
   });
 
   return {
     touches: query.data?.touches ?? [],
+    firstSignedAt: query.data?.firstSignedAt ?? EMPTY_FIRST_SIGNED,
     scannedFrom: query.data?.scannedFrom,
     isLoading: query.isLoading,
     isRefreshing: query.isFetching && !query.isLoading,

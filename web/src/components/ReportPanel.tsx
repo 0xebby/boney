@@ -117,6 +117,7 @@ export function ReportPanel({
     kpiIndex,
     params: kpi?.spec.params,
     referrals: liveReferrals,
+    firstSignedAt: touchScan.firstSignedAt,
     enabled: isProject,
   });
 
