@@ -190,7 +190,7 @@ async function actorFloors(
   startTime: bigint,
   logs: readonly IndexedLog[],
   source: EventSource,
-): Promise<ActorFloors> {
+): Promise<{floors: ActorFloors; unattributed: string[]}> {
   const actors = new Set<string>();
   for (const log of logs) {
     const actor = actorFromTopic(log, source.actorTopic);
@@ -198,6 +198,7 @@ async function actorFloors(
   }
 
   const floors = new Map<string, bigint>();
+  const unattributed: string[] = [];
   await Promise.all(
     [...actors].map(async (actor) => {
       const touch = (await client.readContract({
@@ -208,12 +209,17 @@ async function actorFloors(
       })) as {signedAt: bigint | number};
 
       const signedAt = BigInt(touch.signedAt);
-      if (signedAt === BigInt(0)) return; // never attributed — nothing here is creditable
+      if (signedAt === BigInt(0)) {
+        // Reported rather than dropped in silence: these used to each print a "no live attribution
+        // touch" line from the loop below, and losing that would make a busy source look quiet.
+        unattributed.push(actor);
+        return;
+      }
       floors.set(actor.toLowerCase(), signedAt > startTime ? signedAt : startTime);
     }),
   );
 
-  return floors;
+  return {floors, unattributed};
 }
 
 async function main(): Promise<void> {
@@ -326,7 +332,7 @@ async function main(): Promise<void> {
       const logs = await fetchLogs(publicClient, source, fromBlock, head);
       console.log(`  ${logs.length} matching log(s)`);
 
-      const floors = await actorFloors(
+      const {floors, unattributed} = await actorFloors(
         publicClient,
         attributionRegistry,
         view.campaign,
@@ -334,6 +340,10 @@ async function main(): Promise<void> {
         logs,
         source,
       );
+      for (const actor of unattributed) {
+        console.log(`  · ${actor}: no live attribution touch — Campaign would revert NoAttribution`);
+        skipped++;
+      }
       const totals = aggregateByActor(logs, source, floors);
 
       for (const total of totals.values()) {
