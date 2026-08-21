@@ -152,12 +152,16 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         // A non-campaign returns no data; a conforming campaign returns exactly one word.
         if (!ok || data.length != 32) return maxTouchDuration;
 
-        uint64 window = abi.decode(data, (uint64));
+        // Decoded as uint256, not uint64: `abi.decode` into the narrower type reverts on a dirty
+        // upper word, which would let a registrant returning a full 32-byte value brick every touch
+        // naming it. Comparing numerically instead means an oversized answer simply clamps to the cap,
+        // which is the documented reading — see `_requireCampaignOpen` for the same decision.
+        uint256 window = abi.decode(data, (uint256));
         // Campaign.sol rejects a zero window at construction, so zero here means "not a campaign"
         // rather than "no attribution allowed" — falling through to the cap keeps a decoding
         // surprise from bricking every touch for that address.
         if (window == 0 || window > maxTouchDuration) return maxTouchDuration;
-        return window;
+        return uint64(window);
     }
 
     /// @dev Reverts unless `campaign` can still accrue creditable work.
@@ -184,10 +188,16 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     function _requireCampaignOpen(address campaign, uint64 nowTs) private view {
         (bool okEnd, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
         if (okEnd && endData.length == 32) {
-            uint64 end = abi.decode(endData, (uint64));
+            // Decoded as uint256, not as the declared uint64, for the same reason `status` below is
+            // not decoded as its enum: `abi.decode` into the narrower type reverts on a non-zero
+            // upper word, so a registrant answering with a full 32-byte value could brick every touch
+            // naming it — the opposite of the "answers neither call is simply unbounded" reading
+            // above. Comparing numerically keeps an oversized answer merely far in the future, and
+            // the error carries the full word so it cannot report a garbage endTime as a plausible one.
+            uint256 end = abi.decode(endData, (uint256));
             // Campaign.sol rejects `endTime <= block.timestamp` at construction, so zero is "not a
             // campaign" rather than "already over" — the same reading as a zero window above.
-            if (end != 0 && nowTs > end) revert CampaignOver(end, nowTs);
+            if (end != 0 && uint256(nowTs) > end) revert CampaignOver(end, nowTs);
         }
 
         (bool okStatus, bytes memory statusData) =

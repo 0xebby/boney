@@ -379,7 +379,9 @@ contract EventMetricKpiVerifierTest is Test {
         verifier.reportBatch(campaign, KPI, users, totals, checkpoint);
     }
 
+    /// @dev Mirrors `EventMetricKpiVerifier._userKey`, epoch included. Reads the epoch off the config
+    ///      rather than assuming 0, so a test that reconfigures a KPI still addresses the live slot.
     function _userKey(address user) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(campaign, KPI, user));
+        return keccak256(abi.encodePacked(campaign, KPI, verifier.configOf(campaign, KPI).epoch, user));
     }
 }
