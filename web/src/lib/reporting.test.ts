@@ -1,6 +1,7 @@
 import {describe, it, expect} from "vitest";
 import {
   latestTouches,
+  earliestSignedAt,
   buildKolTargets,
   describeCeiling,
   splitAmount,
@@ -37,6 +38,65 @@ function touch(over: Partial<TouchEntry> = {}): TouchEntry {
 function tiers(...pairs: [bigint, bigint][]): RewardTier[] {
   return pairs.map(([threshold, reward]) => ({threshold, reward}) as RewardTier);
 }
+
+describe("earliestSignedAt", () => {
+  it("keeps the oldest touch per referral, not the newest", () => {
+    const out = earliestSignedAt([
+      touch({signedAt: BigInt(500), promoterId: ID_A}),
+      touch({signedAt: BigInt(900), promoterId: ID_B}),
+    ]);
+    expect(out.get(REF_1.toLowerCase())).toBe(BigInt(500));
+  });
+
+  it("is keyed lowercase, so a checksummed log matches a lowercased lookup", () => {
+    const out = earliestSignedAt([touch({referral: REF_2, signedAt: BigInt(700)})]);
+    expect(out.get(REF_2.toLowerCase())).toBe(BigInt(700));
+  });
+
+  it("tracks referrals independently", () => {
+    const out = earliestSignedAt([
+      touch({referral: REF_1, signedAt: BigInt(500)}),
+      touch({referral: REF_2, signedAt: BigInt(800)}),
+    ]);
+    expect(out.get(REF_1.toLowerCase())).toBe(BigInt(500));
+    expect(out.get(REF_2.toLowerCase())).toBe(BigInt(800));
+  });
+
+  it("omits a referral with no touch at all", () => {
+    expect(earliestSignedAt([]).has(REF_1.toLowerCase())).toBe(false);
+  });
+
+  /**
+   * The campaign-2 regression. A referral moves from promoter A to B after A was credited 3. Keying
+   * the floor to the *current* touch makes B's recomputed total equal what A already banked, so
+   * `Campaign` credits `newTotal - _userCredited` = 0 and B can never earn. The earliest touch keeps
+   * the total cumulative across both eras, so B is credited exactly its own 3.
+   */
+  it("keeps a switched referral's total cumulative across both promoters", () => {
+    const history = [
+      touch({signedAt: BigInt(500), promoterId: ID_A}),
+      touch({signedAt: BigInt(900), promoterId: ID_B}),
+    ];
+    const floor = earliestSignedAt(history).get(REF_1.toLowerCase())!;
+    const live = latestTouches(history);
+
+    // Who gets credited comes from the latest touch; from when counts comes from the earliest.
+    expect(live[0]!.promoterId).toBe(ID_B);
+    expect(floor).toBe(BigInt(500));
+
+    // Six actions spread across both eras, three of them before B took over. Measured from the
+    // earliest touch all six count, so newTotal is 6 against A's banked 3 -> B is credited 3.
+    const actionTimes = [BigInt(600), BigInt(700), BigInt(800), BigInt(950), BigInt(960), BigInt(970)];
+    const cumulative = actionTimes.filter((t) => t >= floor).length;
+    const alreadyCreditedUnderA = 3;
+    expect(cumulative).toBe(6);
+    expect(cumulative - alreadyCreditedUnderA).toBe(3);
+
+    // Measured from the live touch instead, only three count and B is credited nothing.
+    const fromLatest = actionTimes.filter((t) => t >= live[0]!.signedAt).length;
+    expect(fromLatest - alreadyCreditedUnderA).toBe(0);
+  });
+});
 
 describe("latestTouches", () => {
   it("keeps one row per referral", () => {
