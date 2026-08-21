@@ -2,12 +2,13 @@
 
 import {useQuery} from "@tanstack/react-query";
 import {usePublicClient} from "wagmi";
-import {pad, toHex, zeroAddress, type Hex, type PublicClient} from "viem";
+import {pad, toHex, type Hex, type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {planWindows} from "@/lib/promoters";
 import {decodeEventSource, type EventSource} from "@/lib/kpiSource";
 import {aggregateByActor, type IndexedLog} from "@/lib/indexerCore";
+import {AttributionRegistryAbi, CampaignAbi} from "@/lib/abis";
 import type {ObservedReferral} from "@/lib/reporting";
 
 /**
@@ -58,7 +59,6 @@ export function useObservedActions({
   campaign,
   kpiIndex,
   params,
-  verifier,
   referrals,
   enabled,
 }: {
@@ -66,8 +66,6 @@ export function useObservedActions({
   kpiIndex: number;
   /** `KpiSpec.params` — the event-source commitment, or empty for a KPI that declares none. */
   params: Hex | undefined;
-  /** `KpiSpec.verifier`; block timestamps are only fetched when one will read the evidence. */
-  verifier: `0x${string}` | undefined;
   referrals: readonly `0x${string}`[];
   enabled: boolean;
 }) {
@@ -103,9 +101,10 @@ export function useObservedActions({
 
       const logs: IndexedLog[] = [];
       let failedWindows = 0;
-      // Only a verifier-gated KPI has anything to read them, and one extra round trip per block is
-      // not worth paying when `Campaign` ignores the evidence argument entirely.
-      const needTimestamps = Boolean(verifier && verifier !== zeroAddress);
+      // Always resolved now. These used to be fetched only for a verifier-gated KPI, on the grounds
+      // that nothing else read the evidence — but the attribution floor below is a timestamp
+      // comparison, and a log carrying 0 is dropped rather than assumed to clear it. Skipping the
+      // fetch would therefore blank every ungated KPI's panel. Still deduped per block.
       const timestamps = new Map<bigint, bigint>();
 
       for (const window of windows) {
@@ -134,19 +133,17 @@ export function useObservedActions({
           const blockNumber = BigInt(log.blockNumber);
 
           let timestamp = BigInt(0);
-          if (needTimestamps) {
-            const cached = timestamps.get(blockNumber);
-            if (cached !== undefined) timestamp = cached;
-            else {
-              try {
-                const block = await publicClient.getBlock({blockNumber});
-                timestamp = block.timestamp;
-                timestamps.set(blockNumber, timestamp);
-              } catch {
-                // Evidence with a zero timestamp fails a window check rather than passing one, so
-                // a missing block is safe to carry through as zero.
-                timestamp = BigInt(0);
-              }
+          const cached = timestamps.get(blockNumber);
+          if (cached !== undefined) timestamp = cached;
+          else {
+            try {
+              const block = await publicClient.getBlock({blockNumber});
+              timestamp = block.timestamp;
+              timestamps.set(blockNumber, timestamp);
+            } catch {
+              // Carried through as zero, which the floor treats as unresolved and drops. Evidence
+              // with a zero timestamp likewise fails a window check rather than passing one.
+              timestamp = BigInt(0);
             }
           }
 
@@ -159,7 +156,39 @@ export function useObservedActions({
         }
       }
 
-      const totals = aggregateByActor(logs, source);
+      // The same floor the relayer and `scripts/indexer.ts` apply: activity only counts once the
+      // wallet is attributed *and* the campaign has begun tracking. Without it this panel showed a
+      // referral's whole history on the source contract as though the promoter had caused it, and
+      // disagreed with the relayer's ceiling — the disagreement this module exists to prevent.
+      const startTime = (await publicClient.readContract({
+        address: campaign,
+        abi: CampaignAbi,
+        functionName: "startTime",
+      })) as bigint;
+
+      const floors = new Map<string, bigint>();
+      await Promise.all(
+        referrals.map(async (referral) => {
+          try {
+            const touch = (await publicClient.readContract({
+              address: deployment.attributionRegistry,
+              abi: AttributionRegistryAbi,
+              functionName: "touchOf",
+              args: [campaign, referral],
+            })) as {signedAt: bigint | number};
+
+            const signedAt = BigInt(touch.signedAt);
+            if (signedAt === BigInt(0)) return; // no live touch — nothing creditable
+            floors.set(referral.toLowerCase(), signedAt > startTime ? signedAt : startTime);
+          } catch {
+            // Leaving the referral out of the map drops their actions. Understating is the safe
+            // direction, and `failedWindows` already frames the total as a floor rather than a fact.
+            failedWindows++;
+          }
+        }),
+      );
+
+      const totals = aggregateByActor(logs, source, floors);
       const observed = new Map<string, ObservedReferral>();
       for (const [addr, total] of totals) {
         observed.set(addr, {

@@ -100,7 +100,8 @@ async function main() {
     }
 
     console.log(`  ${logs.length} matched logs, ${failed} failed windows`);
-    const totals = aggregateByActor(logs, source);
+    // `null` floors — a diagnostic asking what is on chain, not what is creditable.
+    const totals = aggregateByActor(logs, source, null);
     if (totals.size === 0) console.log("  observed: nothing — panel refuses, no payout");
     for (const [addr, t] of totals) {
       const credited = (await client.readContract({

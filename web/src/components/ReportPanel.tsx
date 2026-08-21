@@ -116,7 +116,6 @@ export function ReportPanel({
     campaign: detail.address,
     kpiIndex,
     params: kpi?.spec.params,
-    verifier: kpi?.spec.verifier,
     referrals: liveReferrals,
     enabled: isProject,
   });

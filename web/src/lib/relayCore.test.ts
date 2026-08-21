@@ -126,9 +126,16 @@ describe("resolveScanRange", () => {
     });
   });
 
-  it("resumes one past the checkpoint rather than rescanning it", () => {
+  /**
+   * Deliberately NOT `checkpoint + 1`. Totals are absolute rather than incremental, so every run
+   * rescans the whole window and recomputes the same figure — which is what makes a re-push
+   * idempotent and lets two racing instances converge instead of double-counting. The checkpoint
+   * decides *whether* there is anything to do, never *where* to start. See the note on
+   * `resolveScanRange`; this test asserted the incremental behaviour the refactor removed.
+   */
+  it("rescans from the window start even when the checkpoint is well past it", () => {
     const r = resolveScanRange({...base, checkpoint: BigInt(300)});
-    expect(r).toMatchObject({scan: true, fromBlock: BigInt(301)});
+    expect(r).toMatchObject({scan: true, fromBlock: BigInt(100)});
   });
 
   /** Activity before tracking began is out of scope, and scanning it is pure RPC spend. */
