@@ -21,8 +21,11 @@ export const wagmiConfig = createConfig({
   connectors: [injected()],
   transports: {
     [anvil.id]: http(process.env.NEXT_PUBLIC_ANVIL_RPC ?? "http://127.0.0.1:8545"),
-    // Base's public endpoint is rate-limited; set the env var to a provider URL for real use.
-    [baseSepolia.id]: http(process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://sepolia.base.org"),
+    // Base's own public endpoint is rate-limited *and* 502s roughly one call in three, so the
+    // fallback is publicnode rather than sepolia.base.org. Set the env var for a provider URL.
+    [baseSepolia.id]: http(
+      process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com",
+    ),
     [sepolia.id]: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC),
     [mainnet.id]: http(process.env.NEXT_PUBLIC_MAINNET_RPC),
   },

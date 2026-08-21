@@ -3,7 +3,9 @@ import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from 
 import {EVENT_PRESETS, WETH_BASE} from "../src/lib/kpiSource";
 import {aggregateByActor, type IndexedLog} from "../src/lib/indexerCore";
 
-const client = createPublicClient({transport: http("https://sepolia.base.org")}) as PublicClient;
+const client = createPublicClient({
+  transport: http("https://base-sepolia-rpc.publicnode.com"),
+}) as PublicClient;
 const deposit = EVENT_PRESETS[0].source; // WETH Deposit, actorTopic 1, dataWord0, scale 1e15
 
 async function main() {

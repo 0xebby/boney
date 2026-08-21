@@ -30,7 +30,7 @@ import {privateKeyToAccount} from "viem/accounts";
 import {baseSepolia} from "viem/chains";
 import {mkdirSync, readFileSync} from "node:fs";
 
-const RPC = process.env.BASE_SEPOLIA_RPC ?? "https://sepolia.base.org";
+const RPC = process.env.BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com";
 const WETH = "0x4200000000000000000000000000000000000006";
 const ZERO = "0x0000000000000000000000000000000000000000";
 

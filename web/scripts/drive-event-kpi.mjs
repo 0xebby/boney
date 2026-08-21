@@ -43,7 +43,7 @@ import {mkdirSync, readFileSync} from "node:fs";
 
 const campaignId = process.argv[2] ?? "5";
 const step = process.argv[3] ?? "touch";
-const RPC = process.env.BASE_SEPOLIA_RPC ?? "https://sepolia.base.org";
+const RPC = process.env.BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com";
 const WETH = "0x4200000000000000000000000000000000000006";
 
 /** 0.003 ETH — three units of progress at the campaign's 0.001 scale, clearing tier 1. */

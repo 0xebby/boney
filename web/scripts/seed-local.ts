@@ -12,9 +12,9 @@
  * Defaults to a local anvil, which must already be running — starting it is deliberately left to
  * you, because a script that spawns a chain it does not own tends to orphan it.
  *
- * Against any other chain (`--rpc https://sepolia.base.org`), `PRIVATE_KEY` from the repo-root
- * `.env` becomes the deployer, attestor, and campaign owner. The chain id is read from the node
- * rather than passed as a flag, so the receipt read back is always the one just written.
+ * Against any other chain (`--rpc https://base-sepolia-rpc.publicnode.com`), `PRIVATE_KEY` from the
+ * repo-root `.env` becomes the deployer, attestor, and campaign owner. The chain id is read from the
+ * node rather than passed as a flag, so the receipt read back is always the one just written.
  */
 import {execFileSync} from "node:child_process";
 import {readFileSync, existsSync} from "node:fs";

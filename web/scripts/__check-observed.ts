@@ -10,7 +10,7 @@ import {decodeEventSource, knownSignature} from "../src/lib/kpiSource";
 import {aggregateByActor, type IndexedLog} from "../src/lib/indexerCore";
 import {planWindows} from "../src/lib/promoters";
 
-const RPC = "https://sepolia.base.org";
+const RPC = "https://base-sepolia-rpc.publicnode.com";
 const REGISTRY = "0x92a86e0Ce5f32328CE7bB208431B4904Ef7760D5" as const;
 const START_BLOCK = 45295535n;
 const campaign = process.argv[2] as `0x${string}`;
