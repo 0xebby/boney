@@ -50,6 +50,8 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
     /// @notice Boney's canonical verifier. Always consulted; never optional.
     address public immutable boneyVerifier;
 
+    uint16 constant MAX_TOLERANCE = 10_000;
+
     /// @notice `keccak256(campaign, kpiIndex)` => how that KPI is guarded.
     mapping(bytes32 => GuardConfig) public guardConfigs;
 
@@ -75,7 +77,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
         Mode mode
     ) external onlyOwner {
         if (campaign == address(0)) revert ZeroAddress();
-        if (toleranceBps > 10_000) revert BpsOutOfRange(toleranceBps);
+        if (toleranceBps > MAX_TOLERANCE) revert BpsOutOfRange(toleranceBps);
 
         guardConfigs[_key(campaign, kpiIndex)] = GuardConfig({
             projectVerifier: projectVerifier,
@@ -115,7 +117,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
 
         uint256 diff = boneyValue > projectValue ? boneyValue - projectValue : projectValue - boneyValue;
         uint256 base = boneyValue > projectValue ? boneyValue : projectValue;
-        uint256 allowed = (base * cfg.toleranceBps) / 10_000;
+        uint256 allowed = (base * cfg.toleranceBps) / MAX_TOLERANCE;
         if (diff > allowed) revert VerifierDisagreement(projectValue, boneyValue, diff, allowed);
 
         // Agreement confirmed. Boney's value stays canonical, so the credited number comes from the
