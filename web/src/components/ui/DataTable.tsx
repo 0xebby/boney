@@ -19,7 +19,15 @@ export type Column<T> = SortableColumn<T> & {
   /** Right-align numeric columns so digits line up. */
   numeric?: boolean;
   render: (row: T) => ReactNode;
-  /** Hide below the `md` breakpoint to keep small screens readable. */
+  /**
+   * Drop this column below `md`.
+   *
+   * The container scrolls horizontally, so an unflagged column is not lost — it is just behind a
+   * gesture nothing advertises, which in practice means unread. The working rule across the app is
+   * roughly **three columns on a phone**: the one that identifies the row, plus the two that carry
+   * whatever decision the table exists to support. Everything else is flagged, and remains one tap
+   * away on the row's own page.
+   */
   hideOnMobile?: boolean;
   width?: string;
   /** Screen-reader-only header text, when the visible header is an icon or blank. */

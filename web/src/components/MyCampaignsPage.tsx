@@ -192,6 +192,9 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
     {
       key: "project",
       header: "Project",
+      // On this page every row is the connected wallet's own campaign, so the project column repeats
+      // one value down the table. First to go on a phone.
+      hideOnMobile: true,
       sortValue: (c) => projectName(c),
       render: (c) =>
         hasProjectName(c) ? (
@@ -233,6 +236,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
       key: "utilization",
       header: "Progress",
       sortValue: (c) => utilization(c),
+      hideOnMobile: true,
       width: "140px",
       render: (c) => (
         <Meter
@@ -254,6 +258,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
       key: "ends",
       header: "Ends",
       numeric: true,
+      hideOnMobile: true,
       sortValue: (c) => c.endTime,
       render: (c) => {
         if (now === 0) return <span className="text-ink-muted">—</span>;
