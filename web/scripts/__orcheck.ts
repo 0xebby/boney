@@ -1,6 +1,8 @@
 import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from "viem";
 import {EVENT_PRESETS, WETH_BASE} from "../src/lib/kpiSource";
-const client = createPublicClient({transport: http("https://sepolia.base.org")}) as PublicClient;
+const client = createPublicClient({
+  transport: http("https://base-sepolia-rpc.publicnode.com"),
+}) as PublicClient;
 const d = EVENT_PRESETS[0].source;
 const ACTIVE = "0x5f9215dff5c01671e6e77469389d694ac4af2e97";
 const IDLE = "0x98405c5776a63547e7cb16000ba04ca53d9fb2f8"; // dev wallet, a campaign 9 referral
