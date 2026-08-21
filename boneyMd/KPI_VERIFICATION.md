@@ -184,6 +184,12 @@ campaign.attributionRegistry() → registry.touchOf(campaign, user).signedAt
 
 A block whose timestamp could not be resolved is excluded rather than assumed to clear the floor.
 
+The relayer floors at the **current** touch, and that is right *for the relayer*: `nextTotals` adds
+this run's deltas onto the figure already stored on chain, so an earlier promoter's era is already
+banked in `verifiedTotals` and must not be recounted. A consumer that recomputes an **absolute** total
+from scratch needs the earliest touch instead — see below. The distinction is the additive-versus-
+absolute model, not a disagreement about the rule.
+
 ### The rule belongs to every reader, not just the relayer
 
 This was written as a property of the relayer, and for a long time that is all it was. Three other
@@ -207,13 +213,45 @@ with `verifier == address(0)` the campaign credits the reported number as-is, an
 between a wide scan and a wrong credit.
 
 The fix puts the rule in the shared fold rather than in each caller. `aggregateByActor` and
-`aggregateActions` both take a **required** `floors` argument — `max(signedAt, startTime)` per actor,
-keyed lowercase — and an actor missing from the map is dropped, matching `NoAttribution`. It is
+`aggregateActions` both take a **required** `floors` argument — `max(firstSignedAt, startTime)` per
+actor, keyed lowercase — and an actor missing from the map is dropped, matching `NoAttribution`. It is
 required rather than optional so that opting out is a visible decision at the call site instead of an
 omission; `null` means "diagnostics, attribution is not the question" and is used only by the
 `scripts/__check-*` scratch tools.
 
-Two consequences worth naming:
+### The floor is the referral's *first* touch, not its current one
+
+This is the subtle part, and getting it wrong is a silent money bug in the other direction.
+
+`Campaign` credits `newTotal - _userCredited[user][kpiIndex]` (`Campaign.sol:331`), and that replay
+guard is **keyed by user alone** — one cumulative ledger spanning every promoter the referral ever
+had. A reported total must therefore be cumulative over the referral's whole *attributed* history, or
+the subtraction compares two different windows.
+
+Floor at the current `signedAt` and a referral who switches promoters becomes permanently
+uncreditable. Observed on campaign 2 of the 08-21 fixture, with `0x98bEf229` moving from promoter A
+to B after A had banked 3:
+
+| floor | B's recomputed total | `already` | credited to B |
+| --- | --- | --- | --- |
+| current `signedAt` | 3 (B's era only) | 3 | **0, forever** |
+| earliest `signedAt` | 6 (both eras) | 3 | **3** — B's own era |
+
+A keeps its 3, B gets its 3, and the six actions are credited once between them. Activity from before
+the referral was *ever* attributed is still excluded, which is the whole point of §8 — it is only the
+per-promoter slicing that was wrong.
+
+`touchOf` returns only the live touch, so the earliest comes from the `TouchStored` history:
+`earliestSignedAt` in `lib/reporting.ts`, fed by the indexer's own log scan and, in the browser, by
+`useCampaignTouches` — which already scans that history for the KOL rows and now derives both from one
+pass. `signedAt` is strictly increasing per referral (`AttributionRegistry.sol:122` reverts
+`TouchNotNewer`), so the minimum really is the first touch ever stored.
+
+The tempting alternative — giving each promoter its own replay ledger — is wrong. It removes the only
+thing stopping B from re-reporting the same actions A was already paid for, out of one shared
+`rewardPool`, and no off-chain honesty can restore a guard the contract no longer has.
+
+Two further consequences worth naming:
 
 - `useObservedActions` now resolves block timestamps for **every** KPI, not just verifier-gated ones.
   It previously skipped them when nothing would read the evidence, which is no longer true — the
