@@ -159,10 +159,23 @@ export type ScanRange =
 /**
  * The block range this run should cover, or why there is nothing to do.
  *
- * Three bounds, and each one matters:
+ * **Every run rescans the whole window.** `fromBlock` is always `windowStartBlock`, never
+ * `checkpoint + 1`, because the totals this run reports are *absolute* rather than incremental (see
+ * `nextTotals`). That is what makes a re-push idempotent, and idempotence is what makes both of the
+ * relayer's retry stories true: a run that dies between batches can simply be repeated, and two
+ * instances racing each other converge instead of double-counting. An incremental scan cannot offer
+ * either, because neither the chain nor a second instance can tell whether a given range has already
+ * been folded into the stored figure.
  *
- *  - **Resume from the on-chain checkpoint**, not from a local cursor. That is what lets any relayer
- *    instance on any machine pick up where the last one stopped.
+ * The checkpoint therefore no longer decides *where* to start. It decides only whether there is
+ * anything new to do at all, which is the common case on a loop — Base's 2s blocks mean most cycles
+ * find nothing.
+ *
+ * The cost is real and worth naming: RPC spend grows with campaign age rather than staying flat per
+ * run, roughly one `eth_getLogs` chunk per 2,000 blocks of window on every cycle.
+ *
+ * Two bounds still matter:
+ *
  *  - **Never scan before `windowStartBlock`.** Activity before a campaign began tracking is out of
  *    scope, and scanning it is pure RPC spend.
  *  - **Never scan past `windowEndBlock`.** `reportBatch` and `advanceCheckpoint` both reject a
@@ -190,17 +203,23 @@ export function resolveScanRange(input: {
     };
   }
 
-  const resumeFrom = checkpoint > BigInt(0) ? checkpoint + BigInt(1) : windowStartBlock;
-  const fromBlock = resumeFrom > windowStartBlock ? resumeFrom : windowStartBlock;
-
   const safeHead = head > confirmations ? head - confirmations : BigInt(0);
   const toBlock = safeHead < windowEndBlock ? safeHead : windowEndBlock;
 
-  if (fromBlock > toBlock) {
-    return {scan: false, reason: `nothing new to scan yet (next block would be ${fromBlock})`};
+  if (windowStartBlock > toBlock) {
+    return {scan: false, reason: `nothing new to scan yet (next block would be ${windowStartBlock})`};
   }
 
-  return {scan: true, fromBlock, toBlock};
+  // Nothing has been confirmed past the checkpoint, so a rescan would recompute the identical
+  // totals. Skipped to save the RPC, not for correctness — repeating it would be harmless.
+  if (toBlock <= checkpoint) {
+    return {
+      scan: false,
+      reason: `nothing new to scan yet (confirmed head ${toBlock} is not past checkpoint ${checkpoint})`,
+    };
+  }
+
+  return {scan: true, fromBlock: windowStartBlock, toBlock};
 }
 
 // ── decoding ─────────────────────────────────────────────────────
