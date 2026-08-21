@@ -54,6 +54,41 @@ export function latestTouches(entries: readonly TouchEntry[]): TouchEntry[] {
   return [...byReferral.values()];
 }
 
+/**
+ * Each referral's *earliest* touch time on this campaign, keyed lowercase.
+ *
+ * The counterpart to `latestTouches`, and the floor every observed total is measured from. The two
+ * answer different questions: the latest touch says **who** gets credited, the earliest says **from
+ * when** activity counts.
+ *
+ * It has to be the earliest, not the current `signedAt`, because `Campaign` credits
+ * `newTotal - _userCredited[user][kpi]` (`Campaign.sol:331`) and that guard is keyed by user alone —
+ * one cumulative ledger spanning every promoter the referral ever had. So a reported total must be
+ * cumulative over the referral's whole attributed history, or the subtraction is measuring two
+ * different windows against each other.
+ *
+ * Concretely, with a referral who moved from promoter A to B after A had been credited 3:
+ *
+ *   floor = current signedAt -> B recomputes 3, already is 3, B is credited nothing, ever
+ *   floor = earliest signedAt -> B reports 6, is credited 6 - 3 = 3, which is B's own era
+ *
+ * Activity from before the referral was *ever* attributed still cannot count — that is what the
+ * floor excludes, and it is the rule `boneyMd/KPI_VERIFICATION.md` §8 exists for. `signedAt` is
+ * strictly increasing per referral (`AttributionRegistry.sol:122` reverts `TouchNotNewer`), so the
+ * minimum here is the first touch that was ever stored, not merely the oldest log still readable.
+ */
+export function earliestSignedAt(entries: readonly TouchEntry[]): Map<string, bigint> {
+  const out = new Map<string, bigint>();
+
+  for (const entry of entries) {
+    const key = entry.referral.toLowerCase();
+    const seen = out.get(key);
+    if (seen === undefined || entry.signedAt < seen) out.set(key, entry.signedAt);
+  }
+
+  return out;
+}
+
 /** A referral row with its live/expired classification resolved. */
 export type ReferralTarget = TouchEntry & {status: TouchStatus};
 
