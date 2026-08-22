@@ -5,7 +5,8 @@ import {Meter} from "@/components/ui/Meter";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {nextTier, tierProgressRatio, crossedTierCount} from "@/lib/campaign";
 import {formatTokenAmount, compactNumber, formatRatio, shortAddress} from "@/lib/format";
-import {decodeEventSource, knownSignature, effectiveScale} from "@/lib/kpiSource";
+import {shortTopic} from "@/lib/eventNames";
+import {useTrackedEvent} from "@/hooks/useTrackedEvent";
 import {explorerAddressUrl} from "@/lib/chains";
 import {KPI_KIND_LABEL, type RewardTier} from "@/lib/types";
 import type {KpiDetail, PromoterKpiState} from "@/lib/campaignDetail";
@@ -22,12 +23,18 @@ type LadderRow = RewardTier & {index: number; crossed: boolean; settled: boolean
 
 export function KpiPanel({
   kpi,
+  campaign,
+  campaignName,
   decimals,
   symbol,
   promoterState,
   chainId,
 }: {
   kpi: KpiDetail;
+  /** The campaign this KPI belongs to — half the key its verifier config is stored under. */
+  campaign: `0x${string}`;
+  /** The campaign's display name, used to label the watched contract when nothing else can. */
+  campaignName?: string;
   decimals: number;
   symbol: string;
   /** Present only when the connected wallet has joined this campaign. */
@@ -130,7 +137,12 @@ export function KpiPanel({
         )}
       </div>
 
-      <EventSourceLine params={kpi.spec.params} chainId={chainId} />
+      <EventSourceLine
+        campaign={campaign}
+        kpi={kpi}
+        campaignName={campaignName}
+        chainId={chainId}
+      />
 
       <div className="-mx-4 -mb-4 border-t border-hairline">
         <DataTable rows={rows} columns={columns} rowKey={(r) => String(r.index)} />
@@ -146,30 +158,74 @@ export function KpiPanel({
  * every KPI a project reports by hand, so absence is ordinary rather than a missing-data state.
  * When a source *is* declared, naming it matters: it is the difference between "trust the project's
  * numbers" and "these came from this contract's logs, go check".
+ *
+ * Naming it in words is what `useTrackedEvent` adds. This line used to render the raw topic hash
+ * for anything outside the two `EVENT_PRESETS`, which meant both live real-protocol campaigns read
+ * as `0x2b627736… on 0x8bAB…AE27` — technically complete and unreadable. The event name now comes
+ * from the verifier's own on-chain config where there is one, and the contract from a verified
+ * address catalog or the contract's own `name()`/`symbol()`.
  */
 function EventSourceLine({
-  params,
+  campaign,
+  kpi,
+  campaignName,
   chainId,
 }: {
-  params: `0x${string}`;
+  campaign: `0x${string}`;
+  kpi: KpiDetail;
+  /** The campaign's display name — the last-resort label for the watched contract. */
+  campaignName?: string;
   chainId?: number;
 }) {
-  const source = decodeEventSource(params);
-  if (!source) return null;
+  const {tracked, isLoading} = useTrackedEvent({
+    campaign,
+    kpiIndex: kpi.index,
+    kind: kpi.spec.kind,
+    verifier: kpi.spec.verifier,
+    params: kpi.spec.params,
+    campaignName,
+  });
 
-  const signature = knownSignature(source.topic0);
-  const scale = effectiveScale(source);
+  if (!tracked) return null;
+
   // Undefined on anvil, which has no explorer — the address then renders as plain text.
-  const href = chainId === undefined ? undefined : explorerAddressUrl(chainId, source.source);
+  const href = chainId === undefined ? undefined : explorerAddressUrl(chainId, tracked.contract);
+  const address = shortAddress(tracked.contract);
 
   return (
-    <div className="mb-4 rounded border border-hairline bg-surface-2 px-3 py-2">
+    <div
+      className={`mb-4 rounded border border-hairline bg-surface-2 px-3 py-2 transition-opacity ${
+        isLoading ? "opacity-70" : ""
+      }`}
+    >
       <p className="text-[10px] uppercase tracking-wide text-ink-muted">Tracking</p>
-      <p className="mt-0.5 font-mono text-xs text-ink">
-        {signature ?? `${source.topic0.slice(0, 10)}…`}
+
+      <p
+        className={`mt-0.5 break-all text-xs text-ink ${
+          tracked.eventFrom === "kind" ? "" : "font-mono"
+        }`}
+      >
+        {tracked.event}
+        {/*
+          Nothing on chain publishes a name for this topic, so the label above is the KPI's category
+          rather than its event. Showing the topic keeps the line checkable instead of asking a
+          reader to take the category on faith.
+        */}
+        {tracked.eventFrom === "kind" ? (
+          <span
+            className="ml-1.5 font-mono text-ink-muted"
+            title="No event signature is published on chain for this topic — this is the KPI's category."
+          >
+            {shortTopic(tracked.topic0)}
+          </span>
+        ) : null}
       </p>
+
       <p className="mt-0.5 text-xs text-ink-muted">
         on{" "}
+        {/* When the protocol name *is* the short address, printing it twice says nothing twice. */}
+        {tracked.protocolFrom !== "address" ? <span className="text-ink-secondary">{tracked.protocol}</span> : null}
+        {tracked.protocolFrom !== "address" ? " · " : null}
         {href ? (
           <a
             href={href}
@@ -177,13 +233,16 @@ function EventSourceLine({
             rel="noreferrer"
             className="font-mono underline hover:text-ink"
           >
-            {shortAddress(source.source)}
+            {address}
           </a>
         ) : (
-          <span className="font-mono">{shortAddress(source.source)}</span>
+          <span className="font-mono">{address}</span>
         )}
-        {scale > BigInt(1) ? ` · ${scale.toLocaleString("en-US")} per unit` : null}
+        {tracked.scale > BigInt(1) ? ` · ${tracked.scale.toLocaleString("en-US")} per unit` : null}
       </p>
+
+      {/* The verifier and the params blob name different events — see `TrackedEvent.drift`. */}
+      {tracked.drift ? <p className="mt-1.5 text-xs text-warning">{tracked.drift}</p> : null}
     </div>
   );
 }

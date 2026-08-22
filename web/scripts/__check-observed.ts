@@ -6,7 +6,8 @@
  */
 import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
-import {decodeEventSource, knownSignature} from "../src/lib/kpiSource";
+import {decodeEventSource} from "../src/lib/kpiSource";
+import {catalogSignature} from "../src/lib/eventNames";
 import {aggregateByActor, type IndexedLog} from "../src/lib/indexerCore";
 import {planWindows} from "../src/lib/promoters";
 
@@ -69,7 +70,7 @@ async function main() {
     })) as {params: Hex; aggregate: boolean};
 
     const source = decodeEventSource(spec.params);
-    console.log(`\nkpi ${i}: ${source ? knownSignature(source.topic0) ?? source.topic0 : "no source"}`);
+    console.log(`\nkpi ${i}: ${source ? catalogSignature(source.topic0) ?? source.topic0 : "no source"}`);
     if (!source) continue;
 
     const topics: (Hex | Hex[] | null)[] = [source.topic0];

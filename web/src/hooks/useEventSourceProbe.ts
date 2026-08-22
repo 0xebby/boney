@@ -38,7 +38,9 @@ export function useEventSourceProbe(input: ProbeInput) {
     staleTime: PROBE_DEBOUNCE_MS,
     queryFn: async (): Promise<ProbeFinding[]> => {
       if (!client) return [];
-      return probeEventSource(client as PublicClient, input);
+      // The chain id is what lets the probe name a known contract — an address means nothing without
+      // the chain it was deployed on. Already in the query key, so a network switch re-probes.
+      return probeEventSource(client as PublicClient, input, {chainId});
     },
   });
 

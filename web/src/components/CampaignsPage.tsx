@@ -3,6 +3,7 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
+import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
 import {denominations, type TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
@@ -21,9 +22,10 @@ import {
   type StatusFilter,
 } from "@/lib/filters";
 import {utilization} from "@/lib/campaign";
+import {summarizeKinds} from "@/lib/kpiSummary";
 import { projectName, hasProjectName } from "@/lib/projects";
 import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
-import type {CampaignView} from "@/lib/types";
+import type {CampaignView, KpiSpec} from "@/lib/types";
 
 /**
  * Filter order, most-asked-for first: a visitor scanning the marketplace wants what is running
@@ -43,9 +45,19 @@ const STATUS_OPTIONS = [
 ] as const satisfies readonly StatusFilter[];
 
 export function CampaignsPage() {
-  const {campaigns, tokens, isLoading, isRefreshing, error, refetch, deployed} = useCampaigns();
+  const {campaigns, tokens, isLoading, isRefreshing, error, refetch, deployed, chainId} =
+    useCampaigns();
   const {reputation} = useReputation();
   const [filters, setFilters] = useState<CampaignFilters>(EMPTY_FILTERS);
+
+  /*
+    What each campaign measures, for the KPI column.
+
+    One read per KPI across the page, fetched once and never polled — see `useCampaignKpiSpecs` for
+    why a `KpiSpec` cannot change under a reader. Keyed on the campaign set rather than the list
+    object, so `useCampaigns`' 30s poll does not drag this along with it.
+  */
+  const {specs: kpiSpecs, dropped: kpiSpecsDropped} = useCampaignKpiSpecs(campaigns);
 
   /*
     Which of these the connected wallet has already joined.
@@ -89,8 +101,8 @@ export function CampaignsPage() {
   const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
   const columns = useMemo(
-    () => buildColumns(tokens, now, joinedAddresses),
-    [tokens, now, joinedAddresses],
+    () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, chainId),
+    [tokens, now, joinedAddresses, kpiSpecs, chainId],
   );
 
   if (!deployed) {
@@ -231,6 +243,15 @@ export function CampaignsPage() {
             {visible.length} of {campaigns.length}
           </span>
         ) : null}
+
+        {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a column
+            that quietly stopped describing the tail of the list would read as "no KPIs here". */}
+        {kpiSpecsDropped > 0 ? (
+          <span className="text-xs text-ink-muted">
+            KPI kinds not loaded for {kpiSpecsDropped} campaign
+            {kpiSpecsDropped === 1 ? "" : "s"}
+          </span>
+        ) : null}
       </div>
 
       <Card padded={false}>
@@ -276,9 +297,29 @@ function buildColumns(
   tokens: Record<string, TokenMeta>,
   now: number,
   joinedAddresses: ReadonlySet<string>,
+  kpiSpecs: Record<string, KpiSpec[]>,
+  chainId?: number,
 ): Column<CampaignView>[] {
   const meta = (c: CampaignView) => tokens[c.token.toLowerCase()] ?? {symbol: "", decimals: 18};
   const hasJoined = (c: CampaignView) => joinedAddresses.has(c.campaign.toLowerCase());
+
+  /*
+    What this campaign measures, in words. Reads no chain state of its own: the kind comes from the
+    specs the hook fetched once, and the hover text names the watched contract from the local catalog
+    or — where a campaign watches the token it escrows, as most seeded ones do — the token metadata
+    already loaded for the reward-pool column.
+  */
+  const kindSummary = (c: CampaignView) => {
+    const specs = kpiSpecs[c.campaign.toLowerCase()];
+    if (!specs) return null;
+
+    return summarizeKinds(specs, {
+      chainId,
+      escrowToken: c.token.toLowerCase(),
+      tokenSymbol: meta(c).symbol || undefined,
+      campaignName: c.name,
+    });
+  };
 
   return [
     {
@@ -363,10 +404,28 @@ function buildColumns(
     {
       key: "kpis",
       header: "KPIs",
-      numeric: true,
       hideOnMobile: true,
-      sortValue: (c) => c.kpiCount,
-      render: (c) => c.kpiCount.toString(),
+      // Sorts on the label, so the column orders the way it reads. Rows whose specs have not landed
+      // (or were left out by the read budget) sort together under the empty string.
+      sortValue: (c) => kindSummary(c)?.sortValue ?? "",
+      render: (c) => {
+        const summary = kindSummary(c);
+
+        // No specs yet: the count is what this column showed before, and it is never wrong — just
+        // less useful than the kind. Better than an empty cell that reads as "no KPIs".
+        if (!summary) {
+          return <span className="text-ink-muted">{c.kpiCount.toString()}</span>;
+        }
+
+        return (
+          <span title={summary.title} className="text-ink-secondary">
+            {summary.label}
+            {summary.extra > 0 ? (
+              <span className="ml-1 text-ink-muted">+{summary.extra}</span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       key: "minRep",
