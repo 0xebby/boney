@@ -127,12 +127,39 @@ export function parseCount(value: string): bigint | null {
   }
 }
 
+/**
+ * Whether a ceiling is a number worth comparing against.
+ *
+ * `ReputationRegistry.maxScore` returns `type(uint256).max` when a weighted schema carries no value
+ * cap — an unbounded score, not an astronomically large one. Comparing a gate against it would pass
+ * everything, which is correct, but saying "no wallet can score above 1.15e77" on the way there would
+ * not be. Anything past a real BoneyScore's range is treated as unbounded rather than testing for the
+ * exact sentinel, since a second uncapped schema saturates to the same meaning at a different value.
+ *
+ * Exported so the form's hint and this check agree on what "unbounded" means.
+ */
+export function isBoundedScoreCeiling(ceiling: bigint): boolean {
+  return ceiling <= BigInt(Number.MAX_SAFE_INTEGER);
+}
+
 export function validateCampaignDraft(
   draft: CampaignDraft,
-  opts: {tokenDecimals: number; nowSeconds: number; nameTaken?: boolean},
+  opts: {
+    tokenDecimals: number;
+    nowSeconds: number;
+    nameTaken?: boolean;
+    /**
+     * `ReputationRegistry.maxScore()`, read by the caller.
+     *
+     * Omit it and the check falls back to `MAX_BONEY_SCORE`, which is the same arithmetic against the
+     * seeded schema configuration. Pass it and the form checks the gate against the ceiling the
+     * constructor will actually compare it to. See the note at the eligibility check.
+     */
+    scoreCeiling?: bigint;
+  },
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const {tokenDecimals, nowSeconds, nameTaken} = opts;
+  const {tokenDecimals, nowSeconds, nameTaken, scoreCeiling} = opts;
 
   // ── name ──────────────────────────────────────────────────────
   // Solidity: EmptyName, NameTooLong, InvalidNameChar (Names.validate), NameTaken (the registry).
@@ -198,13 +225,16 @@ export function validateCampaignDraft(
   // constructor now rejects this outright, which is what protects campaigns created by a script or
   // a direct contract call; this check exists so the form catches it before the user pays gas.
   //
-  // The ceiling is a property of the registered schemas rather than a constant of the protocol:
-  // the contract derives it from live schema weights and per-schema value caps
-  // (`ReputationRegistry.maxScore`), and `MAX_BONEY_SCORE` here is the same arithmetic against the
-  // seeded configuration — ETHOS_WEIGHT * 2800 + REACH_WEIGHT * 2800. The two agree today (asserted
-  // on chain in Campaign.t.sol), but governance can re-weight or add a schema without redeploying
-  // the frontend, so treat the contract as authoritative and this as a fast local approximation.
-  // If they ever disagree, the constructor is the one that decides.
+  // The ceiling is a property of the registered schemas rather than a constant of the protocol: the
+  // contract derives it from live schema weights and per-schema value caps
+  // (`ReputationRegistry.maxScore`). `opts.scoreCeiling` is that number, read by the caller
+  // (`useScoreCeiling`); `MAX_BONEY_SCORE` is the same arithmetic against the *seeded* configuration
+  // and is the fallback when the read is unavailable.
+  //
+  // Preferring the live value is not a refinement, it is the whole point. A registry with no schemas
+  // registered reports a ceiling of 0 — `DeployBoney` registers none, and a redeploy that skips
+  // `SeedDevRep` leaves it that way — so the local constant said 28,000, the chain said 0, and the
+  // disagreement surfaced as `UnreachableReputation(15000, 0)` after the gas was spent.
   const minReputationRaw = draft.minReputation.trim();
   if (minReputationRaw) {
     const minReputation = parseCount(minReputationRaw);
@@ -212,13 +242,28 @@ export function validateCampaignDraft(
       // Otherwise this surfaces much later as a DraftEncodingError from `campaignArgs`, which is
       // thrown at submit time and not attached to any field.
       issues.push({path: "minReputation", message: "Enter a whole number."});
-    } else if (minReputation > BigInt(MAX_BONEY_SCORE)) {
-      issues.push({
-        path: "minReputation",
-        message:
-          `No wallet can score above ${MAX_BONEY_SCORE.toLocaleString()}, so nobody could ever join ` +
-          `this campaign. BoneyScore is 7 × Ethos + 3 × reach, and both inputs cap at 2,800.`,
-      });
+    } else {
+      const ceiling = scoreCeiling ?? BigInt(MAX_BONEY_SCORE);
+
+      if (ceiling === BigInt(0) && minReputation > BigInt(0)) {
+        // Not "your number is too high" — no number above zero is possible here, so the advice has to
+        // name the actual fix rather than send someone hunting for a value that works.
+        issues.push({
+          path: "minReputation",
+          message:
+            "No wallet can hold any BoneyScore on this network yet: the reputation registry has no " +
+            "weighted schemas, so every gate above 0 locks everyone out. Leave this empty until the " +
+            "schemas are registered (script/SeedDevRep.s.sol).",
+        });
+      } else if (isBoundedScoreCeiling(ceiling) && minReputation > ceiling) {
+        issues.push({
+          path: "minReputation",
+          message:
+            `No wallet can score above ${ceiling.toLocaleString("en-US")} on this network, so nobody ` +
+            `could ever join this campaign. BoneyScore is 7 × Ethos + 3 × reach, and both inputs cap ` +
+            `at 2,800.`,
+        });
+      }
     }
   }
 

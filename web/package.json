@@ -22,6 +22,7 @@
     "seed": "tsx scripts/seed-local.ts",
     "index": "tsx scripts/indexer.ts",
     "relay": "tsx scripts/relay-kpi-metric.ts",
+    "sygma:deposit": "tsx scripts/sygma-deposit.ts",
     "report-window": "tsx scripts/compute-report-window.ts"
   },
   "dependencies": {

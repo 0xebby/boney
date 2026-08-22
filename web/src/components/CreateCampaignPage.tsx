@@ -8,9 +8,10 @@ import {ErrorState} from "@/components/ui/States";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
 import {useNameAvailability} from "@/hooks/useNameAvailability";
+import {useScoreCeiling} from "@/hooks/useScoreCeiling";
 import {useNow} from "@/hooks/useNow";
 import {useEventSourceProbe} from "@/hooks/useEventSourceProbe";
-import {validateCampaignDraft, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
+import {validateCampaignDraft, isBoundedScoreCeiling, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
 import {KPI_KIND, MAX_CAMPAIGN_NAME_LENGTH, type KpiKind} from "@/lib/types";
 import {MAX_BONEY_SCORE} from "@/lib/boneyscore";
 import {AMOUNT_MODE, EVENT_PRESETS} from "@/lib/kpiSource";
@@ -43,6 +44,10 @@ export function CreateCampaignPage() {
   // is the one that decides.
   const nameCheck = useNameAvailability(draft.name);
 
+  // The gate ceiling the constructor will actually compare `minReputation` against. Read rather than
+  // assumed: an unseeded registry reports 0, which makes every gate unreachable — see the hook.
+  const scoreCeiling = useScoreCeiling();
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -59,6 +64,7 @@ export function CreateCampaignPage() {
         tokenDecimals,
         nowSeconds,
         nameTaken: nameCheck.isTaken,
+        scoreCeiling: scoreCeiling.ceiling,
       });
       setIssues(found);
 
@@ -66,7 +72,7 @@ export function CreateCampaignPage() {
 
       await create(draft, tokenDecimals);
     },
-    [draft, tokenDecimals, create, nameCheck.isTaken],
+    [draft, tokenDecimals, create, nameCheck.isTaken, scoreCeiling.ceiling],
   );
 
   const updateField = <K extends keyof CampaignDraft>(key: K, value: CampaignDraft[K]) => {
@@ -280,9 +286,10 @@ export function CreateCampaignPage() {
           error={issueFor("minReputation")}
         />
         <p className="mt-1.5 text-xs text-ink-muted">
-          BoneyScore ranges from <b>0–{MAX_BONEY_SCORE.toLocaleString()}</b>. 
+          BoneyScore ranges from <b>0–{MAX_BONEY_SCORE.toLocaleString()}</b>.
            Campaign settings [including this score cap] are <b>immutable</b> once created.
         </p>
+        <CeilingNote ceiling={scoreCeiling.ceiling} />
       </Card>
 
       <Card>
@@ -436,6 +443,53 @@ export function CreateCampaignPage() {
         ) : null}
       </div>
     </form>
+  );
+}
+
+/**
+ * What this network's registry says the gate ceiling actually is.
+ *
+ * The line above quotes `MAX_BONEY_SCORE`, which is the arithmetic for the *seeded* schema
+ * configuration. `Campaign`'s constructor compares against `ReputationRegistry.maxScore()` instead,
+ * and the two part company on a registry that was deployed but never seeded: no weighted schemas means
+ * a ceiling of 0, every wallet scoring 0, and `UnreachableReputation` on any gate at all. That is not
+ * hypothetical — it is what a redeploy without `SeedDevRep` leaves behind, and it read as a form
+ * cheerfully promising a 0–28,000 range while the chain accepted nothing.
+ *
+ * Renders nothing when the chain agrees with the constant, so the ordinary case stays quiet.
+ */
+function CeilingNote({ceiling}: {ceiling?: bigint}) {
+  // Loading, or the registry could not be read. The line above already states the fallback range, and
+  // the constructor remains the decider either way.
+  if (ceiling === undefined) return null;
+
+  if (ceiling === BigInt(0)) {
+    return (
+      <p className="mt-1.5 text-xs text-warning">
+        On this network no wallet can hold any BoneyScore yet — the reputation registry has no
+        weighted schemas, so a gate above 0 would lock out everyone, permanently. Leave this at 0
+        until the schemas are registered.
+      </p>
+    );
+  }
+
+  if (!isBoundedScoreCeiling(ceiling)) {
+    return (
+      <p className="mt-1.5 text-xs text-ink-muted">
+        This network reports no score ceiling — a weighted schema has no value cap — so any gate is
+        accepted.
+      </p>
+    );
+  }
+
+  if (ceiling === BigInt(MAX_BONEY_SCORE)) return null;
+
+  return (
+    <p className="mt-1.5 text-xs text-warning">
+      This network&rsquo;s registry caps scores at {ceiling.toLocaleString("en-US")}, not{" "}
+      {MAX_BONEY_SCORE.toLocaleString()} — its schema weights differ from the seeded ones. A gate
+      above that is rejected on creation.
+    </p>
   );
 }
 
@@ -631,11 +685,6 @@ function DateTimeField({
   error,
   /**
    * Chain time to compare against, for the "opens immediately / not until" note.
-   *
-   * Passed in rather than read from `Date.now()` here so the whole form judges the window against
-   * one instant, and so this stays a pure render — a clock read inside the component would differ
-   * between the server pass and the client pass and trip hydration.
-   *
    * `useNow` reports 0 until the clock is live, so 0 means "not ready" and suppresses the note
    * entirely. Treating it as a real timestamp would date every start to 1970 and mislabel an
    * already-open window as pending.
@@ -652,8 +701,7 @@ function DateTimeField({
   const describedBy = error ? `${id}-error` : `${id}-hint`;
 
   // A future start is legal but costs real testing time: the campaign funds, activates, reads as
-  // Active, and still rejects every report with `OutsideWindow` until it opens. Say so here rather
-  // than letting it be discovered from a revert.
+  // Active, and still rejects every report with `OutsideWindow` until it opens.
   const clockReady = nowSeconds !== undefined && nowSeconds > 0;
   const pending = clockReady && value > (nowSeconds as number);
   const delay = pending ? formatDuration(value - (nowSeconds as number)) : null;

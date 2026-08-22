@@ -349,7 +349,6 @@ async function main(): Promise<void> {
     users,
     totals,
     size: BATCH_SIZE,
-    currentCheckpoint: checkpoint,
     newCheckpoint: range.toBlock,
   });
 
