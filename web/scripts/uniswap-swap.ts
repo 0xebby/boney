@@ -15,11 +15,20 @@
  *
  * ## The two things that quietly produce an uncreditable swap
  *
- *  - **Swapping ETH instead of WETH.** SwapRouter02 will happily wrap ETH for you, but then the WETH
- *    `Transfer` into the pool comes `from` the *router*, not from you — so the volume KPI credits
- *    nobody. This script always swaps WETH you already hold, wrapping first if asked.
- *  - **Recipient is not the sender.** The count KPI credits `topics[2]`, the swap's `recipient`. Sending
- *    the output somewhere else moves the credit with it. `recipient` here is always the sender.
+ *  - **Recipient is not the sender.** Both KPIs credit `topics[2]` — the swap's `recipient` and the
+ *    USDC transfer's `to`. Sending the output somewhere else moves the credit with it, so `recipient`
+ *    here is always the sender.
+ *  - **No live attribution.** The events land and `reportUserAction` then reverts `NoAttribution` for
+ *    that wallet, so the pre-flight reads `touchOf` and says which promoter would be credited.
+ *
+ * ## What this script learned the hard way
+ *
+ * A swap through SwapRouter02 **need not move the swapper's WETH at all**. `PeripheryPayments.pay`
+ * checks `address(this).balance >= value` first, and this router holds stranded ETH on Base Sepolia, so
+ * it wraps its own and pays the pool from that — approval untouched, WETH balance unchanged. Tying a
+ * volume KPI to the user's WETH `Transfer` therefore credits nothing, which is why the campaign reads
+ * the USDC leg instead. The summary below reports what the receipt actually contains rather than what
+ * the swap was asked to do; the difference is the whole reason that bug survived a passing swap.
  */
 import {readFileSync, existsSync} from "node:fs";
 import {resolve, dirname} from "node:path";
@@ -177,8 +186,8 @@ async function main() {
   if (needsWrap && !wrap) {
     throw new Error(
       `Holds ${formatEther(weth)} WETH but needs ${formatEther(amount)}. Pass --wrap to deposit the ` +
-        `difference from ETH first — do NOT swap raw ETH, the router would then be the WETH sender and ` +
-        `the volume KPI would credit nobody.`,
+        `difference from ETH first. (The router may still pay the pool from its own stranded ETH and ` +
+        `leave your WETH untouched — the swap happens either way, and both KPIs read the output side.)`,
     );
   }
 
@@ -247,19 +256,34 @@ async function main() {
 
   const swapTopic = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67";
   const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-  const swaps = receipt.logs.filter(
-    (l) => l.address.toLowerCase() === POOL.toLowerCase() && l.topics[0] === swapTopic,
-  );
-  const wethOut = receipt.logs.filter(
-    (l) =>
-      l.address.toLowerCase() === WETH.toLowerCase() &&
-      l.topics[0] === transferTopic &&
-      l.topics[1]?.toLowerCase().endsWith(from.slice(2).toLowerCase()),
-  );
+  /** `topics` hold addresses left-padded to 32 bytes, so compare the low 20. */
+  const isWallet = (topic: string | undefined, wallet: `0x${string}`) =>
+    topic?.toLowerCase() === `0x${wallet.slice(2).toLowerCase().padStart(64, "0")}`;
 
+  const swaps = receipt.logs.filter(
+    (l) =>
+      l.address.toLowerCase() === POOL.toLowerCase() &&
+      l.topics[0] === swapTopic &&
+      isWallet(l.topics[2], from),
+  );
+  const usdcIn = receipt.logs.filter(
+    (l) =>
+      l.address.toLowerCase() === USDC.toLowerCase() &&
+      l.topics[0] === transferTopic &&
+      isWallet(l.topics[2], from),
+  );
+  const usdcCredited = usdcIn.reduce((sum, l) => sum + BigInt(l.data), BigInt(0));
+
+  // Read off the receipt, not assumed from the request. The first version of this script printed the
+  // amount it had asked to swap, which read as a credit even when the KPI's event never fired.
   console.log("");
-  console.log(`credits   ${swaps.length} pool Swap log(s) with this wallet as recipient: KPI 0 +${swaps.length}`);
-  console.log(`          ${wethOut.length} WETH Transfer log(s) from this wallet: KPI 1 +${formatEther(amount)} WETH`);
+  console.log(`credits   KPI 0  +${swaps.length}  (pool Swap logs with this wallet as recipient)`);
+  console.log(
+    `          KPI 1  +${formatUnits(usdcCredited, 6)} USDC  (USDC Transfer logs to this wallet)`,
+  );
+  if (swaps.length === 0 || usdcCredited === BigInt(0)) {
+    console.log("          ^ a zero here means that KPI credits nothing for this transaction.");
+  }
   console.log("");
   console.log("Now run `pnpm relay` (Boney observes) before `pnpm index` (the project claims).");
 }
