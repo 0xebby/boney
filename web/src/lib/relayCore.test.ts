@@ -126,16 +126,20 @@ describe("resolveScanRange", () => {
     });
   });
 
-  /**
-   * Deliberately NOT `checkpoint + 1`. Totals are absolute rather than incremental, so every run
-   * rescans the whole window and recomputes the same figure — which is what makes a re-push
-   * idempotent and lets two racing instances converge instead of double-counting. The checkpoint
-   * decides *whether* there is anything to do, never *where* to start. See the note on
-   * `resolveScanRange`; this test asserted the incremental behaviour the refactor removed.
-   */
-  it("rescans from the window start even when the checkpoint is well past it", () => {
+  it("resumes one past the checkpoint rather than rescanning it", () => {
     const r = resolveScanRange({...base, checkpoint: BigInt(300)});
-    expect(r).toMatchObject({scan: true, fromBlock: BigInt(100)});
+    expect(r).toMatchObject({scan: true, fromBlock: BigInt(301)});
+  });
+
+  /**
+   * The regression this guards. Totals are additive (`nextTotals` = stored + delta), so a range that
+   * has already been folded in must not be walked again — rescanning from the window start counted a
+   * single deposit once per relay cycle and drove the observed ceiling to 13 against a real count of 1.
+   */
+  it("never re-walks a range already folded into the stored totals", () => {
+    const r = resolveScanRange({...base, checkpoint: BigInt(300)});
+    if (!r.scan) throw new Error("expected a scan");
+    expect(r.fromBlock > BigInt(300)).toBe(true);
   });
 
   /** Activity before tracking began is out of scope, and scanning it is pure RPC spend. */
@@ -348,34 +352,24 @@ describe("planReportBatches", () => {
   const users = [ALICE, BOB, ALICE, BOB, ALICE] as const;
   const totals = [BigInt(1), BigInt(2), BigInt(3), BigInt(4), BigInt(5)];
 
-  it("sends everything in one transaction when it fits", () => {
-    const batches = planReportBatches({
-      users,
-      totals,
-      size: 10,
-      currentCheckpoint: BigInt(100),
-      newCheckpoint: BigInt(200),
-    });
+  it("sends everything in one transaction, carrying the new checkpoint", () => {
+    const batches = planReportBatches({users, totals, size: 10, newCheckpoint: BigInt(200)});
 
     expect(batches).toHaveLength(1);
     expect(batches[0]!.checkpoint).toBe(BigInt(200));
+    expect(batches[0]!.totals).toEqual(totals);
   });
 
   /**
-   * The retry-safety property: a run that dies partway must leave the checkpoint untouched, because
-   * the on-chain guard is monotonic and a premature advance can never be walked back.
+   * Splitting by user is refused rather than performed. Totals are additive, so re-reporting a batch
+   * is not the no-op re-pushing an absolute total was: holding the old checkpoint on the non-final
+   * batches would double-add batch 1 on any retry, and advancing it on every batch would strand the
+   * users a failed batch never reported. Both are silent; the throw is recoverable.
    */
-  it("advances the checkpoint only on the final transaction", () => {
-    const batches = planReportBatches({
-      users,
-      totals,
-      size: 2,
-      currentCheckpoint: BigInt(100),
-      newCheckpoint: BigInt(200),
-    });
-
-    expect(batches.map((b) => b.checkpoint)).toEqual([BigInt(100), BigInt(100), BigInt(200)]);
-    expect(batches.flatMap((b) => b.totals)).toEqual(totals);
+  it("refuses to split by user rather than pick an unsafe checkpoint", () => {
+    expect(() => planReportBatches({users, totals, size: 2, newCheckpoint: BigInt(200)})).toThrow(
+      /exceeds the 2-per-transaction limit/,
+    );
   });
 
   it("still advances the checkpoint when a range held no creditable activity", () => {
@@ -383,7 +377,6 @@ describe("planReportBatches", () => {
       users: [],
       totals: [],
       size: 2,
-      currentCheckpoint: BigInt(100),
       newCheckpoint: BigInt(200),
     });
 
@@ -392,13 +385,7 @@ describe("planReportBatches", () => {
 
   it("rejects mismatched inputs rather than reporting a misaligned total", () => {
     expect(() =>
-      planReportBatches({
-        users,
-        totals: [BigInt(1)],
-        size: 2,
-        currentCheckpoint: BigInt(0),
-        newCheckpoint: BigInt(1),
-      }),
+      planReportBatches({users, totals: [BigInt(1)], size: 2, newCheckpoint: BigInt(1)}),
     ).toThrow(/length mismatch/);
   });
 });

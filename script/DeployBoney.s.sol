@@ -14,18 +14,15 @@ import {GuardedKpiVerifier} from "../src/verifiers/GuardedKpiVerifier.sol";
 import {TouchWindowVerifier} from "../src/verifiers/TouchWindowVerifier.sol";
 
 /// @title DeployBoney
-/// @notice Full-stack Boney deployment script.
+/// @notice Boney deployment script.
 /// @dev Deploy order:
 ///      1. Modules with no cross-dependencies (attribution, attestations, reputation).
-///      2. The coordinator, deployed *before* the registry, because the registry needs the
-///         coordinator's address at construction (coordinator → registry is wired afterward).
+///      2. The coordinator, deployed before the registry, because the registry needs the
+///         coordinator's address at construction.
 ///      3. The escrow vault and registry; the registry becomes the vault's registrar.
 ///      4. Wire the coordinator to the registry, then deploy the facade.
 ///      5. The KPI verification layer, which depends on nothing above it — verifiers are
 ///         configured per KPI after a campaign exists, not wired at deploy time.
-///
-///      `MAX_TOUCH_DURATION` and `MIN_STAKE` are env-configurable for testing; the rest are
-///      protocol constants.
 contract DeployBoney is Script {
     /// @dev [bscoretest] Dispute and unstake delays shortened from their protocol values (1 day /
     ///      2 days) so both resolve inside a manual testing session. Restore before any
@@ -33,18 +30,15 @@ contract DeployBoney is Script {
     uint256 public constant DISPUTE_WINDOW = 4 minutes;
     uint256 public constant UNSTAKE_DELAY = 10 minutes;
 
-    /// @dev [bscoretest] Held at the protocol value of 30 days, deliberately *not* shortened.
+    /// @dev [bscoretest] Held at the protocol value of 30 days, deliberately not shortened.
     ///
     ///      This is a per-touch ceiling the attribution registry applies as
     ///      `min(campaign.attributionWindow, maxTouchDuration)`, and it applies **silently** — a
     ///      campaign whose window exceeds the cap still reports its own longer window from
-    ///      `attributionWindow()`, which is what the UI renders. Shortening this to a testing value
-    ///      therefore does not shorten what the app *says*; it only makes the app disagree with the
-    ///      chain, which is a worse failure than a long window.
+    ///      `attributionWindow()`, which is what the UI renders.
     ///
     ///      `script/SeedExpiry.s.sol` seeds campaigns up to 23 days that attribute for their whole
-    ///      lifetime, and asserts this cap covers them before spending gas. Lowering this below
-    ///      23 days will fail that seed rather than silently truncating it.
+    ///      lifetime, and asserts this cap covers them before spending gas.
     uint64 public constant MAX_TOUCH_DURATION = 30 days;
 
     /// @dev [bscoretest] Default initial attestor: the dev wallet that `web/.env.local`'s
@@ -69,13 +63,11 @@ contract DeployBoney is Script {
             new AttestationVerifier(deployer, vm.envOr("BONEY_INITIAL_ATTESTOR", DEV_ATTESTOR));
         ReputationRegistry reputation = new ReputationRegistry(deployer, address(attestations));
 
-        // 2. Oracle coordinator (needs no registry yet).
+        // 2. Oracle coordinator.
         OracleCoordinator coordinator =
             new OracleCoordinator(deployer, minStake, DISPUTE_WINDOW, UNSTAKE_DELAY);
 
-        // 3. Vault, then registry. The vault's registrar is wired afterwards rather than
-        //    predicted, so a nonce mismatch between simulation and broadcast cannot produce a
-        //    vault that the registry is unable to register campaigns with.
+        // 3. Vault, then registry.
         EscrowVault vault = new EscrowVault(deployer);
         registry = new CampaignRegistry(
             address(vault), address(reputation), address(attribution), address(coordinator)
@@ -91,7 +83,8 @@ contract DeployBoney is Script {
         //
         //    `GuardedKpiVerifier` is what a campaign's `KpiSpec.verifier` should point at: it always
         //    consults Boney's `EventMetricKpiVerifier`, and optionally cross-checks a second
-        //    verifier per KPI. `TouchWindowVerifier` is deployed here so it is available as that
+        //    verifier per KPI. 
+        //    `TouchWindowVerifier` is deployed here so it is available as that
         //    second verifier under `Mode.CAP`, which is how attribution-timing enforcement stays on
         //    chain rather than resting on the relayer alone.
         EventMetricKpiVerifier kpiVerifier =

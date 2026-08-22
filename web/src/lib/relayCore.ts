@@ -159,31 +159,37 @@ export type ScanRange =
 /**
  * The block range this run should cover, or why there is nothing to do.
  *
- * **Every run rescans the whole window.** `fromBlock` is always `windowStartBlock`, never
- * `checkpoint + 1`, because the totals this run reports are *absolute* rather than incremental (see
- * `nextTotals`). That is what makes a re-push idempotent, and idempotence is what makes both of the
- * relayer's retry stories true: a run that dies between batches can simply be repeated, and two
- * instances racing each other converge instead of double-counting. An incremental scan cannot offer
- * either, because neither the chain nor a second instance can tell whether a given range has already
- * been folded into the stored figure.
+ * **Resumes at `checkpoint + 1`.** The checkpoint is the last block the relayer has confirmed it fully
+ * incorporated, and it is persisted on chain (`lastScannedBlock`, advanced inside the same transaction
+ * that writes the totals), so it is exactly the watermark a resume needs — no local state file, and
+ * nothing to lose.
  *
- * The checkpoint therefore no longer decides *where* to start. It decides only whether there is
- * anything new to do at all, which is the common case on a loop — Base's 2s blocks mean most cycles
- * find nothing.
+ * This has to match `nextTotals`, which adds this run's deltas onto the figure already stored. A full
+ * rescan combined with an additive write counts the same activity once per cycle: with one deposit in
+ * the window and a loop running every two minutes, the observed ceiling climbed 1 → 13 while the real
+ * count stayed 1. Measured on the 08-21 fixture, not theorised. The two halves have to agree on
+ * whether a scan produces a delta or a total, and the delta reading is the one that keeps a credited
+ * range from being credited again.
  *
- * The cost is real and worth naming: RPC spend grows with campaign age rather than staying flat per
- * run, roughly one `eth_getLogs` chunk per 2,000 blocks of window on every cycle.
+ * Scanning only new blocks also makes RPC spend flat per cycle rather than growing with campaign age.
  *
- * Two bounds still matter:
+ * Three bounds still matter:
  *
  *  - **Never scan before `windowStartBlock`.** Activity before a campaign began tracking is out of
- *    scope, and scanning it is pure RPC spend.
+ *    scope, and on a first run the checkpoint sits below the window.
  *  - **Never scan past `windowEndBlock`.** `reportBatch` and `advanceCheckpoint` both reject a
  *    checkpoint beyond it, so a range that overshoots produces a run that does all the work and then
  *    reverts.
+ *  - **Never rescan at or below the checkpoint.** That range is already folded into the stored totals.
  *
  * Also stays `confirmations` behind the head, so a reorg cannot strand a checkpoint on a block that
  * no longer exists — the checkpoint is monotonic on chain and cannot be walked back.
+ *
+ * The retry story this gives up, and why that is fine: an absolute total could be re-pushed freely,
+ * because pushing the same number twice is a no-op. A delta cannot. What replaces it is atomicity —
+ * `reportBatch` writes the totals and advances the checkpoint in one transaction, so a failed run
+ * moves neither and a retry recomputes the identical delta over the identical range. The one case that
+ * needs care is a run split across several transactions; see `planReportBatches`.
  */
 export function resolveScanRange(input: {
   checkpoint: bigint;
@@ -210,8 +216,9 @@ export function resolveScanRange(input: {
     return {scan: false, reason: `nothing new to scan yet (next block would be ${windowStartBlock})`};
   }
 
-  // Nothing has been confirmed past the checkpoint, so a rescan would recompute the identical
-  // totals. Skipped to save the RPC, not for correctness — repeating it would be harmless.
+  // Nothing has been confirmed past the checkpoint, so there is no new activity to fold in. Under
+  // additive totals this is not merely a saving — rescanning a range already folded in would add it a
+  // second time.
   if (toBlock <= checkpoint) {
     return {
       scan: false,
@@ -219,7 +226,12 @@ export function resolveScanRange(input: {
     };
   }
 
-  return {scan: true, fromBlock: windowStartBlock, toBlock};
+  // Resume one past the checkpoint, but never before the window opens — on a first run the checkpoint
+  // is below `windowStartBlock`.
+  const resumeFrom = checkpoint + BigInt(1);
+  const fromBlock = resumeFrom > windowStartBlock ? resumeFrom : windowStartBlock;
+
+  return {scan: true, fromBlock, toBlock};
 }
 
 // ── decoding ─────────────────────────────────────────────────────
@@ -390,16 +402,34 @@ export type ReportBatch = {
  * new checkpoint, a run that died halfway would leave the checkpoint claiming a range whose later
  * totals were never stored, and the monotonic guard on chain means it can never be walked back — the
  * gap would be permanent. Holding the old checkpoint until the final transaction means a failure
- * leaves it untouched, and re-running re-reports totals that are idempotent anyway.
+ * leaves it untouched, and re-running recomputes the identical delta over the identical range.
+ *
+ * ## Why splitting is refused rather than performed
+ *
+ * That retry story only holds while a run is a *single* transaction. Totals are additive
+ * (`nextTotals` = stored + delta), so re-reporting a batch is not a no-op the way re-pushing an
+ * absolute total was. With more than one transaction there is no safe checkpoint to carry:
+ *
+ *  - old checkpoint on the non-final batches — batch 1 commits, batch 2 fails, the retry rescans the
+ *    same range and adds batch 1's delta on top of the value it already wrote. Double credit, and it
+ *    inflates the very ceiling the guarded verifier exists to enforce.
+ *  - new checkpoint on every batch — batch 1 commits and moves the watermark past a range whose
+ *    remaining users were never reported. Their activity is unreachable for the rest of the epoch.
+ *
+ * Both are silent. So a run that will not fit in one transaction throws instead, which is recoverable
+ * (narrow the range and re-run) where the alternatives are not. The correct shape when this becomes
+ * real is to split by **block sub-range** rather than by user: each transaction then covers a range it
+ * fully incorporated and carries that range's own end as its checkpoint, which is self-consistent and
+ * retry-safe at any width. `size` is 200 and the live fixtures report one or two users, so this is a
+ * guard against a future run, not a limitation anyone is hitting.
  */
 export function planReportBatches(input: {
   users: readonly `0x${string}`[];
   totals: readonly bigint[];
   size: number;
-  currentCheckpoint: bigint;
   newCheckpoint: bigint;
 }): ReportBatch[] {
-  const {users, totals, size, currentCheckpoint, newCheckpoint} = input;
+  const {users, totals, size, newCheckpoint} = input;
 
   if (users.length !== totals.length) {
     throw new Error(`users/totals length mismatch: ${users.length} vs ${totals.length}`);
@@ -411,17 +441,15 @@ export function planReportBatches(input: {
     return [{users: [], totals: [], checkpoint: newCheckpoint}];
   }
 
-  const out: ReportBatch[] = [];
-  for (let i = 0; i < users.length; i += size) {
-    const isLast = i + size >= users.length;
-    out.push({
-      users: users.slice(i, i + size),
-      totals: totals.slice(i, i + size),
-      checkpoint: isLast ? newCheckpoint : currentCheckpoint,
-    });
+  if (users.length > size) {
+    throw new Error(
+      `${users.length} users with creditable activity exceeds the ${size}-per-transaction limit. ` +
+        `Splitting by user is unsafe with additive totals — see planReportBatches. Narrow the scanned ` +
+        `range (report over fewer blocks at a time) and re-run.`,
+    );
   }
 
-  return out;
+  return [{users: [...users], totals: [...totals], checkpoint: newCheckpoint}];
 }
 
 // ── drift guard ──────────────────────────────────────────────────

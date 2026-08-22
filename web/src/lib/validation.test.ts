@@ -148,6 +148,61 @@ describe("minReputation", () => {
   });
 });
 
+/*
+  The live ceiling, which is what `Campaign`'s constructor compares against
+  (`ReputationRegistry.maxScore`). The local constant is only the arithmetic for the *seeded* schema
+  configuration, and the two parting company is not theoretical: a registry deployed without
+  `SeedDevRep` has no weighted schemas, reports 0, and reverts `UnreachableReputation(15000, 0)` on a
+  gate this file had just approved.
+*/
+describe("minReputation against a live ceiling", () => {
+  function gateIssue(minReputation: string, scoreCeiling?: bigint) {
+    return validateCampaignDraft(draft({minReputation}), {
+      tokenDecimals: 18,
+      nowSeconds: NOW,
+      scoreCeiling,
+    }).find((i) => i.path === "minReputation");
+  }
+
+  it("rejects a gate the chain's ceiling cannot reach, even below the local constant", () => {
+    const issue = gateIssue("15000", BigInt(5_000));
+
+    expect(issue?.message).toContain("5,000");
+    expect(gateIssue("5000", BigInt(5_000))).toBeUndefined();
+  });
+
+  it("allows a gate above the local constant when the chain permits it", () => {
+    // Governance can re-weight schemas without redeploying the frontend, and the constructor is the
+    // authority — so the form must not refuse a gate the chain would accept.
+    expect(gateIssue(String(MAX_BONEY_SCORE + 1_000), BigInt(50_000))).toBeUndefined();
+  });
+
+  it("names the unseeded registry rather than telling the creator to pick a lower number", () => {
+    const issue = gateIssue("15000", BigInt(0));
+
+    expect(issue?.message).toMatch(/no weighted schemas/i);
+    expect(issue?.message).toMatch(/SeedDevRep/);
+    // 0 stays valid: an ungated campaign is exactly what that registry can support.
+    expect(gateIssue("0", BigInt(0))).toBeUndefined();
+    expect(gateIssue("", BigInt(0))).toBeUndefined();
+  });
+
+  it("treats an uncapped ceiling as no ceiling", () => {
+    // `maxScore` returns type(uint256).max when a weighted schema has no value cap.
+    const uncapped = BigInt(2) ** BigInt(256) - BigInt(1);
+
+    expect(gateIssue(uncapped.toString(), uncapped)).toBeUndefined();
+    expect(gateIssue("40000", uncapped)).toBeUndefined();
+  });
+
+  it("falls back to the local constant when the ceiling could not be read", () => {
+    expect(gateIssue(String(MAX_BONEY_SCORE + 1), undefined)?.message).toContain(
+      MAX_BONEY_SCORE.toLocaleString(),
+    );
+    expect(gateIssue("26000", undefined)).toBeUndefined();
+  });
+});
+
 describe("parseAmount", () => {
   it("parses decimals to base units", () => {
     expect(parseAmount("1", 18)).toBe(BigInt("1000000000000000000"));

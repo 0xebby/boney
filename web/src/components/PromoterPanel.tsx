@@ -251,7 +251,7 @@ export function PromoterPanel({
           {/* Tracking link */}
           <div className="space-y-1.5">
             <label htmlFor="tracking-link" className="block text-xs text-ink-muted">
-              Your tracking link
+              Your Boneylink link
             </label>
             <div className="flex gap-2">
               <input
@@ -270,7 +270,7 @@ export function PromoterPanel({
               </button>
             </div>
             <p className="text-xs text-ink-muted">
-                <b>Traffic through this link is attributed to you for{" "}
+                <b>Traffic through your Boneylink is attributed to you for{" "}
                   {formatDuration(Number(detail.attributionWindow))} after each visit.</b>
             </p>
           </div>
@@ -290,8 +290,7 @@ export function PromoterPanel({
                 </p>
               ) : (
                 <p className="mt-1 text-xs text-ink-muted">
-                  Rewards are sent to your wallet the moment a tier is crossed. There is nothing to
-                  claim.
+                  Rewards are sent to your wallet the moment a tier is crossed.
                 </p>
               )}
               {poolDrained ? (

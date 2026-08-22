@@ -140,7 +140,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you promote"
-            subtitle="Campaigns you joined, and the promotion link to share for each"
+            subtitle="Campaigns you joined, and your promotion boneylink to share for each"
           />
         </div>
         {isLoading || joinedQuery.isLoading ? (
@@ -158,14 +158,14 @@ export function PromoterDashboard() {
             isRefreshing={joinedQuery.isRefreshing}
             emptyState={
               <EmptyState
-                title="No memberships yet"
+                title="Not Joined Any Campaign Yet."
                 description="Browse the boneyard and join campaigns that match your audience. Each membership gives you a tracking link to share."
                 action={
                   <Link
                     href="/"
                     className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
                   >
-                    Browse boneyard
+                    Browse Boneyard
                   </Link>
                 }
               />
@@ -183,7 +183,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you were referred to"
-            subtitle="Attributions you signed through a promoter's link"
+            subtitle="Attributions you signed through a promoter's boneylink"
           />
         </div>
         {isLoading || referredQuery.isLoading ? (
@@ -202,7 +202,7 @@ export function PromoterDashboard() {
             emptyState={
               <EmptyState
                 title="No referrals yet"
-                description="When you follow a promoter's tracking link and confirm the attribution, the campaign shows up here."
+                description="When you follow a promoter's boneylink and confirm the attribution, the campaign shows up here."
               />
             }
           />
@@ -286,7 +286,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
     },
     {
       key: "link",
-      header: "Tracking link",
+      header: "Boneylink link",
       sortValue: () => 0,
       render: (r) => <CopyLinkButton link={r.link} />,
     },
