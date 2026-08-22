@@ -22,27 +22,32 @@ import {Types} from "../src/libraries/Types.sol";
 ///      the swap KPI credits **topic 2**: crediting `sender` would pay for every swap the router ever
 ///      routes, to whoever happened to be attributed.
 ///
-///      **Why volume is sourced from WETH and not from the pool.** The pool's amounts are the honest
-///      place to read volume and this machinery cannot read them. `Swap` declares
-///      `int256 amount0, int256 amount1`, and for a WETH → USDC swap on this pool (token0 is USDC,
-///      whose address sorts below WETH's) `amount0` is *negative* — USDC leaving the pool. The
-///      indexer's half can only "count each log" or "read the first 32-byte word of `data`"
-///      (`KpiSpec.params.amountMode`), so that word decodes as ~1.15e77 rather than a volume, and the
-///      WETH amount it should read sits in the *second* word, which the encoding cannot name.
-///      `EventMetricKpiVerifier` could address `amount1` by declaration index, but
-///      `validateParamIndexes` rejects a non-`uint` value param — correctly, since a signed magnitude
-///      has no meaning under SUM.
+///      **Why volume is sourced from the USDC leg.** The pool's own amounts are the honest place to
+///      read volume and this machinery cannot read them. `Swap` declares `int256 amount0, int256
+///      amount1`, and for a WETH → USDC swap on this pool (token0 is USDC, whose address sorts below
+///      WETH's) `amount0` is *negative* — USDC leaving the pool. The indexer's half can only "count
+///      each log" or "read the first 32-byte word of `data`" (`KpiSpec.params.amountMode`), so that
+///      word decodes as ~1.15e77 rather than a volume, and the WETH amount it should read sits in the
+///      *second* word, which the encoding cannot name. `EventMetricKpiVerifier` could address
+///      `amount1` by declaration index, but `validateParamIndexes` rejects a non-`uint` value param —
+///      correctly, since a signed magnitude has no meaning under SUM.
 ///
-///      So volume reads WETH's own `Transfer(address indexed from, address indexed to, uint256 value)`
-///      with `from` as the actor: SwapRouter02 pays the pool by pulling WETH straight from the swapper,
-///      so a swap emits exactly one such transfer for the amount swapped in. `value` is a `uint256` in
-///      the first data word, which both halves can read identically.
+///      So volume reads the **USDC** `Transfer` with `to` as the actor: the pool sends the output
+///      straight to the swap's `recipient`, in a `uint256` first data word both halves read identically.
 ///
-///      What that costs, stated rather than hidden: **any** WETH the referral sends counts toward
-///      volume, not only swaps. Wrapping ETH does not (WETH9's `deposit` emits `Deposit`, no
-///      `Transfer`), and neither does unwrapping (`Withdrawal`, no `Transfer`), so the common noise is
-///      excluded — but a plain WETH send to a friend would credit. The swap-count KPI is the one
-///      pinned to Uniswap itself; read the two together.
+///      **Not the WETH leg, which the first attempt used and which cannot work.** A swap through
+///      SwapRouter02 does not necessarily move the swapper's WETH at all. `PeripheryPayments.pay`
+///      checks `address(this).balance >= value` *first*, and this router holds ~0.19 ETH stranded on
+///      Base Sepolia — so it wraps its own ETH and pays the pool from that, leaving the user's WETH and
+///      even their approval untouched. Verified on tx
+///      `0x3a406382d9811276cfe6cd5132da8cf4f7d7d2b45d7a004bde12da9720e43f91`: four logs, and the WETH
+///      `Transfer` is `router → pool`, not `user → pool`. A volume KPI keyed to the user's WETH credits
+///      nothing there, and `KpiSpec.params` is written in the constructor with no setter, so campaign 7
+///      (`0x2535adF6…`) keeps that dead KPI permanently — hence this second campaign rather than a fix.
+///
+///      What the USDC leg costs, stated rather than hidden: **any** USDC the referral receives counts,
+///      not only swap output — a faucet drip would credit. The swap-count KPI is the one pinned to
+///      Uniswap itself; read the two together.
 ///
 ///      **Both KPIs are gated through `GuardedKpiVerifier`**, so a claim is capped at what Boney
 ///      independently observed. That means `pnpm relay` must run before `pnpm index` credits anything,
@@ -61,11 +66,11 @@ contract SeedSwapKpi is Script {
     ///      one with swaps in recent history. A campaign pointed at an idle pool is untestable.
     address public constant POOL = 0x46880b404CD35c165EDdefF7421019F8dD25F4Ad;
 
-    /// @notice Base's canonical WETH predeploy — the swap input, and the volume KPI's source.
+    /// @notice Base's canonical WETH predeploy — what a promoter's referral swaps in. No KPI watches
+    ///         it: see the note above on the router paying from its own ETH.
     address public constant WETH = 0x4200000000000000000000000000000000000006;
 
-    /// @notice Circle's test USDC on Base Sepolia — the swap output. Named for the record; no KPI
-    ///         watches it, because a faucet drip would then read as swap volume.
+    /// @notice Circle's test USDC on Base Sepolia — the swap output, and the volume KPI's source.
     address public constant USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
 
     /// @notice `keccak256("Swap(address,address,int256,int256,uint160,uint128,int24)")`.
@@ -82,7 +87,7 @@ contract SeedSwapKpi is Script {
     string public constant SWAP_EVENT =
         "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)";
 
-    /// @notice ERC-20 transfer. `from` is the attributed wallet: param 0, `topics[1]`.
+    /// @notice ERC-20 transfer. `to` is the attributed wallet: param 1, `topics[2]`.
     string public constant TRANSFER_EVENT =
         "Transfer(address indexed from, address indexed to, uint256 value)";
 
@@ -96,13 +101,14 @@ contract SeedSwapKpi is Script {
     /// @dev Slack on that projection, so a slow chain cannot close the window before the campaign.
     uint256 public constant BLOCK_MARGIN = 10_000;
 
-    /// @dev 1e15 wei = 0.001 WETH per unit of progress.
+    /// @dev 1e5 USDC units = 0.1 USDC per unit of progress. USDC carries 6 decimals, not 18.
     ///
-    ///      Set against what a tester can actually spend rather than against a market: at ~150 USDC
-    ///      per WETH in this pool, 0.001 WETH is about $0.15, so the first volume tier costs a fraction
-    ///      of a cent of testnet value and the top one is 0.02 WETH. Integer division drops the
-    ///      remainder, so a 0.0019 WETH swap credits 1 — pick round amounts when testing.
-    uint256 public constant VOLUME_SCALE = 1e15;
+    ///      Set against what a tester can actually spend rather than against a market: this pool trades
+    ///      at ~150 USDC per WETH, so 0.1 USDC of progress is about 0.0007 WETH, the first tier costs
+    ///      a fraction of a cent of testnet value, and the top one is 2 USDC (~0.013 WETH) across as
+    ///      many swaps as it takes. Integer division drops the remainder, so a swap yielding 0.19 USDC
+    ///      credits 1.
+    uint256 public constant VOLUME_SCALE = 1e5;
 
     /// @dev Held as state rather than locals: `run()` is at the stack-slot limit without `via_ir`.
     uint256 pk;
@@ -132,7 +138,7 @@ contract SeedSwapKpi is Script {
         // 20,000 bUSD covers three promoters running both ladders to the top (6,500 each) with room
         // over. A fourth would hit `PoolExhausted`, which is a real state worth being able to reach.
         uint256 pool = vm.envOr("SEED_POOL", uint256(20_000 ether));
-        string memory name = vm.envOr("SEED_NAME", string("Uniswap WETH USDC swaps"));
+        string memory name = vm.envOr("SEED_NAME", string("Uniswap WETH to USDC"));
 
         address campaign = _create(name, pool);
         _configure(campaign);
@@ -145,8 +151,8 @@ contract SeedSwapKpi is Script {
         console.log("");
         console.log("  KPI 0  Swaps  - Uniswap V3 Swap on", POOL);
         console.log("         actor topics[2] (recipient), COUNT, tiers 1/2/3/5/8 swaps");
-        console.log("  KPI 1  Volume - WETH Transfer on", WETH);
-        console.log("         actor topics[1] (from), SUM / 1e15, tiers at 0.001/0.002/0.005/0.01/0.02 WETH");
+        console.log("  KPI 1  Volume - USDC Transfer on", USDC);
+        console.log("         actor topics[2] (to), SUM / 1e5, tiers at 0.1/0.3/0.5/1/2 USDC out");
         console.log("");
         console.log("  To test: join as a promoter, sign a touch for a referral wallet, then have that");
         console.log("  wallet swap WETH for USDC through SwapRouter02 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4.");
@@ -185,13 +191,13 @@ contract SeedSwapKpi is Script {
             params: abi.encode(POOL, SWAP_TOPIC, uint8(2), uint8(0), uint256(1))
         });
 
-        // KPI 1 — how much. `amountMode` 1 is dataWord0, which for `Transfer` is `value`.
+        // KPI 1 — how much came out. `amountMode` 1 is dataWord0, which for `Transfer` is `value`.
         kpis[1] = Types.KpiSpec({
             kind: Types.KpiKind.Volume,
             verifier: address(guardedVerifier),
             target: 20,
             aggregate: false,
-            params: abi.encode(WETH, TRANSFER_TOPIC, uint8(1), uint8(1), VOLUME_SCALE)
+            params: abi.encode(USDC, TRANSFER_TOPIC, uint8(2), uint8(1), VOLUME_SCALE)
         });
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](2);
@@ -206,10 +212,10 @@ contract SeedSwapKpi is Script {
         tiers[0][3] = Types.RewardTier({threshold: 5, reward: 800 ether});
         tiers[0][4] = Types.RewardTier({threshold: 8, reward: 1_200 ether});
 
-        // Thresholds in units of 0.001 WETH: 0.001 / 0.002 / 0.005 / 0.01 / 0.02.
+        // Thresholds in units of 0.1 USDC out: 0.1 / 0.3 / 0.5 / 1.0 / 2.0.
         tiers[1] = new Types.RewardTier[](5);
         tiers[1][0] = Types.RewardTier({threshold: 1, reward: 200 ether});
-        tiers[1][1] = Types.RewardTier({threshold: 2, reward: 300 ether});
+        tiers[1][1] = Types.RewardTier({threshold: 3, reward: 300 ether});
         tiers[1][2] = Types.RewardTier({threshold: 5, reward: 500 ether});
         tiers[1][3] = Types.RewardTier({threshold: 10, reward: 1_000 ether});
         tiers[1][4] = Types.RewardTier({threshold: 20, reward: 1_500 ether});
@@ -229,8 +235,8 @@ contract SeedSwapKpi is Script {
     ///      Each config must agree with its `KpiSpec.params` on all five of source, topic0, actor,
     ///      fold and scale, or the relayer refuses to run (`relayCore.describeConfigDrift`). The actor
     ///      is the subtle one: the blob names a *topic* position and the verifier names a *declaration*
-    ///      position, so `topics[2]` on `Swap` is param 1 (`recipient`) and `topics[1]` on `Transfer`
-    ///      is param 0 (`from`).
+    ///      position, so `topics[2]` is param 1 on both events here — `recipient` on `Swap`, and `to`
+    ///      on `Transfer`.
     function _configure(address campaign) internal {
         uint256 closesIn = uint256(DURATION) + Campaign(campaign).CLAIM_GRACE();
         uint256 windowEndBlock = block.number + closesIn / BLOCK_TIME + BLOCK_MARGIN;
@@ -253,9 +259,9 @@ contract SeedSwapKpi is Script {
         kpiVerifier.setKpiConfig(
             campaign,
             1,
-            WETH,
+            USDC,
             TRANSFER_EVENT,
-            0, // userParamIndex — `from`, the wallet whose WETH left
+            1, // userParamIndex — `to`, the wallet the pool sent the output to
             IEventMetricKpiVerifier.Aggregation.SUM,
             2, // valueParamIndex — `value`, a uint256, which is what SUM requires
             VOLUME_SCALE,
