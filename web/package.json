@@ -23,6 +23,7 @@
     "index": "tsx scripts/indexer.ts",
     "relay": "tsx scripts/relay-kpi-metric.ts",
     "sygma:deposit": "tsx scripts/sygma-deposit.ts",
+    "swap:weth-usdc": "tsx scripts/uniswap-swap.ts",
     "report-window": "tsx scripts/compute-report-window.ts"
   },
   "dependencies": {

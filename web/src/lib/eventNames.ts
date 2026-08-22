@@ -95,6 +95,14 @@ export const KNOWN_EVENTS = [
   "Withdrawal(address,uint256)",
   /** Aave V3 Pool. `SeedRealKpi.AAVE_SUPPLY_TOPIC`, matched against live Base Sepolia logs. */
   "Supply(address,address,address,uint256,uint16)",
+  /**
+   * Uniswap V3 pool swaps. `SeedSwapKpi.SWAP_TOPIC`, matched against live pool logs on Base Sepolia.
+   *
+   * `topics[2]` is `recipient` — the end user on a routed swap, where `sender` is the router. Note the
+   * amounts are `int256` and the input token's is the *second* data word, so this event can back a
+   * count KPI but not a volume one; see `SeedSwapKpi` for what volume reads instead.
+   */
+  "Swap(address,address,int256,int256,uint160,uint128,int24)",
   /** Sygma bridge. `SeedRealKpi.SYGMA_DEPOSIT_TOPIC`, matched against the deployed bytecode. */
   "Deposit(uint8,bytes32,uint64,address,bytes,bytes)",
 ] as const;
