@@ -40,6 +40,15 @@ const BASE_SEPOLIA: ContractLabels = {
   "0x8bab6d1b75f19e9ed9fce8b9bd338844ff79ae27": "Aave V3 Pool",
   // `SeedRealKpi.SYGMA_BRIDGE`.
   "0x9d5c332ebe0dae36e07a4ed552ad4d8c5067a61f": "Sygma Bridge",
+  // `SeedSwapKpi.POOL` — the 0.3% WETH/USDC pool from `UniswapV3Factory.getPool`, whose `Swap` logs
+  // were sampled live. The fee tier is part of the name because all four tiers exist on this chain and
+  // they are different pools with different liquidity.
+  "0x46880b404cd35c165eddeff7421019f8dd25f4ad": "Uniswap V3 WETH/USDC 0.3%",
+  // SwapRouter02, which appears as `sender` on every routed swap — worth naming so a KPI mistakenly
+  // pointed at `topics[1]` shows whose address it is really crediting.
+  "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4": "Uniswap SwapRouter02",
+  // Circle's test USDC. It answers `symbol()`, so this entry only saves a round trip.
+  "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC",
   [WETH_BASE_KEY]: "WETH",
 };
 

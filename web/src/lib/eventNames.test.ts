@@ -103,6 +103,13 @@ describe("catalogSignature", () => {
     ).toBe("TransferSingle(address,address,address,uint256,uint256)");
   });
 
+  /** Pinned the same way, from a real Base Sepolia pool log — see `script/SeedSwapKpi.s.sol`. */
+  it("names the Uniswap V3 swap the swap campaign counts", () => {
+    expect(
+      catalogSignature("0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"),
+    ).toBe("Swap(address,address,int256,int256,uint160,uint128,int24)");
+  });
+
   it("is case-insensitive on the topic, since sources disagree on hex casing", () => {
     expect(catalogSignature(AAVE_SUPPLY_TOPIC.toUpperCase().replace("0X", "0x") as `0x${string}`))
       .toBe("Supply(address,address,address,uint256,uint16)");
@@ -205,6 +212,28 @@ describe("resolveTrackedEvent — protocol name", () => {
 
     expect(resolved.protocol).toBe("Aave Supplies");
     expect(resolved.protocolFrom).toBe("campaign");
+  });
+
+  /*
+    Guards the address keys themselves, which are data a typo makes silently inert: a wrong key never
+    matches, so the label just never appears and the line quietly falls back to the campaign name.
+  */
+  it("names the Uniswap pool the swap campaign watches", () => {
+    const resolved = resolveTrackedEvent(
+      input({
+        source: source({
+          source: "0x46880b404CD35c165EDdefF7421019F8dD25F4Ad",
+          topic0: eventTopic("Swap(address,address,int256,int256,uint160,uint128,int24)"),
+          actorTopic: 2,
+        }),
+        kind: "Swap",
+        campaignName: "Uniswap WETH USDC swaps",
+      }),
+    );
+
+    expect(resolved.event).toBe("Swap(address,address,int256,int256,uint160,uint128,int24)");
+    expect(resolved.protocol).toBe("Uniswap V3 WETH/USDC 0.3%");
+    expect(resolved.protocolFrom).toBe("catalog");
   });
 
   /*
