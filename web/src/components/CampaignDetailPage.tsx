@@ -2,7 +2,9 @@
 
 import {useMemo, useCallback} from "react";
 import Link from "next/link";
+import {useAccount} from "wagmi";
 import {useCampaignDetail, usePromoterState} from "@/hooks/useCampaignDetail";
+import {useReferredCampaigns} from "@/hooks/useReferredCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
@@ -11,10 +13,12 @@ import {Meter} from "@/components/ui/Meter";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {KpiPanel} from "@/components/KpiPanel";
 import {ProjectActions} from "@/components/ProjectActions";
+import {ProjectPromotersPanel} from "@/components/ProjectPromotersPanel";
 import {ReportPanel} from "@/components/ReportPanel";
 import {PromoterPanel} from "@/components/PromoterPanel";
 import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
 import {projectName} from "@/lib/projects";
+import {viewerRole, visibleSections} from "@/lib/viewerRole";
 import {
   formatTokenAmount,
   formatPercent,
@@ -33,7 +37,32 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
     detail?.address,
     detail?.kpis.length ?? 0,
   );
+  const {address, isConnected} = useAccount();
   const now = useNow();
+
+  /*
+    Whether this wallet has been referred here.
+
+    Reuses the dashboard's hook with a single-campaign list rather than a new read: it is two point
+    lookups (`touchOf`, then `promoterOf` when there is a touch), pinned and cached like the rest of
+    the fan-outs. It returns an empty list with no wallet connected, so a visitor pays nothing for it.
+  */
+  const referredQuery = useReferredCampaigns(view ? [view] : []);
+
+  /*
+    Which sections this reader gets. Not a permission — every fact behind it is public on chain (see
+    `lib/viewerRole`) — but the page serves four different readers off one route, and showing all of
+    them everything meant a referral got the escrow accounting while the project owner got the
+    promoter-facing reward ladders. Neither can act on what they were shown.
+  */
+  const role = viewerRole({
+    connected: isConnected,
+    wallet: address,
+    project: detail?.project ?? "",
+    joined: Boolean(promoter?.joined),
+    referred: referredQuery.referred.length > 0,
+  });
+  const sections = visibleSections(role);
 
   /**
    * Refetch after any write.
@@ -167,13 +196,16 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
           unit={token.symbol}
           //accent="var(--series-1)"
         />
-        <StatTile
-          label="Paid out"
-          value={formatTokenAmount(detail.paidOut, token.decimals, {compact: true})}
-          unit={token.symbol}
-          qualifier={`of ${formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})}`}
-          //accent="var(--series-3)"
-        />
+        {/* Payout and custody figures travel with the utilization meter — see `SectionVisibility`. */}
+        {sections.escrowTiles ? (
+          <StatTile
+            label="Paid out"
+            value={formatTokenAmount(detail.paidOut, token.decimals, {compact: true})}
+            unit={token.symbol}
+            qualifier={`of ${formatTokenAmount(detail.rewardPool, token.decimals, {compact: true})}`}
+            //accent="var(--series-3)"
+          />
+        ) : null}
         {/*
           Custody, not accounting. `remainingPool()` is `rewardPool - paidOut`, which a reclaim
           never touches — the tokens leave the vault but the subtraction stays put, so this tile
@@ -181,11 +213,13 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
           that answers "how much is actually still escrowed", and it is what `reclaimUnspent`
           itself pays out. Same reason it also reads 0 on a campaign that was never funded.
         */}
-        <StatTile
-          label="Remaining escrow"
-          value={formatTokenAmount(detail.escrowBalance, token.decimals, {compact: true})}
-          unit={token.symbol}
-        />
+        {sections.escrowTiles ? (
+          <StatTile
+            label="Remaining escrow"
+            value={formatTokenAmount(detail.escrowBalance, token.decimals, {compact: true})}
+            unit={token.symbol}
+          />
+        ) : null}
         <StatTile
           label={clockReady && Number(detail.endTime) <= now ? "Window closed" : "Ends in"}
           value={clockReady ? formatTimeUntil(detail.endTime, now) : "—"}
@@ -193,90 +227,106 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         />
       </StatRow>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader
-            title="Pool utilization"
-            subtitle="Share of escrow already released to promoters"
-          />
-          <Meter
-            value={utilization(detail)}
-            max={1}
-            label={`${formatTokenAmount(detail.paidOut, token.decimals)} / ${formatTokenAmount(detail.rewardPool, token.decimals)} ${token.symbol}`}
-            valueText={formatPercent(Number(detail.paidOut), Number(detail.rewardPool))}
-            fullIsBad
-          />
+      {/*
+        5.1 — escrow, utilization, window.
 
-          <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-hairline pt-3 text-xs sm:grid-cols-4">
-            <Field label="Starts" value={formatDate(detail.startTime)} />
-            <Field label="Ends" value={formatDate(detail.endTime)} />
-            <Field
-              label="Attribution window"
-              value={formatDuration(Number(detail.attributionWindow))}
-            />
-            <Field
-              label="Min. reputation"
-              value={
-                detail.minReputation === BigInt(0)
-                  ? "Open to all"
-                  : detail.minReputation.toLocaleString("en-US")
-              }
-            />
-          </dl>
-        </Card>
+        Hidden from a referral: they are not paid from this pool, and how much of it has been
+        released is an arrangement between the project and its promoters. Both cards move together,
+        so the grid goes with them rather than leaving a one-card row.
+      */}
+      {sections.poolUtilization || sections.escrowReturn ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {sections.poolUtilization ? (
+            <Card className="lg:col-span-2">
+              <CardHeader
+                title="Pool utilization"
+                subtitle="Share of escrow already released to promoters"
+              />
+              <Meter
+                value={utilization(detail)}
+                max={1}
+                label={`${formatTokenAmount(detail.paidOut, token.decimals)} / ${formatTokenAmount(detail.rewardPool, token.decimals)} ${token.symbol}`}
+                valueText={formatPercent(Number(detail.paidOut), Number(detail.rewardPool))}
+                fullIsBad
+              />
 
-        <Card>
-          <CardHeader title="Escrow return" subtitle="Unspent funds after the settlement window" />
-          {detail.status === "Ended" || detail.status === "Cancelled" ? (
-            <div className="space-y-2 text-xs">
-              {reclaimOpen ? (
-                detail.escrowBalance > BigInt(0) ? (
-                  <p className="text-good">
-                    The settlement window has closed. The project can reclaim{" "}
-                    {formatTokenAmount(detail.escrowBalance, token.decimals, {compact: true})}{" "}
-                    {token.symbol}.
+              <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-hairline pt-3 text-xs sm:grid-cols-4">
+                <Field label="Starts" value={formatDate(detail.startTime)} />
+                <Field label="Ends" value={formatDate(detail.endTime)} />
+                <Field
+                  label="Attribution window"
+                  value={formatDuration(Number(detail.attributionWindow))}
+                />
+                <Field
+                  label="Min. reputation"
+                  value={
+                    detail.minReputation === BigInt(0)
+                      ? "Open to all"
+                      : detail.minReputation.toLocaleString("en-US")
+                  }
+                />
+              </dl>
+            </Card>
+          ) : null}
+
+          {sections.escrowReturn ? (
+            <Card>
+              <CardHeader
+                title="Escrow return"
+                subtitle="Unspent funds after the settlement window"
+              />
+              {detail.status === "Ended" || detail.status === "Cancelled" ? (
+                <div className="space-y-2 text-xs">
+                  {reclaimOpen ? (
+                    detail.escrowBalance > BigInt(0) ? (
+                      <p className="text-good">
+                        The settlement window has closed. The project can reclaim{" "}
+                        {formatTokenAmount(detail.escrowBalance, token.decimals, {compact: true})}{" "}
+                        {token.symbol}.
+                      </p>
+                    ) : (
+                      /* Empty vault: already reclaimed, fully paid out, or never funded. All three
+                         read the same from here, and `reclaimUnspent` reverts `NothingToReclaim` in
+                         each — so don't offer a number the project cannot collect. */
+                      <p className="text-ink-secondary">
+                        The settlement window has closed and escrow is empty — nothing left to
+                        reclaim.
+                      </p>
+                    )
+                  ) : detail.status === "Cancelled" ? (
+                    <p className="text-ink-secondary">
+                      Cancelled — unspent escrow returns immediately.
+                    </p>
+                  ) : (
+                    <p className="text-ink-secondary">
+                      Promoters can still settle for{" "}
+                      {clockReady && detail.endedAt > BigInt(0)
+                        ? formatDuration(
+                            reclaimAvailableIn(
+                              Number(detail.endedAt),
+                              now,
+                              Number(detail.claimGrace),
+                            ),
+                          )
+                        : formatDuration(Number(detail.claimGrace))}
+                      . Reclaim unlocks after that.
+                    </p>
+                  )}
+                  <p className="text-ink-muted">
+                    Settlement grace: {formatDuration(Number(detail.claimGrace))} from when the
+                    campaign was ended.
                   </p>
-                ) : (
-                  /* Empty vault: already reclaimed, fully paid out, or never funded. All three
-                     read the same from here, and `reclaimUnspent` reverts `NothingToReclaim` in
-                     each — so don't offer a number the project cannot collect. */
-                  <p className="text-ink-secondary">
-                    The settlement window has closed and escrow is empty — nothing left to
-                    reclaim.
-                  </p>
-                )
-              ) : detail.status === "Cancelled" ? (
-                <p className="text-ink-secondary">
-                  Cancelled — unspent escrow returns immediately.
-                </p>
+                </div>
               ) : (
-                <p className="text-ink-secondary">
-                  Promoters can still settle for{" "}
-                  {clockReady && detail.endedAt > BigInt(0)
-                    ? formatDuration(
-                        reclaimAvailableIn(
-                          Number(detail.endedAt),
-                          now,
-                          Number(detail.claimGrace),
-                        ),
-                      )
-                    : formatDuration(Number(detail.claimGrace))}
-                  . Reclaim unlocks after that.
+                <p className="text-xs text-ink-muted">
+                  Escrow is locked while the campaign is {detail.status.toLowerCase()}. Unspent funds
+                  become reclaimable {formatDuration(Number(detail.claimGrace))} after it ends.
                 </p>
               )}
-              <p className="text-ink-muted">
-                Settlement grace: {formatDuration(Number(detail.claimGrace))} from when the campaign
-                was ended.
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-ink-muted">
-              Escrow is locked while the campaign is {detail.status.toLowerCase()}. Unspent funds
-              become reclaimable {formatDuration(Number(detail.claimGrace))} after it ends.
-            </p>
-          )}
-        </Card>
-      </div>
+            </Card>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* 6.2 — fund / activate / pause / end / reclaim */}
       <ProjectActions
@@ -307,48 +357,67 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         nowSeconds={now}
       />
 
-      {/* 5.2 — KPI panels with tier ladders and per-promoter progress */}
-      <section className="space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold text-ink">
-            KPIs{" "}
-            <span className="font-normal text-ink-muted">
-              ({detail.kpis.length})
-            </span>
-          </h2>
-          {promoter?.joined ? (
-            <p className="text-xs text-ink-muted">
-              Showing your progress · promoter {shortAddress(promoter.promoterId, 8, 6)}
-            </p>
-          ) : (
-            <p className="text-xs text-ink-muted">Showing combined progress across promoters</p>
-          )}
-        </div>
+      {/* The project's own view: who joined and what each has been paid, in place of the ladders. */}
+      {sections.promoterTable && view ? (
+        <ProjectPromotersPanel view={view} detail={detail} token={token} chainId={chainId} />
+      ) : null}
 
-        {detail.kpis.length === 0 ? (
-          <Card>
-            <EmptyState
-              title="No KPIs configured"
-              description="This campaign has no measurable milestones, so no rewards can be released."
-            />
-          </Card>
-        ) : (
-          <div className="space-y-4">
-            {detail.kpis.map((kpi) => (
-              <KpiPanel
-                key={kpi.index}
-                kpi={kpi}
-                campaign={detail.address}
-                campaignName={detail.name}
-                decimals={token.decimals}
-                symbol={token.symbol}
-                promoterState={promoterByKpi.get(kpi.index)}
-                chainId={chainId}
-              />
-            ))}
+      {/* 5.2 — KPI panels with tier ladders and per-promoter progress */}
+      {sections.kpis ? (
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-semibold text-ink">
+              KPIs{" "}
+              <span className="font-normal text-ink-muted">
+                ({detail.kpis.length})
+              </span>
+            </h2>
+            {promoter?.joined ? (
+              <p className="text-xs text-ink-muted">
+                Showing your progress · promoter {shortAddress(promoter.promoterId, 8, 6)}
+              </p>
+            ) : (
+              <p className="text-xs text-ink-muted">Showing combined progress across promoters</p>
+            )}
           </div>
-        )}
-      </section>
+
+          {detail.kpis.length === 0 ? (
+            <Card>
+              <EmptyState
+                title="No KPIs configured"
+                description="This campaign has no measurable milestones, so no rewards can be released."
+              />
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {detail.kpis.map((kpi) => (
+                <KpiPanel
+                  key={kpi.index}
+                  kpi={kpi}
+                  campaign={detail.address}
+                  campaignName={detail.name}
+                  decimals={token.decimals}
+                  symbol={token.symbol}
+                  promoterState={promoterByKpi.get(kpi.index)}
+                  chainId={chainId}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : role === "disconnected" ? (
+        /*
+          A tier threshold only means something against "what would *I* be paid", so the ladders wait
+          for a wallet. Said out loud rather than left as a gap — an absent section reads as a
+          campaign with no KPIs, which is a different and much worse claim.
+        */
+        <Card>
+          <EmptyState
+            title={`${detail.kpis.length} KPI${detail.kpis.length === 1 ? "" : "s"} on this campaign`}
+            description="Connect a wallet to see what each KPI measures and the reward tiers behind it."
+          />
+        </Card>
+      ) : null}
     </div>
   );
 }

@@ -52,5 +52,16 @@ function event<const abi extends readonly unknown[], const name extends string>(
 /** `ICampaign.PromoterJoined` — a promoter cleared the reputation gate and joined. */
 export const PROMOTER_JOINED = event(CampaignAbi, "PromoterJoined");
 
+/**
+ * `ICampaign.TierSettled` — a promoter crossed a tier and was paid for it.
+ *
+ * The only enumerable record of *who was paid what*. `Campaign` keeps `paidOut` as one campaign-wide
+ * total and `_settledTiers` per promoter, but a settled tier is not the same as its configured
+ * reward: `_settle` pays `min(reward, remaining)` and marks the tier settled either way, so summing
+ * ladder rewards over-reports a promoter whose payout was clipped by an exhausted pool. This event's
+ * `paid` is the amount that actually left the vault.
+ */
+export const TIER_SETTLED = event(CampaignAbi, "TierSettled");
+
 /** `IAttributionRegistry.TouchStored` — a referral signed attribution to a promoter. */
 export const TOUCH_STORED = event(AttributionRegistryAbi, "TouchStored");

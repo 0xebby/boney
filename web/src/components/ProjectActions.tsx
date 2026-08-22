@@ -15,6 +15,7 @@ import {
 } from "@/lib/lifecycle";
 import {formatTokenAmount, toAmountInput} from "@/lib/format";
 import {parseAmount} from "@/lib/validation";
+import {isProjectWallet} from "@/lib/viewerRole";
 import type {CampaignDetail} from "@/lib/campaignDetail";
 
 /**
@@ -50,7 +51,7 @@ export function ProjectActions({
   nowSeconds: number;
 }) {
   const {address} = useAccount();
-  const isProject = Boolean(address && address.toLowerCase() === detail.project.toLowerCase());
+  const isProject = isProjectWallet(address, detail.project);
 
   const fund = useFundCampaign();
   const lifecycle = useCampaignLifecycle();
