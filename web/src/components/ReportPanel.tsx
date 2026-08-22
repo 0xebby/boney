@@ -22,6 +22,7 @@ import {
 } from "@/lib/reporting";
 import {eventSourceSummary, type EventSource} from "@/lib/kpiSource";
 import {catalogSignature} from "@/lib/eventNames";
+import {isProjectWallet} from "@/lib/viewerRole";
 import {shortAddress, formatTokenAmount} from "@/lib/format";
 import {KPI_KIND_LABEL} from "@/lib/types";
 import type {CampaignDetail} from "@/lib/campaignDetail";
@@ -73,7 +74,7 @@ export function ReportPanel({
   nowSeconds: number;
 }) {
   const {address} = useAccount();
-  const isProject = Boolean(address && address.toLowerCase() === detail.project.toLowerCase());
+  const isProject = isProjectWallet(address, detail.project);
 
   const [kolIndex, setKolIndex] = useState(0);
   const [kpiIndex, setKpiIndex] = useState(0);
