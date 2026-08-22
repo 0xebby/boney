@@ -338,6 +338,8 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
               <KpiPanel
                 key={kpi.index}
                 kpi={kpi}
+                campaign={detail.address}
+                campaignName={detail.name}
                 decimals={token.decimals}
                 symbol={token.symbol}
                 promoterState={promoterByKpi.get(kpi.index)}

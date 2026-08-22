@@ -20,7 +20,8 @@ import {
   type ObservedReferral,
   type TierSeed,
 } from "@/lib/reporting";
-import {eventSourceSummary, knownSignature, type EventSource} from "@/lib/kpiSource";
+import {eventSourceSummary, type EventSource} from "@/lib/kpiSource";
+import {catalogSignature} from "@/lib/eventNames";
 import {shortAddress, formatTokenAmount} from "@/lib/format";
 import {KPI_KIND_LABEL} from "@/lib/types";
 import type {CampaignDetail} from "@/lib/campaignDetail";
@@ -276,7 +277,7 @@ export function ReportPanel({
           {touchScan.scannedFrom !== undefined ? (
             <p className="text-xs text-ink-muted">
               Attribution history was scanned from block{" "}
-              {touchScan.scannedFrom.toLocaleString("en-US")} only — a touch signed before that
+              {touchScan.scannedFrom.toLocaleString("en-US")} only, touches signed before that
               block will not appear here.
             </p>
           ) : null}
@@ -292,8 +293,7 @@ export function ReportPanel({
           {activity.failedWindows > 0 ? (
             <p className="text-xs text-warning">
               {activity.failedWindows} log window
-              {activity.failedWindows === 1 ? "" : "s"} failed to load, so the observed totals are a
-              floor rather than the full picture. Refetch before concluding a referral did nothing.
+              {activity.failedWindows === 1 ? "" : "s"} failed to load, Refetch...
             </p>
           ) : null}
 
@@ -379,9 +379,9 @@ function KpiSelect({
  * the invented-payout bug straight back. Overriding it is the simulate toggle's job, which says so
  * out loud.
  *
- * The event is named where it is known (`knownSignature`) rather than shown as a topic hash: "which
- * contract am I waiting on" is the question a dev asks when the total is zero, and a 32-byte hash
- * does not answer it.
+ * The event is named where it is known (`eventNames.catalogSignature`) rather than shown as a topic
+ * hash: "which contract am I waiting on" is the question a dev asks when the total is zero, and a
+ * 32-byte hash does not answer it.
  */
 function ObservedField({
   source,
@@ -462,7 +462,7 @@ function ObservedField({
         ) : !source ? (
           "This KPI declares no event source, so nothing about it is observable."
         ) : (
-          <>Measured from {eventSourceSummary(source, knownSignature(source.topic0))}</>
+          <>Measured from {eventSourceSummary(source, catalogSignature(source.topic0))}</>
         )}
       </p>
     </div>
@@ -611,9 +611,8 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
   if (status.kind === "unconfigured") {
     return (
       <p className="text-xs text-warning">
-        Boney&rsquo;s verifier has no config for this KPI, so every report will credit nothing —
-        permanently. This is not a relayer delay: <code>setKpiConfig</code> has never run for it, and no
-        amount of waiting fixes it.
+        Boney&rsquo;s verifier has no configuration for this KPI, so every report will credit nothing —
+        permanently.
       </p>
     );
   }
@@ -622,9 +621,7 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
     return (
       <p className="text-xs text-warning">
         Boney has observed <span className="font-mono">0</span> {unit} for these referrals, so this
-        report will confirm successfully and credit nothing. Usually the relayer has not scanned yet —
-        run <code>pnpm relay</code>. If it has, the activity predates these referrals&rsquo; attribution
-        and is not creditable to this promoter at all. Nothing reverts either way.
+        report will confirm successfully but credits nothing.
       </p>
     );
   }
@@ -634,10 +631,7 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
       <p className="text-xs text-warning">
         Boney has observed <span className="font-mono">{status.ceiling.toString()}</span> of the{" "}
         <span className="font-mono">{status.measured.toString()}</span> {unit} measured here, so this
-        report will be trimmed to the smaller figure. Two different causes: the relayer may not have
-        scanned the newest activity yet, or the difference happened before the referral was attributed —
-        the scan above counts that, and Boney deliberately does not. The first resolves on the next
-        relayer run; the second never becomes creditable.
+        report will be trimmed to the smaller figure.
       </p>
     );
   }

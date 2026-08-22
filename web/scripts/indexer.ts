@@ -37,7 +37,8 @@ import {
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, AttributionRegistryAbi, BoneyAbi} from "../src/lib/abis";
-import {decodeEventSource, knownSignature, type EventSource} from "../src/lib/kpiSource";
+import {decodeEventSource, type EventSource} from "../src/lib/kpiSource";
+import {catalogSignature} from "../src/lib/eventNames";
 import {
   actorFromTopic,
   aggregateByActor,
@@ -310,7 +311,7 @@ async function main(): Promise<void> {
       if (!source) continue;
 
       const label = `campaign ${view.campaignId} kpi ${kpiIndex}`;
-      const signature = knownSignature(source.topic0) ?? source.topic0;
+      const signature = catalogSignature(source.topic0) ?? source.topic0;
       console.log(`\n${label} — ${signature} on ${source.source}`);
 
       // Pre-flight against the contract's own guards, so a skip prints a reason instead of

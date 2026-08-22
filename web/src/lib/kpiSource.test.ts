@@ -8,7 +8,6 @@ import {
   eventSourceConflictsWithVerifier,
   eventSourceSummary,
   eventTopic,
-  knownSignature,
   classifyEventSource,
   probeEventSource,
   actorTopicFindings,
@@ -21,8 +20,41 @@ import {
 const WETH_DEPOSIT_TOPIC =
   "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c";
 
-/** The log shape `getLogs` resolves to, so stubbed logs need no `any`. */
-type ProbeLog = Awaited<ReturnType<ProbeClient["getLogs"]>>[number];
+/**
+ * A `getLogs` returning fixed logs.
+ *
+ * Cast, like `stubMetadata` below: viem types `getLogs`' return against the ABI event and block tags
+ * it was called with, so no plain function satisfies that signature structurally. The probe only ever
+ * reads `topics` off the result, which is what these carry.
+ */
+function stubLogs(
+  logs: readonly {
+    topics: `0x${string}`[];
+    data: `0x${string}`;
+    blockNumber: bigint;
+    address: `0x${string}`;
+  }[],
+): ProbeClient["getLogs"] {
+  return (async () => logs) as unknown as ProbeClient["getLogs"];
+}
+
+const BASE_SEPOLIA = 84532;
+/** An address the catalog does not know, so the probe has to ask the contract itself. */
+const SOME_TOKEN = "0x2755a4A19B9B4d3B1e9Bd1cDe3B5DB2A0f9AdCc2" as const;
+
+/**
+ * A `readContract` that answers `name()`/`symbol()` and nothing else.
+ *
+ * Cast because viem's `readContract` is overloaded against the ABI it is handed; a stub cannot
+ * satisfy that signature structurally, and the probe only ever calls it two ways.
+ */
+function stubMetadata(values: {name?: string; symbol?: string}): ProbeClient["readContract"] {
+  return (async ({functionName}: {functionName: string}) => {
+    const value = functionName === "name" ? values.name : values.symbol;
+    if (value === undefined) throw new Error("execution reverted");
+    return value;
+  }) as unknown as ProbeClient["readContract"];
+}
 
 function src(overrides: Partial<EventSource> = {}): EventSource {
   return {
@@ -185,11 +217,10 @@ describe("eventSourceConflictsWithVerifier", () => {
 });
 
 describe("display helpers", () => {
-  it("names a known event rather than showing its hash", () => {
-    expect(knownSignature(WETH_DEPOSIT_TOPIC)).toBe("Deposit(address,uint256)");
-    expect(knownSignature("0x" + "11".repeat(32))).toBeUndefined();
-  });
-
+  /*
+    Naming a topic moved to `eventNames.catalogSignature`, which knows a wider set than the two
+    presets this module offers — see `eventNames.test.ts`. What stays here is the formatting.
+  */
   it("summarizes a source with its signature when known", () => {
     expect(eventSourceSummary(src(), "Deposit(address,uint256)")).toBe(
       "Deposit(address,uint256) on 0x4200…0006",
@@ -303,14 +334,14 @@ describe("probeEventSource", () => {
   it("confirms a live event", async () => {
     const topic0 = eventTopic("Deposit(address,uint256)");
     const client = stubClient({
-      getLogs: async () => [
+      getLogs: stubLogs([
         {
-          topics: [topic0, "0x" + "11".repeat(32)],
-          data: "0x" + "22".repeat(32),
+          topics: [topic0, `0x${"11".repeat(32)}`],
+          data: `0x${"22".repeat(32)}`,
           blockNumber: BigInt(9500),
           address: WETH_BASE,
-        } as ProbeLog,
-      ],
+        },
+      ]),
     });
     const findings = await probeEventSource(client, {
       source: WETH_BASE,
@@ -329,5 +360,65 @@ describe("probeEventSource", () => {
     const findings = await probeEventSource(client, {source: WETH_BASE, signature: ""});
     expect(findings[0].severity).toBe("warn");
     expect(findings[0].message).toMatch(/could not reach/i);
+  });
+
+  /*
+    Naming the contract back is the only feedback a pasted address gets: nothing about the hex tells a
+    project it typed the wrong pool, and the campaign is immutable once deployed.
+  */
+  it("names a known contract without reading it", async () => {
+    const client = stubClient();
+    const findings = await probeEventSource(
+      client,
+      {source: WETH_BASE, signature: ""},
+      {chainId: BASE_SEPOLIA},
+    );
+
+    expect(findings).toEqual([{severity: "ok", message: "Known contract: WETH."}]);
+  });
+
+  it("asks an unknown contract what it calls itself", async () => {
+    const client = stubClient({readContract: stubMetadata({name: "Boney USD", symbol: "bUSD"})});
+    const findings = await probeEventSource(
+      client,
+      {source: SOME_TOKEN, signature: ""},
+      {chainId: BASE_SEPOLIA},
+    );
+
+    expect(findings).toEqual([
+      {severity: "ok", message: "This contract calls itself Boney USD (bUSD)."},
+    ]);
+  });
+
+  it("says nothing when the contract publishes no name", async () => {
+    const client = stubClient({
+      readContract: (async () => {
+        throw new Error("execution reverted");
+      }) as unknown as ProbeClient["readContract"],
+    });
+
+    const findings = await probeEventSource(
+      client,
+      {source: SOME_TOKEN, signature: ""},
+      {chainId: BASE_SEPOLIA},
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  it("keeps the identity line below anything more important", async () => {
+    const client = stubClient({
+      getLogs: async () => [],
+      readContract: stubMetadata({name: "Boney USD", symbol: "bUSD"}),
+    });
+
+    const findings = await probeEventSource(
+      client,
+      {source: SOME_TOKEN, signature: "Deposit(address,uint256)"},
+      {chainId: BASE_SEPOLIA},
+    );
+
+    expect(findings.map((f) => f.severity)).toEqual(["warn", "ok"]);
+    expect(findings[1].message).toMatch(/calls itself/i);
   });
 });
