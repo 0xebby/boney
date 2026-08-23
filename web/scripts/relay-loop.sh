@@ -22,18 +22,20 @@ INTERVAL="${1:-120}"
 
 # campaign:kpiIndex.
 #
-# These are the whole fixture as of the 2026-08-21 redeploy — two campaigns, both watching a real
-# third-party protocol. Addresses change with every `DeployBoney` + reseed, and a stale one is silent:
-# the relayer reports against a dead campaign, credits nothing, and the gated KPI simply stays flat.
+# Only the **gated** KPIs belong here. Relaying an ungated one is pointless: with `verifier == 0x0` the
+# campaign credits the reported figure as-is, so there is no ceiling to raise. Of the 2026-08-23
+# five-project fixture's eleven KPIs, these two are gated.
 #
-# The escrow-token campaign that used to be excluded here is gone with the old fixture. If one is ever
-# seeded again, keep it out: its KPI watched the escrow token, so `Transfer` events that are not user
-# actions got credited — the referral's own self-transfers, tier payouts arriving from the EscrowVault,
-# and the Boney facade moving tokens. The payout case is self-reinforcing, since a payout raises the
+# Addresses change with every `DeployBoney` + reseed, and a stale one is silent: the relayer reports
+# against a dead campaign, credits nothing, and the gated KPI simply stays flat.
+#
+# Keep any KPI that watches the escrow token *out* of this list. Its `Transfer` events include things
+# that are not user actions — the referral's own self-transfers, tier payouts leaving the EscrowVault,
+# the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
 # observed ceiling, which unlocks the next tier, which pays out again.
 TARGETS=(
-  "0x5A6d0E8CF9df181d62Cd2D8608c93d9328678985:0"   # Aave Supplies — real Aave pool
-  "0x6225448466f97d795f363951606B5A22A93241d9:0"   # Sygma Bridge  — real bridge
+  "0x938E0c2Ef6E3ED250D1D004050091f0A26076fEC:0"   # 0 Sygma Bridge — bridge count, real Sygma bridge
+  "0xaBC517769c86a2122bCe19422b7863296c8BCF90:0"   # 4 Uniswap      — swap count, real V3 pool
 )
 
 while true; do

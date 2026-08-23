@@ -11,6 +11,7 @@
     "scripts/compute-report-window.ts",
     "scripts/indexer.ts",
     "scripts/sygma-deposit.ts",
+    "scripts/demo-seed.ts",
     "scripts/uniswap-swap.ts",
     "scripts/generate-deployments.ts",
     "scripts/extract-abis.ts",

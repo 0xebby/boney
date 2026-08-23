@@ -29,13 +29,16 @@ export function DocsPage() {
     <div className="max-w-3xl space-y-8">
       <header>
         <h1 className="font-display text-2xl text-ink">Boneyard Docs</h1>
+
+
+
         <Section title="What is Boneyard" >
           <p>
-            Boneyard is a performance-based growth marketplace for Base. 
+            Boneyard is a performance-based growth marketplace. 
             
-            Projects create campaigns around the onchain activity like <Term>
-              swaps, deposits, volume, mints, transfers, sign-ups, bridges, liquidity, etc.  
-              </Term>that they need and escrow rewards for promoters who generate it. 
+            Projects create campaigns targetting onchain activities like <Term>
+              swaps, deposits, volume generated, mints, transfers, sign-ups, bridges, liquidity, etc.  
+              </Term> that they need and escrow rewards for promoters who generate it. 
             
             Promoters discover campaigns, refer users, and earn based on verified activity. 
             
