@@ -93,7 +93,7 @@ export function KpiPanel({
     <Card>
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <h3 className="flex items-center gap-2 text-sm font-bold text-brand">
             {label}
             {kpi.spec.aggregate ? (
               <span

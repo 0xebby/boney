@@ -366,7 +366,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
       {sections.kpis ? (
         <section className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-sm font-semibold text-ink">
+            <h2 className="text-sm font-bold text-brand">
               KPIs{" "}
               <span className="font-normal text-ink-muted">
                 ({detail.kpis.length})

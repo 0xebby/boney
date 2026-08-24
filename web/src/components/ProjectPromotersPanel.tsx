@@ -73,7 +73,7 @@ export function ProjectPromotersPanel({
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-semibold text-ink">Promoters</h2>
+      <h2 className="text-sm font-bold text-brand">Promoters</h2>
 
       <StatRow>
         <StatTile
