@@ -12,6 +12,20 @@ import {sortRows, nextSortState, type SortState, type SortableColumn} from "@/li
  *
  * Semantics matter more than features: real `<th scope="col">` headers with `aria-sort`, so the
  * sort state is announced rather than implied by an arrow glyph.
+ *
+ * Headers are bold brand yellow. That is the one register yellow is safe in here — as chrome it
+ * measures 12.75:1 on the app surface, where as a *fill* it fails every contrast check (see the
+ * token rationale at the top of `globals.css`). The sans face is variable 300–700, so `font-bold`
+ * is a real weight rather than a synthesised one; the display face is 400-only and must never take
+ * a weight utility.
+ *
+ * Because every header now carries the brand colour, the sorted column is no longer distinguished
+ * by colour — it is carried by the `▲`/`▼` glyph and by `aria-sort`, which was already the
+ * accessible signal. Hover shifts opacity rather than colour so it cannot fight it.
+ *
+ * Unsorted columns show no glyph, but the slot is held with `invisible` rather than dropped: the
+ * arrow sits inside the header's flex row (on the *left* for numeric columns, which reverse), so
+ * collapsing it would shift every label sideways the moment you sort.
  */
 
 export type Column<T> = SortableColumn<T> & {
@@ -75,7 +89,7 @@ export function DataTable<T>({
                   scope="col"
                   aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
                   style={col.width ? {width: col.width} : undefined}
-                  className={`px-3 py-2 font-medium text-ink-muted ${
+                  className={`px-3 py-2 font-bold text-brand ${
                     col.numeric ? "text-right" : "text-left"
                   } ${col.hideOnMobile ? "hidden md:table-cell" : ""}`}
                 >
@@ -83,13 +97,16 @@ export function DataTable<T>({
                     <button
                       type="button"
                       onClick={() => setSort((prev) => nextSortState(prev, col.key))}
-                      className={`inline-flex items-center gap-1 text-xs transition-colors hover:text-ink ${
-                        active ? "text-ink" : ""
-                      } ${col.numeric ? "flex-row-reverse" : ""}`}
+                      className={`inline-flex items-center gap-1 text-xs transition-opacity hover:opacity-80 ${
+                        col.numeric ? "flex-row-reverse" : ""
+                      }`}
                     >
                       {col.header}
-                      <span aria-hidden className="text-[9px] opacity-70">
-                        {active ? (sort!.dir === "desc" ? "▼" : "▲") : "·"}
+                      <span
+                        aria-hidden
+                        className={`text-[9px] ${active ? "opacity-70" : "invisible"}`}
+                      >
+                        {active && sort!.dir === "desc" ? "▼" : "▲"}
                       </span>
                     </button>
                   ) : (

@@ -7,6 +7,11 @@ import type {ReactNode} from "react";
  * The value keeps the font's default *proportional* figures: `tabular-nums` gives every
  * digit the width of a `0`, which makes a number like `121` look loose at display sizes.
  * Tabular figures are reserved for columns that align vertically (table rows, axis ticks).
+ *
+ * The label is bold brand yellow, matching table headers in `ui/DataTable` — labelling chrome is
+ * the register yellow is safe in here (see the token rationale at the top of `globals.css`). The
+ * value stays `text-ink`: the tile's hierarchy is carried by size and face, so colouring the number
+ * too would leave the label and the figure competing.
  */
 export function StatTile({
   label,
@@ -44,7 +49,7 @@ export function StatTile({
         {accent ? (
           <span aria-hidden className="h-3 w-0.5 rounded-full" style={{background: accent}} />
         ) : null}
-        <span className="text-xs text-ink-muted">{label}</span>
+        <span className="text-xs font-bold text-brand">{label}</span>
       </div>
 
       <div className="flex flex-wrap items-baseline gap-x-1.5">
