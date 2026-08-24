@@ -9,7 +9,7 @@ pragma solidity ^0.8.30;
 ///
 ///      **Why normalize at all.** Uniqueness on raw bytes is trivially defeated by accident:
 ///      "Aave", "aave" and "Aave " are three distinct byte strings that read as the same name to a
-///      person, so a raw-bytes index would let three campaigns claim what looks like one Campaign Title.
+///      person, so a raw-bytes index would let three campaigns claim what looks like one identity.
 
 library Names {
     /// @dev Raised when a name is empty, or is nothing but spaces (which normalizes to empty).
