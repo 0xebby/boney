@@ -69,11 +69,23 @@ describe("visibleSections", () => {
   it("keeps the escrow accounting away from referrals", () => {
     expect(visibleSections("referral")).toEqual({
       kpis: false,
+      guide: true,
       promoterTable: false,
       poolUtilization: false,
       escrowReturn: false,
       escrowTiles: false,
     });
+  });
+
+  /*
+    The one section with no per-role argument against it — it carries no payout figure and no accounting
+    ratio, only what each KPI asks for and where. A referral in particular has nothing else on the page:
+    every other section above is false for them.
+  */
+  it("shows the guide to every role", () => {
+    for (const role of ["disconnected", "project", "promoter", "referral", "visitor"] as const) {
+      expect(visibleSections(role).guide, role).toBe(true);
+    }
   });
 
   /*

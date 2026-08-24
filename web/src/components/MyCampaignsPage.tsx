@@ -168,7 +168,7 @@ function Header() {
     <header>
       <h1 className="font-display text-2xl text-ink">My Campaigns</h1>
       <p className="mt-0.5 text-xs text-ink-muted">
-        Campaigns you created. Open one to <b>Fund, Activate, Pause, End, or Reclaim Unspent Escrow</b> funds.
+        Campaigns you created. Click one to <b>Fund, Activate, Pause, End, or Reclaim Unspent Escrow</b> funds.
       </p>
     </header>
   );

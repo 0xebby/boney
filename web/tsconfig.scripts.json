@@ -25,6 +25,9 @@
     "src/lib/knownContracts.ts",
     "src/lib/kpiSummary.ts",
     "src/lib/kpiSummary.test.ts",
+    "src/lib/campaignGuide.ts",
+    "src/lib/campaignGuide.test.ts",
+    "src/lib/guideStore.ts",
     "src/lib/campaignDetail.ts",
     "src/lib/chains.ts",
     "src/lib/deployments.ts"

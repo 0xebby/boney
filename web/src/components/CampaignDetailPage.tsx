@@ -5,6 +5,7 @@ import Link from "next/link";
 import {useAccount} from "wagmi";
 import {useCampaignDetail, usePromoterState} from "@/hooks/useCampaignDetail";
 import {useReferredCampaigns} from "@/hooks/useReferredCampaigns";
+import {useCampaignGuide} from "@/hooks/useCampaignGuide";
 import {useNow} from "@/hooks/useNow";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
@@ -12,6 +13,7 @@ import {StatusPill} from "@/components/ui/StatusPill";
 import {Meter} from "@/components/ui/Meter";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {KpiPanel} from "@/components/KpiPanel";
+import {CampaignGuidePanel, hasGuideContent} from "@/components/CampaignGuidePanel";
 import {ProjectActions} from "@/components/ProjectActions";
 import {ProjectPromotersPanel} from "@/components/ProjectPromotersPanel";
 import {ReportPanel} from "@/components/ReportPanel";
@@ -48,6 +50,13 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
     the fan-outs. It returns an empty list with no wallet connected, so a visitor pays nothing for it.
   */
   const referredQuery = useReferredCampaigns(view ? [view] : []);
+
+  /*
+    The off-chain half of the campaign — what a referral is supposed to do about it. Resolves
+    synchronously from the committed catalog on the first paint and upgrades if the project published
+    its own; see `lib/campaignGuide` for why this cannot live on chain.
+  */
+  const {guide, refetch: refetchGuide} = useCampaignGuide(detail?.address);
 
   /*
     Which sections this reader gets. Not a permission — every fact behind it is public on chain (see
@@ -226,6 +235,21 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
           hint={formatDate(detail.endTime)}
         />
       </StatRow>
+
+      {/*
+        What to actually do about this campaign. Mounted here, directly after the tiles, because it is
+        the section a referral needs and every other block below is hidden from them — so this lands
+        immediately under the header on their page and below the accounting on everyone else's.
+      */}
+      {sections.guide && hasGuideContent(detail, guide, role) ? (
+        <CampaignGuidePanel
+          chainId={chainId}
+          detail={detail}
+          guide={guide}
+          onGuidePublished={refetchGuide}
+          role={role}
+        />
+      ) : null}
 
       {/*
         5.1 — escrow, utilization, window.
