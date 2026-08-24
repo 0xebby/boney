@@ -6,23 +6,18 @@
  */
 
 import {reachFromFollowers} from "./boneyscore";
-import {isStubbedWallet} from "./stubWallets";
+import {isStubbedWallet} from "./stubWalletStore";
+import {stubFiguresFor} from "./stubProfile";
 
 const DEFAULT_ETHOS_API = "https://api.ethos.network";
-const DEFAULT_ETHOS_STUB_API = "http://127.0.0.1:8787/ethos";
 /** FixTweet's public JSON API. Primary follower source. */
 const DEFAULT_FXTWITTER_API = "https://api.fxtwitter.com";
-const DEFAULT_FXTWITTER_STUB_API = "http://127.0.0.1:8787/fx";
 /** vxTwitter's public JSON API. Independent implementation, used when FixTweet is down. */
 const DEFAULT_VXTWITTER_API = "https://api.vxtwitter.com";
-const DEFAULT_VXTWITTER_STUB_API = "http://127.0.0.1:8787/vx";
 
 const ETHOS_API = () => process.env.ETHOS_API ?? DEFAULT_ETHOS_API;
-const ETHOS_STUB_API = () => process.env.ETHOS_STUB_API ?? DEFAULT_ETHOS_STUB_API;
 const FXTWITTER_API = () => process.env.FXTWITTER_API ?? DEFAULT_FXTWITTER_API;
-const FXTWITTER_STUB_API = () => process.env.FXTWITTER_STUB_API ?? DEFAULT_FXTWITTER_STUB_API;
 const VXTWITTER_API = () => process.env.VXTWITTER_API ?? DEFAULT_VXTWITTER_API;
-const VXTWITTER_STUB_API = () => process.env.VXTWITTER_STUB_API ?? DEFAULT_VXTWITTER_STUB_API;
 /**
  * Kaito's crypto-Twitter index, reached through gomtu's proxy.
  *
@@ -31,7 +26,7 @@ const VXTWITTER_STUB_API = () => process.env.VXTWITTER_STUB_API ?? DEFAULT_VXTWI
  * for most), so it only ever cost a lookup. Kaito is kept for `smart_follower_count`, which is a
  * different signal — see `fetchSmartFollowers`.
  */
-const KAITO_API = process.env.KAITO_API ?? "https://gomtu.xyz/api";
+const KAITO_API = () => process.env.KAITO_API ?? "https://gomtu.xyz/api";
 const TIMEOUT_MS = 10_000;
 
 /** Ethos user record, narrowed to the fields we depend on. */
@@ -90,6 +85,10 @@ const NO_PROFILE_MESSAGE =
 /**
  * Fetch an Ethos profile, refusing anything that is not a claimed one.
  *
+ * A wallet on the stub allowlist short-circuits all of this and gets a fabricated profile — see
+ * `lib/stubWallets` for why that list exists and who may change it. Everything below describes the
+ * real path, which is what every other wallet takes.
+ *
  * There are two distinct ways a wallet fails this, both verified against the live API:
  *
  *  - **404 `User not found`** for an address Ethos has no record of at all. This is the ordinary
@@ -112,11 +111,22 @@ export async function fetchEthosProfile(wallet: string): Promise<EthosProfile> {
     throw new EthosError("invalid_address", "Not a valid Ethereum address.", 400);
   }
 
-  const base = isStubbedWallet(wallet) ? ETHOS_STUB_API() : ETHOS_API();
+  // Allowlisted wallets never reach Ethos. Synthesised rather than fetched from the loopback stub so
+  // this works identically on a deploy, where no such host exists — see `lib/stubProfile`.
+  if (isStubbedWallet(wallet)) {
+    const figures = stubFiguresFor(wallet);
+    return {
+      score: figures.score,
+      profileId: figures.profileId,
+      status: "ACTIVE",
+      username: figures.handle,
+      userkeys: [`address:${wallet.toLowerCase()}`, `service:x.com:${figures.profileId}`],
+    };
+  }
 
   let raw: unknown;
   try {
-    raw = await getJson(`${base}/api/v2/user/by/address/${wallet.toLowerCase()}`);
+    raw = await getJson(`${ETHOS_API()}/api/v2/user/by/address/${wallet.toLowerCase()}`);
   } catch (cause) {
     if (cause instanceof HttpError && cause.status === 404) {
       throw new EthosError("no_ethos_profile", NO_PROFILE_MESSAGE, 400);
@@ -172,21 +182,17 @@ export function xHandleOf(profile: EthosProfile): string | null {
 export type FollowerSource = {
   /** Stable identifier, used in health-check output. */
   name: string;
-  url: (encodedHandle: string, wallet?: string) => string;
+  url: (encodedHandle: string) => string;
   /** Pull the count out of a parsed response, or return null when the payload carries none. */
   read: (raw: unknown) => number | null;
 };
-
-function sourceBaseForWallet(wallet: string | undefined, production: string, stub: string) {
-  return isStubbedWallet(wallet) ? stub : production;
-}
 
 export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
   {
     // FixTweet reads X's public GraphQL layer, so its count is the live one. Verified against
     // handles from 718 to 241M followers.
     name: "fxtwitter",
-    url: (h, wallet) => `${sourceBaseForWallet(wallet, FXTWITTER_API(), FXTWITTER_STUB_API())}/${h}`,
+    url: (h) => `${FXTWITTER_API()}/${h}`,
     read: (raw) => {
       const body = raw as {code?: number; user?: {followers?: unknown}};
       const count = body?.user?.followers;
@@ -197,7 +203,7 @@ export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
     // Independent implementation of the same idea. Runs a few thousand followers behind FixTweet on
     // large accounts, which is well inside the log curve's noise floor.
     name: "vxtwitter",
-    url: (h, wallet) => `${sourceBaseForWallet(wallet, VXTWITTER_API(), VXTWITTER_STUB_API())}/${h}`,
+    url: (h) => `${VXTWITTER_API()}/${h}`,
     read: (raw) => {
       const count = (raw as {followers_count?: unknown})?.followers_count;
       return typeof count === "number" ? count : null;
@@ -219,11 +225,15 @@ export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
  * score.
  */
 export async function fetchFollowers(handle: string, wallet?: string): Promise<number> {
+  // An allowlisted wallet's audience is fabricated alongside its Ethos score, so the two halves of
+  // its BoneyScore agree. Nothing is fetched.
+  if (isStubbedWallet(wallet)) return stubFiguresFor(wallet as string).followers;
+
   const encoded = encodeURIComponent(handle);
 
   for (const source of FOLLOWER_SOURCES) {
     try {
-      const count = source.read(await getJson(source.url(encoded, wallet)));
+      const count = source.read(await getJson(source.url(encoded)));
       if (typeof count === "number" && count > 0) return count;
     } catch {
       // Try the next source. A 404 here means "no such handle" and every source will agree, but
@@ -248,9 +258,9 @@ export async function fetchFollowers(handle: string, wallet?: string): Promise<n
  * handles return 0 — so weighting it today would penalise everyone Kaito has not indexed.
  */
 export async function fetchSmartFollowers(handle: string, wallet?: string): Promise<number> {
-  const base = isStubbedWallet(wallet)
-    ? (process.env.KAITO_STUB_API ?? "http://127.0.0.1:8787/smart")
-    : (process.env.KAITO_API ?? "https://gomtu.xyz/api");
+  if (isStubbedWallet(wallet)) return stubFiguresFor(wallet as string).smartFollowers;
+
+  const base = KAITO_API();
 
   try {
     const raw = (await getJson(`${base}/kaito/user_status?username=${encodeURIComponent(handle)}`)) as {

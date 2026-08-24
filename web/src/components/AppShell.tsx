@@ -3,15 +3,16 @@
 import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {useEffect, useState, type ReactNode} from "react";
-import {useAccount, useConnect, useDisconnect} from "wagmi";
+import {useAccount, useConnect, useDisconnect, useWalletClient} from "wagmi";
 import {RankBadge} from "@/components/ui/RankBadge";
 import {NavDrawer} from "@/components/ui/NavDrawer";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useIsPromoter} from "@/hooks/useIsPromoter";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {isActiveNav, navItems} from "@/lib/nav";
 import {rankOf} from "@/lib/ranks";
 import {describeTxError} from "@/lib/txErrors";
-import {DEV_STUB_WALLET} from "@/lib/stubWallets";
+import {DEV_STUB_WALLET, canonicalStubAllowlistMessage} from "@/lib/stubWallets";
 
 /**
  * AppShell — a persistent top bar over a single full-width content column.
@@ -125,10 +126,26 @@ function WalletRank() {
   );
 }
 
+/**
+ * The stub allowlist, for the admin wallet only.
+ *
+ * An address added here is scored by `lib/stubProfile` instead of Ethos, which is how a wallet with no
+ * claimed Ethos profile can be driven through the join and attestation flow. Everyone else on the app
+ * is scored by the real APIs.
+ *
+ * The address check below only decides whether this renders — the real gate is a signature the route
+ * verifies against the admin wallet, because a browser-side check is not a boundary. That is why every
+ * change costs a signing prompt.
+ */
 function DevStubWalletManager() {
   const {address} = useAccount();
+  // Not wagmi's bare `useChainId`: on the first render of every load its store still reads
+  // `chains[0]` — anvil — and a signature bound to the wrong chain fails verification.
+  const chainId = useBoneyChainId();
+  const {data: walletClient} = useWalletClient();
   const [wallet, setWallet] = useState("");
   const [wallets, setWallets] = useState<string[]>([]);
+  const [persisted, setPersisted] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,8 +153,9 @@ function DevStubWalletManager() {
     void (async () => {
       try {
         const response = await fetch("/api/stub-wallets", {cache: "no-store"});
-        const body = (await response.json()) as {wallets?: string[]};
+        const body = (await response.json()) as {wallets?: string[]; persisted?: boolean};
         setWallets(body.wallets ?? []);
+        setPersisted(body.persisted ?? true);
       } catch {
         setWallets([]);
       }
@@ -152,23 +170,41 @@ function DevStubWalletManager() {
       setError("Enter a wallet address.");
       return;
     }
+    if (!walletClient) {
+      setError("Connect the admin wallet to sign.");
+      return;
+    }
 
     setBusy(true);
     setError(null);
 
     try {
+      // The address is normalised before signing so the text matches what the route will rebuild from
+      // its own normalised copy — a mixed-case address would otherwise verify against a different
+      // message than the one that was signed.
+      const normalized = trimmed.toLowerCase();
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const signature = await walletClient.signMessage({
+        message: canonicalStubAllowlistMessage({action, wallet: normalized, chainId, issuedAt}),
+      });
+
       const response = await fetch("/api/stub-wallets", {
         method: "POST",
         headers: {"content-type": "application/json"},
-        body: JSON.stringify({wallet: trimmed, action}),
+        body: JSON.stringify({wallet: normalized, action, chainId, issuedAt, signature}),
       });
 
-      const body = (await response.json()) as {wallets?: string[]; error?: string};
+      const body = (await response.json()) as {
+        wallets?: string[];
+        persisted?: boolean;
+        error?: string;
+      };
       if (!response.ok) {
         throw new Error(body.error ?? "Failed to update allowlist.");
       }
 
       setWallets(body.wallets ?? []);
+      setPersisted(body.persisted ?? true);
       setWallet("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to update allowlist.");
@@ -181,6 +217,10 @@ function DevStubWalletManager() {
     <div className="rounded-md border border-dashed border-hairline bg-surface-2 px-3 py-2 text-left">
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
         Dev stub allowlist
+      </p>
+      <p className="mt-1 text-[10px] text-ink-muted">
+        These wallets get a fabricated BoneyScore instead of a real Ethos lookup. Every other wallet
+        is scored by the live APIs. Each change takes a signature from this wallet.
       </p>
 
       <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -224,6 +264,13 @@ function DevStubWalletManager() {
       ) : (
         <p className="mt-2 text-[10px] text-ink-muted">No stub wallets currently allowed.</p>
       )}
+
+      {!persisted ? (
+        <p className="mt-2 text-[10px] text-ink-muted">
+          This deployment has no writable store, so the list falls back to its committed default and a
+          change lasts only as long as this server instance.
+        </p>
+      ) : null}
 
       {error ? <p className="mt-2 text-[10px] text-critical">{error}</p> : null}
     </div>
