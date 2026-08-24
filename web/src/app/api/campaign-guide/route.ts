@@ -1,9 +1,9 @@
 import {createPublicClient, http} from "viem";
 import type {NextRequest} from "next/server";
 import {CampaignAbi} from "@/lib/abis";
-import {anvil, sepolia, baseSepolia, mainnet} from "@/lib/chains";
 import {canonicalGuideMessage, isEmptyGuide, sanitizeGuide} from "@/lib/campaignGuide";
 import {readGuide, writeGuide} from "@/lib/guideStore";
+import {chainFor, rpcFor} from "@/lib/serverChain";
 
 /**
  * Campaign guides — the off-chain "what am I supposed to do here" a campaign page renders.
@@ -34,29 +34,6 @@ import {readGuide, writeGuide} from "@/lib/guideStore";
 export const runtime = "nodejs";
 /** The store changes under a running server, and a stale guide is a wrong instruction. Never cache. */
 export const dynamic = "force-dynamic";
-
-/** viem chain objects by id, for the RPC transport the project read needs. Mirrors `/api/attest`. */
-const CHAINS = [anvil, sepolia, baseSepolia, mainnet];
-const chainFor = (id: number) => CHAINS.find((c) => c.id === id);
-
-/**
- * The endpoint the rest of the app already reads through, per chain — `undefined` to take viem's
- * default for chains that have no override.
- *
- * `http()` with no URL uses the chain's built-in RPC, which for Base Sepolia is `sepolia.base.org`:
- * the endpoint `wagmi.ts` and `.env.local` both deliberately moved off, because it 502s roughly one
- * call in three. A flake on the `project()` read below is indistinguishable from a bad address, so it
- * comes back as `unknown_campaign` — telling a project there is no campaign at an address they just
- * created one at. Same URL as the client, so the one server-side read cannot be the flaky one.
- */
-function rpcFor(chainId: number): string | undefined {
-  if (chainId === baseSepolia.id) {
-    return process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com";
-  }
-  if (chainId === anvil.id) return process.env.NEXT_PUBLIC_ANVIL_RPC ?? "http://127.0.0.1:8545";
-  if (chainId === sepolia.id) return process.env.NEXT_PUBLIC_SEPOLIA_RPC;
-  return process.env.NEXT_PUBLIC_MAINNET_RPC;
-}
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const SIGNATURE_RE = /^0x[0-9a-fA-F]+$/;

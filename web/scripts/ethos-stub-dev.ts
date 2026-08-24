@@ -4,54 +4,44 @@
  * Usage: pnpm ethos:stub:dev [--port 8787]
  *                            [--pin 0xaddr:score:followers] (repeatable)
  *
- * Why this exists alongside `ethos-stub.ts`
- * -----------------------------------------
- * The general stub's `--score` / `--followers` are *global* overrides: they force the same values
- * for every address that asks. That is right for exercising one specific score end-to-end, and
- * wrong for everything else — with them set, the promoter directory, the rank badges and the reach
- * curve all collapse to a single point, because every wallet reports identically.
+ * ## This is the *global* stub, and it is no longer the usual path
  *
- * This stub pins *named wallets* instead. A pinned address gets exactly the score and follower
- * count you asked for; every other address falls through to the same derived pseudo-profile the
- * general stub produces, so the directory stays populated across the whole rank ladder while your
- * own wallet sits at a known, reproducible number.
+ * The app now synthesises a fabricated profile in-process for any wallet on the stub allowlist — see
+ * `src/lib/stubProfile` and `src/lib/stubWalletStore` — so the dev wallet needs no server running at
+ * all, and works the same on a deploy where a loopback port cannot be reached.
  *
- * Point the four upstream vars at it exactly as with the general stub — the route shapes are
- * identical, so `web/.env.local` needs no change when switching between the two:
+ * What this script is still for is the *other* mode: pointing `ETHOS_API`/`FXTWITTER_API`/
+ * `VXTWITTER_API`/`KAITO_API` at it, which stubs **every** wallet regardless of the allowlist. That is
+ * the right tool for exercising the promoter directory across a whole rank ladder, or for working
+ * offline, and the wrong one for testing that real profiles resolve.
+ *
+ * Why this stub alongside `ethos-stub.ts`
+ * --------------------------------------
+ * The general stub's `--score` / `--followers` are *global* overrides: they force the same values for
+ * every address that asks, so every wallet reports identically and the rank badges and reach curve all
+ * collapse to a single point. This one pins *named wallets* and derives everyone else, so the directory
+ * stays populated while your own wallet sits at a known, reproducible number.
  *
  *   ETHOS_API=http://127.0.0.1:8787/ethos
  *   FXTWITTER_API=http://127.0.0.1:8787/fx
  *   VXTWITTER_API=http://127.0.0.1:8787/vx
  *   KAITO_API=http://127.0.0.1:8787/smart
  *
- * Only ever bound to loopback, for the same reason as the general stub: this mints reputation, and
- * the only client that needs to reach it is the Next server on the same host.
+ * Only ever bound to loopback: this mints reputation, and the only client that needs to reach it is
+ * the Next server on the same host.
+ *
+ * The pins and the derivation live in `src/lib/stubProfile`, imported rather than duplicated, so a
+ * pinned wallet reads identically whether this served it or the app synthesised it.
  */
 
 import {createServer, type IncomingMessage, type ServerResponse} from "node:http";
-
-/** One wallet's pinned upstream identity. */
-type Pin = {score: number; followers: number; handle: string};
-
-/**
- * Wallets pinned by default.
- *
- * The dev wallet is registered as an attestor on the Base Sepolia `AttestationVerifier`, so it can
- * sign its own attestations and submit them — the whole point of pinning it is to drive that path
- * against a known BoneyScore rather than whatever its address happens to hash to.
- *
- * 2750 Ethos with 30,000 followers gives `7*2750 + 3*reachFromFollowers(30000)` = 7*2750 + 3*1790
- * = 24,620 of a possible 28,000. High enough to clear any plausible `minReputation`, and still a
- * real point on the reach curve rather than the 2800 ceiling — a maxed-out reach would hide any
- * bug in the log normalisation, since every large follower count clamps to the same value.
- */
-const DEFAULT_PINS: Record<string, Pin> = {
-  "0x98405c5776a63547e7cb16000ba04ca53d9fb2f8": {
-    score: 2750,
-    followers: 30_000,
-    handle: "dev_98405c",
-  },
-};
+import {
+  ethosResponseShape,
+  stubFiguresFor,
+  stubHandleFor,
+  stubPins,
+  type StubPin,
+} from "../src/lib/stubProfile";
 
 function flag(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -59,15 +49,16 @@ function flag(name: string): string | undefined {
 }
 
 /**
- * Parse every `--pin 0xaddr:score:followers` occurrence.
+ * Parse every `--pin 0xaddr:score:followers` occurrence, on top of the committed defaults.
  *
  * Repeatable rather than comma-separated because a pin already contains colons and would make a
- * comma-separated list of triples hard to read. Malformed pins are a hard exit, not a warning: a
- * silently-ignored pin looks exactly like the stub serving a derived profile, and you would chase
- * the wrong bug.
+ * comma-separated list of triples hard to read. Malformed pins are a hard exit here, unlike the
+ * `BONEY_STUB_PINS` env var the app reads: this is a foreground process someone just started, so
+ * failing loudly is cheap, and a silently-ignored pin looks exactly like the stub serving a derived
+ * profile — you would chase the wrong bug.
  */
-function parsePins(): Record<string, Pin> {
-  const pins: Record<string, Pin> = {...DEFAULT_PINS};
+function parsePins(): Record<string, StubPin> {
+  const pins: Record<string, StubPin> = {...stubPins()};
 
   for (let i = 0; i < process.argv.length; i++) {
     if (process.argv[i] !== "--pin") continue;
@@ -83,9 +74,7 @@ function parsePins(): Record<string, Pin> {
     pins[lower] = {
       score: Number(score),
       followers: Number(followers),
-      // Derived from the address so a pin added on the command line still gets a stable handle
-      // without having to spell one out.
-      handle: `dev_${lower.slice(2, 8)}`,
+      handle: stubHandleFor(lower),
     };
   }
 
@@ -99,44 +88,26 @@ const PINS = parsePins();
 /**
  * Reverse index from handle back to its pin.
  *
- * Necessary because the follower endpoints are keyed by *handle*, not address: `lib/ethos.ts` reads
- * the handle out of the Ethos response and never passes the address along. Without this map a
- * pinned wallet would get its pinned Ethos score but a derived follower count, which is the exact
- * mismatch the general stub avoids only by forcing followers globally.
+ * Necessary because the follower endpoints are keyed by *handle*, not address: a client reads the
+ * handle out of the Ethos response and never passes the address along. Without this map a pinned
+ * wallet would get its pinned Ethos score but a derived follower count, which is the exact mismatch
+ * the general stub avoids only by forcing followers globally.
  */
-const PINS_BY_HANDLE: Record<string, Pin> = Object.fromEntries(
+const PINS_BY_HANDLE: Record<string, StubPin> = Object.fromEntries(
   Object.values(PINS).map((pin) => [pin.handle, pin]),
 );
 
-/** FNV-1a. Matches `ethos-stub.ts` so an unpinned address keeps the same profile across both. */
-function hash(input: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h;
-}
-
-/** Derived pseudo-profile for an unpinned key. Mirrors `ethos-stub.ts`'s spread exactly. */
-function derived(key: string) {
-  const h = hash(key.toLowerCase());
-  const exponent = 2 + (((h >>> 11) % 1000) / 1000) * 4.7;
-  const followers = Math.round(10 ** exponent);
-  return {
-    score: 600 + (h % 2051),
-    followers,
-    smartFollowers: Math.floor(followers * (0.001 + ((h >>> 21) % 40) / 10_000)),
-    profileId: 10_000 + (h % 90_000),
-  };
-}
-
-/** Profile for an address — pinned if we know it, derived otherwise. */
+/**
+ * Profile for an address — the shared synthesiser, plus any pin added on the command line.
+ *
+ * A `--pin` cannot be pushed into `stubProfile` (it reads the environment, not argv), so it is applied
+ * over the top here. Everything else, pinned or derived, comes from the shared module.
+ */
 function profileForAddress(address: string) {
   const lower = address.toLowerCase();
-  const base = derived(lower);
   const pin = PINS[lower];
-  if (!pin) return {...base, handle: `stub_${lower.slice(2, 8)}`};
+  const base = stubFiguresFor(lower);
+  if (!pin) return base;
 
   return {
     ...base,
@@ -153,7 +124,9 @@ function profileForHandle(handleName: string) {
   if (pin) {
     return {followers: pin.followers, smartFollowers: Math.floor(pin.followers * 0.004)};
   }
-  const base = derived(`handle:${handleName}`);
+  // Keyed by handle rather than address, so the derived spread is over a different input space. The
+  // `handle:` prefix keeps it from colliding with an address's own derived profile.
+  const base = stubFiguresFor(`handle:${handleName}`);
   return {followers: base.followers, smartFollowers: base.smartFollowers};
 }
 
@@ -177,15 +150,7 @@ function handle(request: IncomingMessage, response: ServerResponse): void {
     if (!ADDRESS_RE.test(address)) return json(response, 400, {error: "Invalid address"});
 
     const p = profileForAddress(address);
-    const lower = address.toLowerCase();
-    return json(response, 200, {
-      id: p.profileId,
-      profileId: p.profileId,
-      score: p.score,
-      status: "ACTIVE",
-      username: p.handle,
-      userkeys: [`address:${lower}`, `service:x.com:${p.profileId}`],
-    });
+    return json(response, 200, ethosResponseShape(address, p));
   }
 
   const fxMatch = path.match(/^\/fx\/([^/]+)$/);

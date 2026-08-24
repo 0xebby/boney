@@ -4,7 +4,8 @@ import type {NextRequest} from "next/server";
 import {buildScoreReport, EthosError, isAddress} from "@/lib/ethos";
 import {SCHEMA_ETHOS, SCHEMA_REACH, SCHEMA_FOLLOWERS} from "@/lib/boneyscore";
 import {AttestationVerifierAbi} from "@/lib/abis";
-import {getDeployment, ZERO_ADDRESS, anvil, sepolia, baseSepolia, mainnet} from "@/lib/chains";
+import {getDeployment, ZERO_ADDRESS} from "@/lib/chains";
+import {chainFor, rpcFor} from "@/lib/serverChain";
 
 /**
  * Attestor endpoint — turns an Ethos profile into signed reputation attestations.
@@ -72,10 +73,6 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
 
 const schemaIdOf = (name: string) => keccak256(stringToHex(name));
 
-/** viem chain objects by id, for the RPC transport the nonce read needs. */
-const CHAINS = [anvil, sepolia, baseSepolia, mainnet];
-const chainFor = (id: number) => CHAINS.find((c) => c.id === id);
-
 function fail(code: string, message: string, status: number) {
   return Response.json({error: code, message}, {status});
 }
@@ -117,7 +114,9 @@ export async function POST(request: NextRequest) {
   }
 
   const account = privateKeyToAccount(key as `0x${string}`);
-  const client = createPublicClient({chain, transport: http()});
+  // `rpcFor` rather than a bare `http()`: viem's default for Base Sepolia is `sepolia.base.org`, which
+  // 502s roughly one call in three, and a flaked nonce read mints a signature against a stale nonce.
+  const client = createPublicClient({chain, transport: http(rpcFor(chain.id))});
 
   const values: Array<{schema: string; value: number}> = [
     {schema: SCHEMA_ETHOS, value: report.ethos},
