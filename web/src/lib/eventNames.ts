@@ -1,6 +1,6 @@
 import {type Hex} from "viem";
 import {KPI_KIND_LABEL, type KpiKind} from "./types";
-import {eventTopic, effectiveScale, type EventSource} from "./kpiSource";
+import {eventTopic, effectiveScale, type AmountMode, type EventSource} from "./kpiSource";
 import {parseEventSignature} from "./relayCore";
 import {knownContractName, contractLabel} from "./knownContracts";
 import {shortAddress} from "./format";
@@ -137,8 +137,14 @@ export type TrackedEventInput = {
   chainId?: number;
   /** `EventMetricKpiVerifier.KpiConfig.eventSignature`, when the KPI has a config. */
   configSignature?: string;
-  /** What the source contract calls itself, when it answers `name()`/`symbol()` at all. */
-  scanned?: {name?: string; symbol?: string};
+  /**
+   * What the source contract calls itself, when it answers `name()`/`symbol()`/`decimals()` at all.
+   *
+   * `decimals` is what lets a `dataWord0` scale be stated as a real token amount ("0.001 WETH")
+   * rather than as a divisor. Absent for the contracts that answer none of the three — Aave's Pool
+   * proxy and Sygma's bridge — where `lib/kpiUnits` falls back to base units rather than assuming 18.
+   */
+  scanned?: {name?: string; symbol?: string; decimals?: number};
   /** The campaign's own name — a project's label for the thing, not the contract's. */
   campaignName?: string;
 };
@@ -156,6 +162,22 @@ export type TrackedEvent = {
   protocolFrom: ProtocolNameSource;
   /** Divisor applied before crediting; 1 when unscaled. */
   scale: bigint;
+  /**
+   * How the credited amount is taken from a matched log.
+   *
+   * Carried alongside `scale` because neither means anything without the other: the same divisor is a
+   * unit conversion under `dataWord0` and a plain difficulty multiplier under `count`. `lib/kpiUnits`
+   * is what turns the pair into a sentence.
+   */
+  amountMode: AmountMode;
+  /**
+   * The watched contract's own units, when it published them.
+   *
+   * Carried through from `scanned` rather than left for the caller to thread separately: a scale is
+   * only expressible as a token amount together with the decimals it is denominated in, and every
+   * consumer of one wants the other. Absent for a contract that answers neither.
+   */
+  token?: {symbol?: string; decimals?: number};
   /**
    * Set when the verifier's configured signature hashes to a different topic than the params blob.
    *
@@ -177,6 +199,7 @@ export type TrackedEvent = {
  */
 export function resolveTrackedEvent(input: TrackedEventInput): TrackedEvent {
   const {event, eventFrom, drift} = resolveEventName(input);
+  const token = resolveToken(input.scanned);
 
   return {
     event,
@@ -184,8 +207,29 @@ export function resolveTrackedEvent(input: TrackedEventInput): TrackedEvent {
     topic0: input.source.topic0,
     contract: input.source.source,
     scale: effectiveScale(input.source),
+    amountMode: input.source.amountMode,
+    ...(token ? {token} : {}),
     ...resolveProtocol(input),
     ...(drift ? {drift} : {}),
+  };
+}
+
+/**
+ * The scanned units, or nothing.
+ *
+ * Omitted entirely rather than returned as a pair of `undefined`s, so a consumer can ask "did the
+ * contract say" with a single check. A symbol alone still counts: `kpiUnits` needs the decimals to
+ * name an amount, but a caller labelling something else may only want the symbol.
+ */
+function resolveToken(
+  scanned: TrackedEventInput["scanned"],
+): {symbol?: string; decimals?: number} | undefined {
+  if (!scanned) return undefined;
+  if (scanned.symbol === undefined && scanned.decimals === undefined) return undefined;
+
+  return {
+    ...(scanned.symbol !== undefined ? {symbol: scanned.symbol} : {}),
+    ...(scanned.decimals !== undefined ? {decimals: scanned.decimals} : {}),
   };
 }
 

@@ -12,7 +12,8 @@ import {useNameAvailability} from "@/hooks/useNameAvailability";
 import {useScoreCeiling} from "@/hooks/useScoreCeiling";
 import {useNow} from "@/hooks/useNow";
 import {useEventSourceProbe} from "@/hooks/useEventSourceProbe";
-import {validateCampaignDraft, isBoundedScoreCeiling, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
+import {validateCampaignDraft, isBoundedScoreCeiling, parseCount, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
+import {describeThreshold, describeUnit, type UnitInput} from "@/lib/kpiUnits";
 import {
   MAX_ACTION_LENGTH,
   MAX_SUMMARY_LENGTH,
@@ -446,6 +447,7 @@ export function CreateCampaignPage() {
 
                 <EventSourceFields
                   kpiIndex={i}
+                  kind={kpi.kind}
                   value={kpi.eventSource}
                   onChange={(eventSource) => updateKpi(i, {eventSource})}
                   issueFor={issueFor}
@@ -496,12 +498,22 @@ export function CreateCampaignPage() {
 
                   {kpi.tiers.map((tier, j) => (
                     <div key={j} className="grid grid-cols-[1fr,1fr,auto] gap-2 items-end">
-                      <Field
-                        label={`Tier ${j + 1} threshold`}
-                        value={tier.threshold}
-                        onChange={(v) => updateTier(i, j, {threshold: v})}
-                        error={issueFor(`kpis.${i}.tiers.${j}.threshold`)}
-                      />
+                      <div>
+                        <Field
+                          label={`Tier ${j + 1} threshold`}
+                          value={tier.threshold}
+                          onChange={(v) => updateTier(i, j, {threshold: v})}
+                          error={issueFor(`kpis.${i}.tiers.${j}.threshold`)}
+                        />
+                        {/*
+                          The threshold restated as the work it takes, right under the number being
+                          typed — the highest-leverage place to catch a scale mistake, since it is the
+                          exact spot the lynx project entered 50 meaning 50 wraps and got 500. Shown
+                          only for a count KPI with a scale above 1; `describeThreshold` returns null
+                          otherwise rather than echoing the figure above it.
+                        */}
+                        <TierActionHint kpi={kpi} threshold={tier.threshold} />
+                      </div>
                       <Field
                         label="Reward"
                         value={tier.reward}
@@ -747,11 +759,14 @@ function CeilingNote({ceiling}: {ceiling?: bigint}) {
  */
 function EventSourceFields({
   kpiIndex,
+  kind,
   value,
   onChange,
   issueFor,
 }: {
   kpiIndex: number;
+  /** This KPI's category, for the fallback noun when no signature has been typed. */
+  kind: KpiKind;
   value: EventSourceDraft | undefined;
   onChange: (next: EventSourceDraft | undefined) => void;
   issueFor: (path: string) => string | undefined;
@@ -769,6 +784,10 @@ function EventSourceFields({
   const probe = useEventSourceProbe({
     source: value?.source ?? "",
     signature: value?.signature ?? "",
+    // The mode and scale drive the count-mode scale warning, which needs no chain read and no
+    // address — see `classifyEventSource`.
+    amountMode: value?.amountMode === "count" ? AMOUNT_MODE.count : AMOUNT_MODE.dataWord0,
+    scale: value?.scale ?? "",
   });
 
   /** Fills every field from a verified preset, so a project need not assemble a topic by hand. */
@@ -871,8 +890,20 @@ function EventSourceFields({
 
           <p className="text-xs text-ink-muted">
             Which indexed topic holds the referral&rsquo;s address, and how much each event is worth.
-            Scale divides the raw amount so tier thresholds stay small — 1e15 makes 0.001 of an
-            18-decimal token one unit of progress.
+          </p>
+
+          {/*
+            What the two fields above actually add up to, restated every keystroke.
+
+            The hint they replace explained only the `dataWord0` case — "1e15 makes 0.001 of an
+            18-decimal token one unit" — and said nothing about `count`, where a scale cannot measure
+            size and only makes thresholds harder to reach. That omission is how the live lynx
+            campaign came to credit 51 deposits as 5. Pure, so it needs no chain read and no debounce;
+            base units rather than a token amount, because naming the token would mean reading its
+            decimals and this updates faster than a request could land. See `lib/kpiUnits`.
+          */}
+          <p className="rounded border border-hairline bg-surface-1 px-2 py-1.5 text-xs text-ink-secondary">
+            {describeUnit(unitFromDraft(kind, value))}
           </p>
 
           {probe.findings.length > 0 && (
@@ -911,6 +942,58 @@ function EventSourceFields({
 
 function emptyEventSource(): EventSourceDraft {
   return {source: "", signature: "", actorTopic: "1", amountMode: "dataWord0", scale: "1"};
+}
+
+/**
+ * A scale string as the encoder will read it, for the live unit preview.
+ *
+ * `parseCount` is the same parser `campaignArgs.buildKpiSpec` uses at submit, so the sentence
+ * describes what would actually be encoded rather than a looser reading of the field: `1e15` is not a
+ * whole number to either, and a blank means 1 to both (`effectiveScale`). Anything it rejects falls
+ * back to 1 here, which keeps the preview honest — the number the KPI would carry if submitted now,
+ * with the form's own "Enter a whole number." handling the malformed case separately.
+ */
+function parseScale(raw: string): bigint {
+  return parseCount(raw.trim()) ?? BigInt(1);
+}
+
+/**
+ * What one unit of progress would cost, as the draft currently stands.
+ *
+ * Shared by the sentence under the Scale field and the action count under each tier threshold, so the
+ * two cannot disagree about what a unit is — which would be worse than either being absent.
+ *
+ * A KPI with no event source still gets an input, describing the `dataWord0` default. That is what
+ * `emptyEventSource` sets, so it is what the KPI would carry if the box were ticked and nothing else
+ * touched; `describeThreshold` returns null for it anyway, so no tier line appears.
+ */
+function unitFromDraft(kind: KpiKind, source: EventSourceDraft | undefined): UnitInput {
+  return {
+    amountMode: source?.amountMode === "count" ? AMOUNT_MODE.count : AMOUNT_MODE.dataWord0,
+    kind,
+    scale: parseScale(source?.scale ?? ""),
+    signature: source?.signature,
+  };
+}
+
+/**
+ * A tier threshold restated as the number of actions behind it, or nothing.
+ *
+ * Renders under the threshold input while it is being typed. Silent for a hand-reported KPI (no event
+ * source), for a threshold that is not a whole number yet, and for any KPI where the action count
+ * equals the threshold — `describeThreshold` decides the last of these, and reads the same
+ * `unitFromDraft` the sentence above the ladder does, so the two never contradict.
+ */
+function TierActionHint({kpi, threshold}: {kpi: KpiDraft; threshold: string}) {
+  if (!kpi.eventSource) return null;
+
+  const parsed = parseCount(threshold.trim());
+  if (parsed === null) return null;
+
+  const actions = describeThreshold(parsed, unitFromDraft(kpi.kind, kpi.eventSource));
+  if (!actions) return null;
+
+  return <p className="mt-1 text-[11px] text-ink-muted">= {actions}</p>;
 }
 
 /**
