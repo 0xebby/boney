@@ -33,9 +33,23 @@ const spaceGrotesk = Space_Grotesk({
   display: "swap",
 });
 
+/**
+ * `base:app_id` claims every route for the Base app of that id, so the Base client renders a
+ * shared Boneyard link — the marketplace, a campaign, a promoter — as an embedded mini app
+ * rather than a plain URL. It lives here rather than on the campaign page because any route can
+ * be the one that gets shared.
+ *
+ * It has no first-class field in the `Metadata` type, and `next/head` does not exist in the App
+ * Router, so it goes through `other` — the escape hatch for arbitrary `<meta name>` tags.
+ *
+ * Metadata from nested segments is merged SHALLOWLY and duplicate keys are replaced, so a page
+ * that exports its own `other` drops this tag for that route and has to repeat it. No page does
+ * today. See `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/generate-metadata.md`.
+ */
 export const metadata: Metadata = {
   title: "Boneyard",
   description: "Campaigns with rewards held in escrow and released as milestones are verified.",
+  other: {"base:app_id": "695996314d3a403912ed8c02"},
 };
 
 export default function RootLayout({children}: Readonly<{children: React.ReactNode}>) {
