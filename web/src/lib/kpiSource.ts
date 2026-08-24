@@ -258,6 +258,16 @@ export type ProbeFinding = {
 export type ProbeInput = {
   source: string;
   signature: string;
+  /**
+   * How the amount is taken from a matched log, when the form has settled on one.
+   *
+   * Optional because every caller predates it and because the interesting check below — a scale that
+   * cannot do anything in `count` mode — is answerable without a source address, which the rest of
+   * this type is about.
+   */
+  amountMode?: AmountMode;
+  /** The raw scale as typed. A string, because a half-typed number is a normal state of a form. */
+  scale?: string;
 };
 
 /**
@@ -284,11 +294,22 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
   const source = input.source.trim();
   const signature = input.signature.trim();
 
-  if (!source) return findings;
+  /*
+    The scale check runs first, and before the `!source` guard, deliberately.
+
+    It needs no address — it is a statement about two other fields — and the form it most needs to
+    reach is the half-filled one, where someone has picked a mode and typed a scale but not yet
+    pasted a contract. Ordering it after the guards would silently withhold it from exactly that
+    reader. `ProbeFinding[]` is documented as worst-first and this is a `warn`, so it is spliced in
+    below rather than pushed, letting the `error`s that follow keep the head of the list.
+  */
+  const scaleFinding = classifyCountScale(input);
+
+  if (!source) return scaleFinding ? [scaleFinding] : findings;
 
   if (!isViemAddress(source, {strict: false})) {
     findings.push({severity: "error", message: "Not a valid address."});
-    return findings;
+    return withScale(findings, scaleFinding);
   }
 
   if (source.toLowerCase() === ZERO_ADDRESS) {
@@ -296,7 +317,7 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
       severity: "error",
       message: "This is the zero address — the preset's placeholder. Enter your own contract.",
     });
-    return findings;
+    return withScale(findings, scaleFinding);
   }
 
   if (signature && !SIGNATURE_RE.test(signature)) {
@@ -306,7 +327,50 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
     });
   }
 
-  return findings;
+  return withScale(findings, scaleFinding);
+}
+
+/** Appends the advisory scale finding, keeping the list's worst-first order. */
+function withScale(findings: ProbeFinding[], scale: ProbeFinding | null): ProbeFinding[] {
+  return scale ? [...findings, scale] : findings;
+}
+
+/**
+ * The one configuration that encodes cleanly, deploys cleanly, credits progress — and still means
+ * something the project almost certainly did not intend.
+ *
+ * In `count` mode `indexerCore.rawAmount` returns exactly 1 per matching log, so there is no magnitude
+ * for a scale to normalize; the divisor only makes thresholds harder to reach. It is *legal* and
+ * expressible — "ten deposits per unit" is a real thing to want — so this is a `warn` and never a
+ * block, per the form's stated posture. But it is how Base Sepolia's lynx campaign came to credit 51
+ * WETH deposits as 5 units against a first tier of 50, which is 500 wraps.
+ *
+ * A scale of 1 (or a blank, or a zero, which `effectiveScale` reads as 1) is the correct setting here
+ * and says nothing.
+ */
+function classifyCountScale(input: ProbeInput): ProbeFinding | null {
+  if (input.amountMode !== AMOUNT_MODE.count) return null;
+
+  const raw = input.scale?.trim();
+  if (!raw) return null;
+
+  // Anything unparseable is the form's own "Enter a whole number." to report, not this.
+  let scale: bigint;
+  try {
+    scale = BigInt(raw);
+  } catch {
+    return null;
+  }
+
+  if (scale <= BigInt(1)) return null;
+
+  return {
+    severity: "warn",
+    message:
+      `In count mode every matching event is worth 1, so a scale of ${scale.toLocaleString("en-US")} ` +
+      `means ${scale.toLocaleString("en-US")} events per unit of progress — it cannot measure size. ` +
+      "Set the scale to 1, or switch Amount to First data word to credit the event's own value.",
+  };
 }
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -360,6 +424,25 @@ export async function probeEventSource(
   const structural = classifyEventSource(input);
   if (structural.some((f) => f.severity === "error")) return structural;
 
+  /*
+    Advisory structural findings survive the chain probe.
+
+    They describe the KPI's *configuration* — a scale that cannot act in the chosen mode — so nothing
+    the chain reports about the contract can resolve them. Appended here, once, because every return
+    path in `probeChain` builds a fresh list and would otherwise drop them the moment the address
+    turned out to be real.
+  */
+  const advisory = structural.filter((f) => f.severity === "warn");
+  const chain = await probeChain(client, input, options);
+
+  return [...chain, ...advisory];
+}
+
+async function probeChain(
+  client: ProbeClient,
+  input: ProbeInput,
+  options: ProbeOptions,
+): Promise<ProbeFinding[]> {
   const source = input.source.trim() as `0x${string}`;
   const signature = input.signature.trim();
 

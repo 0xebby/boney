@@ -265,6 +265,90 @@ describe("classifyEventSource", () => {
   it("accepts an empty source as a no-op", () => {
     expect(classifyEventSource({source: "", signature: ""})).toEqual([]);
   });
+
+  /*
+    The lynx campaign's configuration: `count` mode at `scale: 10`, which encodes cleanly, deploys
+    cleanly, credits progress, and still divided 51 WETH deposits down to 5 units.
+  */
+  it("warns that a scale cannot act in count mode", () => {
+    const findings = classifyEventSource({
+      amountMode: AMOUNT_MODE.count,
+      scale: "10",
+      signature: "Deposit(address,uint256)",
+      source: WETH_BASE,
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warn");
+    expect(findings[0].message).toMatch(/cannot measure size/i);
+    expect(findings[0].message).toMatch(/10 events per unit/i);
+  });
+
+  /*
+    Reaches the half-filled form too. Someone picks a mode and types a scale before pasting a
+    contract, and that is the reader with the most to gain from being told now.
+  */
+  it("warns before an address has been entered at all", () => {
+    const findings = classifyEventSource({
+      amountMode: AMOUNT_MODE.count,
+      scale: "10",
+      signature: "",
+      source: "",
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warn");
+  });
+
+  it("keeps errors ahead of the scale warning", () => {
+    const findings = classifyEventSource({
+      amountMode: AMOUNT_MODE.count,
+      scale: "10",
+      signature: "",
+      source: "not-an-address",
+    });
+
+    // Documented as worst-first, and the form renders the list in order.
+    expect(findings.map((f) => f.severity)).toEqual(["error", "warn"]);
+  });
+
+  it("says nothing about a scale that does something", () => {
+    // `dataWord0` is the mode scale exists for.
+    expect(
+      classifyEventSource({
+        amountMode: AMOUNT_MODE.dataWord0,
+        scale: "1000000000000000",
+        signature: "Deposit(address,uint256)",
+        source: WETH_BASE,
+      }),
+    ).toEqual([]);
+  });
+
+  it("says nothing about a scale that is already correct", () => {
+    // 0 and a blank both mean 1 to `effectiveScale`, so none of the three is worth a warning.
+    for (const scale of ["1", "0", "", "   "]) {
+      expect(
+        classifyEventSource({
+          amountMode: AMOUNT_MODE.count,
+          scale,
+          signature: "Deposit(address,uint256)",
+          source: WETH_BASE,
+        }),
+        scale,
+      ).toEqual([]);
+    }
+  });
+
+  it("leaves an unparseable scale to the form's own validation", () => {
+    expect(
+      classifyEventSource({
+        amountMode: AMOUNT_MODE.count,
+        scale: "1e15",
+        signature: "Deposit(address,uint256)",
+        source: WETH_BASE,
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe("actorTopicFindings", () => {
@@ -329,6 +413,50 @@ describe("probeEventSource", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("warn");
     expect(findings[0].message).toMatch(/idle/i);
+  });
+
+  /*
+    The scale warning describes the KPI's configuration, so nothing the chain says about the contract
+    can resolve it. Every chain-probe path builds a fresh list, which is why it is appended once at
+    the boundary rather than threaded through seven returns — this is the test that pins that.
+  */
+  it("keeps the scale warning after a successful chain probe", async () => {
+    const topic0 = eventTopic("Deposit(address,uint256)");
+    const client = stubClient({
+      getLogs: stubLogs([
+        {
+          address: WETH_BASE,
+          blockNumber: BigInt(9500),
+          data: `0x${"22".repeat(32)}`,
+          topics: [topic0, `0x${"11".repeat(32)}`],
+        },
+      ]),
+    });
+
+    const findings = await probeEventSource(client, {
+      amountMode: AMOUNT_MODE.count,
+      scale: "10",
+      signature: "Deposit(address,uint256)",
+      source: WETH_BASE,
+    });
+
+    expect(findings.some((f) => f.severity === "ok")).toBe(true);
+    const warn = findings.find((f) => f.severity === "warn");
+    expect(warn?.message).toMatch(/cannot measure size/i);
+  });
+
+  it("drops the scale warning when a structural error stops the probe", async () => {
+    const client = stubClient();
+    const findings = await probeEventSource(client, {
+      amountMode: AMOUNT_MODE.count,
+      scale: "10",
+      signature: "Deposit(address,uint256)",
+      source: "0x0000000000000000000000000000000000000000",
+    });
+
+    // The error short-circuits before the chain is touched, and it carries the warning with it —
+    // there is no address to probe, so nothing later can re-add it.
+    expect(findings.map((f) => f.severity)).toEqual(["error", "warn"]);
   });
 
   it("confirms a live event", async () => {

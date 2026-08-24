@@ -13,12 +13,14 @@ import type {KpiKind} from "@/lib/types";
 /**
  * Resolves one KPI's tracked event into something a person can read.
  *
- * Three reads at most, and only for a KPI that declares an event source at all — a KPI the project
+ * A few reads at most, and only for a KPI that declares an event source at all — a KPI the project
  * reports by hand has nothing to look up, so the hook stays dormant and issues none. What it gathers:
  *
  *  1. the verifier's configured signature, which is the authoritative human-readable name (see
  *     `lib/eventNames`);
- *  2. `name()` / `symbol()` off the watched contract, for sources that can introduce themselves.
+ *  2. `name()` / `symbol()` / `decimals()` off the watched contract, for sources that can introduce
+ *     themselves — the last of which is what lets a scale be stated as a token amount rather than as
+ *     a divisor (see `lib/kpiUnits`).
  *
  * Everything is individually caught. A KPI panel exists to show a reward ladder; degrading its
  * "Tracking" line to a topic hash because an RPC hiccuped is acceptable, blanking the page is not.
@@ -146,22 +148,49 @@ async function resolveMetricVerifier(
 }
 
 /**
- * What the watched contract calls itself.
+ * What the watched contract calls itself, and in what units it counts.
  *
- * Both calls are expected to fail for the interesting sources: Aave's Pool and Sygma's bridge
- * implement neither, which is why `lib/knownContracts` exists. They succeed for the token contracts
- * the demo campaigns watch, where the symbol is the same one every amount on the page is quoted in.
+ * All three calls are expected to fail for the interesting sources: Aave's Pool and Sygma's bridge
+ * implement none of them, which is why `lib/knownContracts` exists. They succeed for the token
+ * contracts the demo campaigns watch, where the symbol is the same one every amount on the page is
+ * quoted in.
+ *
+ * `decimals` is what lets `lib/kpiUnits` state a `dataWord0` scale as a real amount — "0.001 WETH"
+ * rather than "1,000,000,000,000,000 base units". One extra read on a query that is already
+ * `staleTime: Infinity`, so it costs one call per KPI per session; a contract that will not answer
+ * degrades to base units rather than to an assumed 18.
  */
 async function readContractIdentity(
   client: PublicClient,
   address: `0x${string}`,
-): Promise<{name?: string; symbol?: string}> {
-  const [name, symbol] = await Promise.all([
+): Promise<{name?: string; symbol?: string; decimals?: number}> {
+  const [name, symbol, decimals] = await Promise.all([
     readString(client, address, "name"),
     readString(client, address, "symbol"),
+    readDecimals(client, address),
   ]);
 
-  return {name, symbol};
+  return {name, symbol, decimals};
+}
+
+/**
+ * `decimals()` as a number, or `undefined`.
+ *
+ * Range-checked rather than trusted: a contract answering something absurd would otherwise reach
+ * `formatTokenAmount`, which throws on a negative and would divide by a nonsense power of ten on a
+ * huge one. 36 is well past any real token and still far inside safe territory.
+ */
+function readDecimals(
+  client: PublicClient,
+  address: `0x${string}`,
+): Promise<number | undefined> {
+  return client
+    .readContract({address, abi: IERC20MetadataAbi, functionName: "decimals"})
+    .then((value) => {
+      const decimals = Number(value);
+      return Number.isInteger(decimals) && decimals >= 0 && decimals <= 36 ? decimals : undefined;
+    })
+    .catch(() => undefined);
 }
 
 function readString(

@@ -5,6 +5,7 @@ import {CampaignGuideEditor} from "@/components/CampaignGuideEditor";
 import {useTrackedEvent} from "@/hooks/useTrackedEvent";
 import {explorerAddressUrl} from "@/lib/chains";
 import {guideForKpi, linkLabel, type ResolvedGuide} from "@/lib/campaignGuide";
+import {describeUnit} from "@/lib/kpiUnits";
 import {KPI_KIND_LABEL} from "@/lib/types";
 import {shortAddress} from "@/lib/format";
 import type {ViewerRole} from "@/lib/viewerRole";
@@ -211,6 +212,25 @@ function KpiRow({
 
       {entry?.action ? (
         <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">{entry.action}</p>
+      ) : null}
+
+      {/*
+        What one unit of progress costs, for the reader who most needs it and is least likely to see
+        it elsewhere: `visibleSections("referral")` hides the KPI panel and its ladders, so this row
+        is where an attributed referral learns that ten wraps buy one unit. Neutral — the same
+        sentence for a well-configured KPI as for the lynx campaign's, no misconfiguration flag on a
+        campaign already on chain. See `lib/kpiUnits`.
+      */}
+      {tracked ? (
+        <p className="mt-0.5 text-[11px] text-ink-muted">
+          {describeUnit({
+            amountMode: tracked.amountMode,
+            kind: kpi.spec.kind,
+            scale: tracked.scale,
+            signature: tracked.eventFrom === "kind" ? undefined : tracked.event,
+            token: tracked.token,
+          })}
+        </p>
       ) : null}
 
       <p className="mt-1 text-xs">

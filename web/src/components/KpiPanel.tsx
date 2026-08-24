@@ -6,6 +6,8 @@ import {DataTable, type Column} from "@/components/ui/DataTable";
 import {nextTier, tierProgressRatio, crossedTierCount} from "@/lib/campaign";
 import {formatTokenAmount, compactNumber, formatRatio, shortAddress} from "@/lib/format";
 import {shortTopic} from "@/lib/eventNames";
+import {decodeEventSource} from "@/lib/kpiSource";
+import {describeThreshold, describeUnit, type UnitInput} from "@/lib/kpiUnits";
 import {useTrackedEvent} from "@/hooks/useTrackedEvent";
 import {explorerAddressUrl} from "@/lib/chains";
 import {KPI_KIND_LABEL, type RewardTier} from "@/lib/types";
@@ -58,6 +60,16 @@ export function KpiPanel({
     settled: promoterState !== undefined && index < promoterState.settledTiers,
   }));
 
+  /*
+    What a threshold costs in real actions, when that differs from the threshold itself.
+
+    Decoded here rather than taken from `useTrackedEvent` below: `describeThreshold` needs only the
+    mode and scale, both of which are in `KpiSpec.params` already loaded on this page, and a hook
+    result would make the ladder wait on a network read to annotate numbers it already has. `null`
+    for every KPI where the two figures agree, which is most of them.
+  */
+  const unit = unitInputFor(kpi);
+
   const columns: Column<LadderRow>[] = [
     {
       key: "tier",
@@ -69,7 +81,22 @@ export function KpiPanel({
       key: "threshold",
       header: "Threshold",
       numeric: true,
-      render: (r) => compactNumber(Number(r.threshold)),
+      render: (r) => {
+        const actions = unit ? describeThreshold(r.threshold, unit) : null;
+        return (
+          <span>
+            {compactNumber(Number(r.threshold))}
+            {/*
+              The number above is in units of progress; this is the work behind it. Shown only when
+              the two differ — see `describeThreshold`, which returns null for a one-for-one KPI
+              rather than restating the figure it sits beside.
+            */}
+            {actions ? (
+              <span className="block text-[10px] font-normal text-ink-muted">{actions}</span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       key: "reward",
@@ -238,7 +265,24 @@ function EventSourceLine({
         ) : (
           <span className="font-mono">{address}</span>
         )}
-        {tracked.scale > BigInt(1) ? ` · ${tracked.scale.toLocaleString("en-US")} per unit` : null}
+      </p>
+
+      {/*
+        What a unit of progress actually costs, spelled out.
+
+        This line used to be a five-word fragment on the end of the address above — `· 10 per unit` —
+        which never said ten of *what*, and sat on the least-read line of the card. Every threshold in
+        the ladder below is denominated in the unit this sentence defines, so it belongs on its own
+        line and above them. See `lib/kpiUnits`.
+      */}
+      <p className="mt-1 text-xs text-ink-secondary">
+        {describeUnit({
+          amountMode: tracked.amountMode,
+          kind: kpi.spec.kind,
+          scale: tracked.scale,
+          signature: tracked.eventFrom === "kind" ? undefined : tracked.event,
+          token: tracked.token,
+        })}
       </p>
 
       {/* The verifier and the params blob name different events — see `TrackedEvent.drift`. */}
@@ -267,4 +311,27 @@ function LadderState({row, hasPromoter}: {row: LadderRow; hasPromoter: boolean})
     return <span className="text-xs text-ink-secondary">Paid</span>;
   }
   return <span className="text-xs font-medium text-warning">Unsettled</span>;
+}
+
+/**
+ * The mode and scale a threshold is denominated in, straight from the spec.
+ *
+ * `null` for a KPI the project reports by hand: `decodeEventSource` returns `null` for params that
+ * are not an event-source blob (a `TouchWindowVerifier` lookback, or nothing at all), and a hand-
+ * reported KPI has no scale to translate a threshold against.
+ *
+ * Signature is deliberately omitted. The event name is only resolvable through `useTrackedEvent`'s
+ * chain reads, which the ladder does not perform; without it `describeThreshold` uses the kind's own
+ * noun, which is the same fallback the unit line takes when a topic has no published signature. The
+ * number is what matters here — "500" — and the noun beside it is a label, not the claim.
+ */
+function unitInputFor(kpi: KpiDetail): UnitInput | null {
+  const source = decodeEventSource(kpi.spec.params);
+  if (!source) return null;
+
+  return {
+    amountMode: source.amountMode,
+    kind: kpi.spec.kind,
+    scale: source.scale,
+  };
 }
