@@ -137,6 +137,14 @@ export function useCreateCampaign() {
   const {publicClient, walletClient, deployment} = useWriteContext();
   const {state, setState, reset, run} = useTx();
   const [campaignId, setCampaignId] = useState<bigint | undefined>();
+  /*
+    The deployed `Campaign`'s own address, alongside the registry id.
+
+    Both come out of the same `CampaignCreated` log and both are needed: the id is what `/campaign/[id]`
+    routes on, and the address is what an off-chain campaign guide is keyed by (`lib/campaignGuide`) —
+    the registry has no address→id lookup, so recovering one from the other later means a browse scan.
+  */
+  const [campaignAddress, setCampaignAddress] = useState<`0x${string}` | undefined>();
 
   const create = useCallback(
     async (draft: CampaignDraft, tokenDecimals: number) => {
@@ -151,6 +159,7 @@ export function useCreateCampaign() {
 
       const account = walletClient.account;
       setCampaignId(undefined);
+      setCampaignAddress(undefined);
 
       await run(
         async () => {
@@ -181,7 +190,10 @@ export function useCreateCampaign() {
             logs: receipt.logs as never,
           });
           const created = events[0];
-          if (created) setCampaignId(created.args.campaignId);
+          if (created) {
+            setCampaignId(created.args.campaignId);
+            setCampaignAddress(created.args.campaign);
+          }
         },
         publicClient,
       );
@@ -189,7 +201,7 @@ export function useCreateCampaign() {
     [publicClient, walletClient, deployment, run, setState],
   );
 
-  return {state, create, reset, campaignId};
+  return {state, create, reset, campaignId, campaignAddress};
 }
 
 // ── fund ─────────────────────────────────────────────────────────

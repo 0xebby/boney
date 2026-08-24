@@ -6,12 +6,22 @@ import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {ErrorState} from "@/components/ui/States";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
+import {usePublishGuide} from "@/hooks/usePublishGuide";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
 import {useNameAvailability} from "@/hooks/useNameAvailability";
 import {useScoreCeiling} from "@/hooks/useScoreCeiling";
 import {useNow} from "@/hooks/useNow";
 import {useEventSourceProbe} from "@/hooks/useEventSourceProbe";
 import {validateCampaignDraft, isBoundedScoreCeiling, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
+import {
+  MAX_ACTION_LENGTH,
+  MAX_SUMMARY_LENGTH,
+  emptyGuideDraft,
+  guideFromDraft,
+  isEmptyGuide,
+  validateGuideDraft,
+  type GuideDraft,
+} from "@/lib/campaignGuide";
 import {KPI_KIND, MAX_CAMPAIGN_NAME_LENGTH, type KpiKind} from "@/lib/types";
 import {MAX_BONEY_SCORE} from "@/lib/boneyscore";
 import {AMOUNT_MODE, EVENT_PRESETS} from "@/lib/kpiSource";
@@ -29,10 +39,20 @@ import {
 export function CreateCampaignPage() {
   const {isConnected} = useAccount();
   const router = useRouter();
-  const {state, create, reset, campaignId} = useCreateCampaign();
+  const {state, create, reset, campaignId, campaignAddress} = useCreateCampaign();
 
   const [draft, setDraft] = useState<CampaignDraft>(() => defaultDraft());
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
+  /*
+    The off-chain half — what a referral should do, and where.
+
+    Held apart from `draft` on purpose. `CampaignDraft` is the input to `buildCreateCampaignArgs` and
+    every field in it becomes a `createCampaign` argument; none of this does. Keeping them separate is
+    what stops the encoder from having to know about fields it must ignore. The two arrays are kept
+    index-aligned by the KPI mutators below, since a guide entry's position *is* its `kpiIndex`.
+  */
+  const [guide, setGuide] = useState<GuideDraft>(() => emptyGuideDraft(defaultDraft().kpis.length));
+  const publishGuide = usePublishGuide();
   // Drives the "opens immediately" note. 0 until the clock is live — see `useNow`.
   const now = useNow();
 
@@ -97,15 +117,40 @@ export function CreateCampaignPage() {
     }));
   };
 
+  /*
+    KPI add and remove move the guide array too.
+
+    A guide entry's position in the array *is* its `kpiIndex` (see `guideFromDraft`), so removing KPI 1
+    without removing guide row 1 would silently reattach KPI 2's instructions to KPI 1 — an
+    off-by-one that produces a page confidently telling a referral to do the wrong thing.
+  */
   const addKpi = () => {
     setDraft((prev) => ({
       ...prev,
       kpis: [...prev.kpis, {kind: "Mint", verifier: "", target: "", aggregate: false, tiers: []}],
     }));
+    setGuide((prev) => ({...prev, kpis: [...prev.kpis, {action: "", url: ""}]}));
   };
 
   const removeKpi = (index: number) => {
     setDraft((prev) => ({...prev, kpis: prev.kpis.filter((_, i) => i !== index)}));
+    setGuide((prev) => ({...prev, kpis: prev.kpis.filter((_, i) => i !== index)}));
+  };
+
+  const updateGuideField = <K extends "summary" | "siteUrl">(key: K, value: string) => {
+    setGuide((prev) => ({...prev, [key]: value}));
+  };
+
+  const updateGuideKpi = (index: number, updates: Partial<GuideDraft["kpis"][number]>) => {
+    setGuide((prev) => ({
+      ...prev,
+      // Tolerates a guide array shorter than the draft's, which a hot reload during development can
+      // produce. Missing rows are filled blank rather than throwing on an undefined spread.
+      kpis: Array.from({length: Math.max(prev.kpis.length, index + 1)}, (_, i) => ({
+        ...(prev.kpis[i] ?? {action: "", url: ""}),
+        ...(i === index ? updates : {}),
+      })),
+    }));
   };
 
   const addTier = (kpiIndex: number) => {
@@ -130,6 +175,20 @@ export function CreateCampaignPage() {
     return issues.find((i) => i.path === path)?.message;
   };
 
+  /*
+    Guide problems, computed every render rather than on submit.
+
+    Advisory by design, and the wording says so: none of these blocks `createCampaign`. A malformed
+    link is not worth refusing an escrowed campaign over, and validating at submit would mean finding
+    the typo after the gas was spent. Same posture as `useEventSourceProbe`'s findings — the form warns
+    while you type, and the only thing an unfixed issue costs is that field being dropped from the
+    published guide.
+  */
+  const guideIssues = validateGuideDraft(guide);
+  const guideIssueFor = (path: string): string | undefined => {
+    return guideIssues.find((i) => i.path === path)?.message;
+  };
+
   if (!isConnected) {
     return (
       <Card>
@@ -140,19 +199,13 @@ export function CreateCampaignPage() {
 
   if (state.status === "confirmed" && campaignId !== undefined) {
     return (
-      <Card>
-        <div className="space-y-3 text-center">
-          <p className="text-sm text-good">Campaign created successfully!</p>
-          <p className="text-xs text-ink-muted">Campaign #{campaignId.toString()}</p>
-          <button
-            type="button"
-            onClick={() => router.push(`/campaign/${campaignId.toString()}`)}
-            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90"
-          >
-            View Campaign
-          </button>
-        </div>
-      </Card>
+      <CreatedCard
+        campaignAddress={campaignAddress}
+        campaignId={campaignId}
+        guide={guide}
+        onView={() => router.push(`/campaign/${campaignId.toString()}`)}
+        publish={publishGuide}
+      />
     );
   }
 
@@ -179,7 +232,7 @@ export function CreateCampaignPage() {
             value={draft.name}
             onChange={(v) => updateField("name", v)}
             error={issueFor("name")}
-            hint={`Shown wherever the campaign is listed. Up to ${MAX_CAMPAIGN_NAME_LENGTH} characters, and unique — plain letters, digits and punctuation.`}
+            hint="Title should reflect KPIs of interest to your protocol."
           />
 
           {/* Live availability, so a taken name is caught before a wallet prompt rather than as a
@@ -187,7 +240,7 @@ export function CreateCampaignPage() {
           <p className="text-xs" role="status" aria-live="polite">
             {nameCheck.isIdle ? (
               <span className="text-ink-muted">
-                {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH} characters
+                {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH}
               </span>
             ) : nameCheck.isLoading ? (
               <span className="text-ink-muted">Checking availability…</span>
@@ -203,15 +256,41 @@ export function CreateCampaignPage() {
               </span>
             ) : (
               <span className="text-good">
-                Available · {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH} characters
+                {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH}
               </span>
             )}
           </p>
         </div>
       </Card>
 
+      {/*
+        The off-chain half of the campaign, and the only place a project can say what it wants done.
+
+        None of this reaches the chain — `Types.CampaignConfig` has no slot for a sentence and
+        `KpiSpec.params` is spent on the event source — so it is published separately, signed, after the
+        campaign exists. See `lib/campaignGuide`.
+      */}
       <Card>
-        <CardHeader title="Token & Pool" subtitle="ERC-20 token used for rewards" />
+        <CardHeader title="Additional Campaign Info" />
+        <div className="space-y-3">
+          <Field
+            error={guideIssueFor("guide.summary")}
+            hint={`${guide.summary.trim().length}/${MAX_SUMMARY_LENGTH}`}
+            label="What is this campaign about?"
+            onChange={(v) => updateGuideField("summary", v)}
+            value={guide.summary}
+          />
+          <Field
+            error={guideIssueFor("guide.siteUrl")}
+            label="Link to Project Frontend."
+            onChange={(v) => updateGuideField("siteUrl", v)}
+            value={guide.siteUrl}
+          />
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Token & Reward Pool" subtitle="ERC-20 token used for rewards" />
         <div className="space-y-3">
           <Field
             label="Token address"
@@ -321,7 +400,7 @@ export function CreateCampaignPage() {
                   onClick={() => removeKpi(i)}
                   className="text-xs text-critical hover:underline"
                 >
-                  Remove
+                  X
                 </button>
               </div>
 
@@ -371,6 +450,31 @@ export function CreateCampaignPage() {
                   onChange={(eventSource) => updateKpi(i, {eventSource})}
                   issueFor={issueFor}
                 />
+
+                {/*
+                  What a referral does about this KPI, in words. Sits beside the event source because
+                  the two describe the same thing from opposite ends: that block says which log credits
+                  progress, this one says what a person has to do to emit it.
+                */}
+                <div className="rounded border border-hairline bg-surface-2 p-2.5">
+                  <p className="text-xs text-ink-secondary">How a referral earns this</p>
+                  <div className="mt-2 space-y-3">
+                    <Field
+                      error={guideIssueFor(`guide.kpis.${i}.action`)}
+                      hint={`One line, up to ${MAX_ACTION_LENGTH} characters.`}
+                      label="Instruction (optional)"
+                      onChange={(v) => updateGuideKpi(i, {action: v})}
+                      value={guide.kpis[i]?.action ?? ""}
+                    />
+                    <Field
+                      error={guideIssueFor(`guide.kpis.${i}.url`)}
+                      hint="If left blank, the campaign page links the watched contract on the block explorer instead."
+                      label="Action link (optional)"
+                      onChange={(v) => updateGuideKpi(i, {url: v})}
+                      value={guide.kpis[i]?.url ?? ""}
+                    />
+                  </div>
+                </div>
 
                 {issueFor(`kpis.${i}.tiers`) ? (
                   <p className="text-xs text-critical">{issueFor(`kpis.${i}.tiers`)}</p>
@@ -444,6 +548,145 @@ export function CreateCampaignPage() {
       </div>
     </form>
   );
+}
+
+/**
+ * The post-creation screen, which is also where the guide gets published.
+ *
+ * Publishing is deliberately a *second, optional* step rather than part of creation. The campaign is
+ * already on chain by the time this renders — refusing the signature, or the store being unwritable,
+ * changes nothing about that. Folding the guide into `createCampaign` would have made a declined
+ * signature look like a failed launch, and there is nowhere on chain to put the guide anyway.
+ *
+ * The signature is what the store authenticates against, so it cannot be skipped for convenience: these
+ * are outbound links that will be shown to referrals on a page that has just told them they are
+ * attributed to a promoter. See `/api/campaign-guide`.
+ */
+function CreatedCard({
+  campaignAddress,
+  campaignId,
+  guide,
+  onView,
+  publish,
+}: {
+  /** From the `CampaignCreated` log. Absent only if the log could not be decoded. */
+  campaignAddress?: `0x${string}`;
+  campaignId: bigint;
+  guide: GuideDraft;
+  onView: () => void;
+  publish: ReturnType<typeof usePublishGuide>;
+}) {
+  const built = guideFromDraft(guide);
+  const nothingToPublish = isEmptyGuide(built);
+  const {state} = publish;
+  const busy = state.status === "signing" || state.status === "saving";
+
+  return (
+    <Card>
+      <div className="space-y-4">
+        <div className="space-y-1 text-center">
+          <p className="text-sm text-good">Campaign created successfully!</p>
+          <p className="text-xs text-ink-muted">Campaign #{campaignId.toString()}</p>
+        </div>
+
+        {/*
+          Only shown when there is something to publish. A project that filled nothing in should not be
+          handed a signature prompt to decline.
+        */}
+        {!nothingToPublish ? (
+          <div className="rounded border border-hairline bg-surface-2 p-3">
+            <p className="text-xs text-ink-secondary">
+              Publish the campaign info so referrals see it. One signature from this wallet, no gas.
+            </p>
+
+            {campaignAddress === undefined ? (
+              // The address comes out of the `CampaignCreated` log; without it there is nothing to key
+              // the guide by, and guessing would write it against the wrong campaign.
+              <p className="mt-2 text-xs text-warning">
+                The campaign&rsquo;s address could not be read from the transaction receipt, so the
+                info cannot be published from here.
+              </p>
+            ) : (
+              <>
+                <button
+                  className="mt-2 rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-hover disabled:opacity-50"
+                  disabled={busy || state.status === "saved" || state.status === "cleared"}
+                  onClick={() => void publish.publish(campaignAddress, built)}
+                  type="button"
+                >
+                  {state.status === "signing"
+                    ? "Awaiting signature…"
+                    : state.status === "saving"
+                      ? "Publishing…"
+                      : state.status === "saved" || state.status === "cleared"
+                        ? "Published"
+                        : "Publish campaign info"}
+                </button>
+
+                <PublishNote state={state} onRetry={publish.reset} />
+              </>
+            )}
+          </div>
+        ) : null}
+
+        <div className="text-center">
+          <button
+            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90"
+            onClick={onView}
+            type="button"
+          >
+            View Campaign
+          </button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** The outcome of a publish attempt, including the one outcome the project has to act on. */
+function PublishNote({
+  state,
+  onRetry,
+}: {
+  state: ReturnType<typeof usePublishGuide>["state"];
+  onRetry: () => void;
+}) {
+  if (state.status === "saved") {
+    return <p className="mt-2 text-xs text-good">Published. The campaign page shows it now.</p>;
+  }
+
+  if (state.status === "cleared") {
+    return <p className="mt-2 text-xs text-ink-muted">Nothing to publish — every field was empty.</p>;
+  }
+
+  if (state.status === "error") {
+    return (
+      <p className="mt-2 text-xs text-warning">
+        Not published: {state.message}{" "}
+        <button className="underline hover:text-ink" onClick={onRetry} type="button">
+          Try again
+        </button>
+        . The campaign itself is unaffected.
+      </p>
+    );
+  }
+
+  if (state.status === "unwritable") {
+    return (
+      <div className="mt-2 space-y-1.5">
+        <p className="text-xs text-warning">{state.message}</p>
+        {/*
+          The entry itself, not a link to documentation. The alternative is telling a project their
+          guide is gone and leaving them to retype prose they have already written once.
+        */}
+        <pre className="max-h-40 overflow-auto rounded border border-hairline bg-surface-1 p-2 text-[10px] leading-relaxed text-ink-secondary">
+          {JSON.stringify(state.entry, null, 2)}
+        </pre>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 /**

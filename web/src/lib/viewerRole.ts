@@ -68,6 +68,16 @@ export function isProjectWallet(wallet: string | undefined, project: string): bo
 export type SectionVisibility = {
   /** KPI panels and their reward-tier ladders. */
   kpis: boolean;
+  /**
+   * The "how to take part" panel — what each KPI asks for, and where to do it.
+   *
+   * True for every role, and in the table rather than left implicit because this is where a reader
+   * looks for "who sees what". It is the one section with no per-role argument against it: a referral
+   * needs it to know what counts, a promoter to know what they are sending people to do, a visitor to
+   * evaluate the campaign before joining, and the project to read back what it published. Nothing in
+   * it is an accounting figure or a payout, which is what every other exclusion below turns on.
+   */
+  guide: boolean;
   /** The project's table of promoters and what each has been paid. */
   promoterTable: boolean;
   /** Share of escrow released, plus the campaign's window and gate. */
@@ -104,6 +114,7 @@ export function visibleSections(role: ViewerRole): SectionVisibility {
     case "project":
       return {
         kpis: false,
+        guide: true,
         promoterTable: true,
         poolUtilization: true,
         escrowReturn: true,
@@ -113,6 +124,7 @@ export function visibleSections(role: ViewerRole): SectionVisibility {
     case "visitor":
       return {
         kpis: true,
+        guide: true,
         promoterTable: false,
         poolUtilization: true,
         escrowReturn: true,
@@ -121,6 +133,7 @@ export function visibleSections(role: ViewerRole): SectionVisibility {
     case "referral":
       return {
         kpis: false,
+        guide: true,
         promoterTable: false,
         poolUtilization: false,
         escrowReturn: false,
@@ -129,6 +142,7 @@ export function visibleSections(role: ViewerRole): SectionVisibility {
     case "disconnected":
       return {
         kpis: false,
+        guide: true,
         promoterTable: false,
         poolUtilization: true,
         escrowReturn: true,

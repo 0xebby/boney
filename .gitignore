@@ -33,3 +33,7 @@ web/.vercel
 
 # Per-machine tool settings, not shared state.
 .claude/settings.local.json
+
+# Campaign guides written by /api/campaign-guide — a local-dev convenience, not shared state.
+# The committed catalog in web/src/lib/campaignGuide.ts is the path a deploy relies on.
+web/.data/
