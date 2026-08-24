@@ -1,6 +1,5 @@
 import {CampaignDetailPage} from "@/components/CampaignDetailPage";
 
-
 /**
  * `params` is a Promise in Next 16 and must be awaited — see
  * `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/page.md`.
