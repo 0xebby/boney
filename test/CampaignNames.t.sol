@@ -39,7 +39,7 @@ contract NamesHarness {
 ///         `CampaignRegistry`.
 /// @dev Two layers, deliberately tested separately. `Names` decides what a *well-formed* name is and
 ///      what two names being "the same" means; the registry decides who holds one. A bug in the first
-///      shows up as an unrenderable name, a bug in the second as two campaigns claiming one Campaign Title,
+///      shows up as an unrenderable name, a bug in the second as two campaigns claiming one identity,
 ///      and only the second needs a full protocol fixture.
 contract CampaignNamesTest is Test {
     uint256 internal constant POOL = 10_000 ether;

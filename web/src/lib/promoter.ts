@@ -2,7 +2,7 @@ import {keccak256, encodeAbiParameters} from "viem";
 import type {CampaignStatus} from "./types";
 
 /**
- * Promoter-side domain logic — join eligibility, settlement eligibility, promoter Campaign Title, and
+ * Promoter-side domain logic — join eligibility, settlement eligibility, promoter identity, and
  * the tracking link a promoter shares.
  *
  * Pure and React-free (F6). As with `lifecycle.ts`, every rule here mirrors a guard in
@@ -11,7 +11,7 @@ import type {CampaignStatus} from "./types";
  * decides what to render and why.
  */
 
-// ── promoter Campaign Title ────────────────────────────────────────────
+// ── promoter identity ────────────────────────────────────────────
 
 /**
  * The promoter id `join()` will assign — derivable *before* joining.
