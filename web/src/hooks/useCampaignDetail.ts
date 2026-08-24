@@ -7,6 +7,7 @@ import {fetchCampaignView} from "@/lib/contracts";
 import {fetchCampaignDetail, fetchPromoterState} from "@/lib/campaignDetail";
 import {IERC20MetadataAbi} from "@/lib/abis";
 import {isDeployed} from "@/lib/chains";
+import {UNKNOWN_TOKEN} from "@/lib/token";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 
 /**
@@ -128,6 +129,6 @@ async function fetchTokenMeta(
     return {symbol: symbol as string, decimals: Number(decimals)};
   } catch {
     // Same fallback as the list: a token without the metadata extension is still valid escrow.
-    return {symbol: "???", decimals: 18};
+    return UNKNOWN_TOKEN;
   }
 }

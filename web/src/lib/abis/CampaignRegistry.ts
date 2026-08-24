@@ -86,6 +86,25 @@ export const CampaignRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "campaignByName",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "campaignCount",
     "inputs": [],
     "outputs": [
@@ -129,6 +148,11 @@ export const CampaignRegistryAbi = [
             "name": "project",
             "type": "address",
             "internalType": "address"
+          },
+          {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
           },
           {
             "name": "token",
@@ -260,6 +284,25 @@ export const CampaignRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "isNameAvailable",
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "oracleCoordinator",
     "inputs": [],
     "outputs": [
@@ -311,9 +354,68 @@ export const CampaignRegistryAbi = [
         "type": "address",
         "indexed": false,
         "internalType": "address"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
       }
     ],
     "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "EmptyName",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidNameChar",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "char",
+        "type": "bytes1",
+        "internalType": "bytes1"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NameTaken",
+    "inputs": [
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "existing",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "NameTooLong",
+    "inputs": [
+      {
+        "name": "got",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

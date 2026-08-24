@@ -16,6 +16,11 @@ export const CampaignAbi = [
             "internalType": "address"
           },
           {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
             "name": "token",
             "type": "address",
             "internalType": "address"
@@ -232,6 +237,11 @@ export const CampaignAbi = [
             "internalType": "address"
           },
           {
+            "name": "name",
+            "type": "string",
+            "internalType": "string"
+          },
+          {
             "name": "token",
             "type": "address",
             "internalType": "address"
@@ -308,6 +318,32 @@ export const CampaignAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract IEscrowVault"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getOracle",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getProject",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "view"
@@ -393,6 +429,19 @@ export const CampaignAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "name",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
       }
     ],
     "stateMutability": "view"
@@ -963,6 +1012,11 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "EmptyName",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EmptyTiers",
     "inputs": [
       {
@@ -990,8 +1044,40 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidNameChar",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "char",
+        "type": "bytes1",
+        "internalType": "bytes1"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidWindow",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NameTooLong",
+    "inputs": [
+      {
+        "name": "got",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

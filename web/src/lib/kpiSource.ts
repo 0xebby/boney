@@ -8,6 +8,8 @@ import {
   type PublicClient,
 } from "viem";
 import {isAddress as isViemAddress} from "viem/utils";
+import {IERC20MetadataAbi} from "./abis";
+import {contractLabel, knownContractName} from "./knownContracts";
 
 /**
  * Event-sourced KPI configuration — the encoding of `Types.KpiSpec.params`.
@@ -23,9 +25,16 @@ import {isAddress as isViemAddress} from "viem/utils";
  * `campaignArgs.ts`: a campaign encodes successfully, deploys, and then credits progress from the
  * wrong contract's events.
  *
- * The chain never reads this blob — `Campaign` forwards `params` to the verifier and otherwise
- * ignores it, and our event KPIs run with `verifier: address(0)`. It is a commitment published on
- * chain for indexers and UIs to agree on, not a consensus rule.
+ * The chain does not read this blob as a consensus rule — `Campaign` forwards `params` to the
+ * verifier and otherwise ignores it. It is a commitment published on chain so the off-chain halves
+ * agree on what a campaign measures.
+ *
+ * It is no longer the *only* such commitment, though. `EventMetricKpiVerifier` keeps its own copy of
+ * the watched contract, event and scale in its own storage (`setKpiConfig`), because a verifier
+ * reading its config from this same field could not coexist with `TouchWindowVerifier`, which reads
+ * `params` as a bare `uint64` lookback. That means two descriptions of the same event now exist, and
+ * they can drift — so the relayer refuses to run when they disagree
+ * (`relayCore.describeConfigDrift`). Change one side and you must change the other.
  */
 
 /** How the credited amount is taken from a matched log. */
@@ -178,6 +187,10 @@ export function eventTopic(signature: string): `0x${string}` {
  * WETH's `Deposit` is the canonical Base predeploy at `0x4200…0006`. Its shape was confirmed
  * against a real Base Sepolia log: `topics[1]` carries `dst`, and `data` is the single `uint256`
  * `wad` — which is exactly `actorTopic: 1` with `amountMode: dataWord0`.
+ *
+ * These are *offers*, not a naming table. Recovering a signature from a topic hash for display is
+ * `eventNames.catalogSignature`, which knows a wider set — a topic only these two presets could name
+ * left both live real-protocol campaigns rendering as hex.
  */
 export const WETH_BASE = "0x4200000000000000000000000000000000000006" as const;
 
@@ -219,12 +232,6 @@ export function eventSourceSummary(src: EventSource, signature?: string): string
   return `${event} on ${shortHex(src.source)}`;
 }
 
-/** Recovers a known signature for a topic hash, so the UI can name an event rather than hash it. */
-export function knownSignature(topic0: Hex): string | undefined {
-  return EVENT_PRESETS.find((p) => p.source.topic0.toLowerCase() === topic0.toLowerCase())
-    ?.signature;
-}
-
 function shortHex(value: string): string {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
@@ -251,6 +258,16 @@ export type ProbeFinding = {
 export type ProbeInput = {
   source: string;
   signature: string;
+  /**
+   * How the amount is taken from a matched log, when the form has settled on one.
+   *
+   * Optional because every caller predates it and because the interesting check below — a scale that
+   * cannot do anything in `count` mode — is answerable without a source address, which the rest of
+   * this type is about.
+   */
+  amountMode?: AmountMode;
+  /** The raw scale as typed. A string, because a half-typed number is a normal state of a form. */
+  scale?: string;
 };
 
 /**
@@ -277,11 +294,22 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
   const source = input.source.trim();
   const signature = input.signature.trim();
 
-  if (!source) return findings;
+  /*
+    The scale check runs first, and before the `!source` guard, deliberately.
+
+    It needs no address — it is a statement about two other fields — and the form it most needs to
+    reach is the half-filled one, where someone has picked a mode and typed a scale but not yet
+    pasted a contract. Ordering it after the guards would silently withhold it from exactly that
+    reader. `ProbeFinding[]` is documented as worst-first and this is a `warn`, so it is spliced in
+    below rather than pushed, letting the `error`s that follow keep the head of the list.
+  */
+  const scaleFinding = classifyCountScale(input);
+
+  if (!source) return scaleFinding ? [scaleFinding] : findings;
 
   if (!isViemAddress(source, {strict: false})) {
     findings.push({severity: "error", message: "Not a valid address."});
-    return findings;
+    return withScale(findings, scaleFinding);
   }
 
   if (source.toLowerCase() === ZERO_ADDRESS) {
@@ -289,7 +317,7 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
       severity: "error",
       message: "This is the zero address — the preset's placeholder. Enter your own contract.",
     });
-    return findings;
+    return withScale(findings, scaleFinding);
   }
 
   if (signature && !SIGNATURE_RE.test(signature)) {
@@ -299,26 +327,87 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
     });
   }
 
-  return findings;
+  return withScale(findings, scaleFinding);
+}
+
+/** Appends the advisory scale finding, keeping the list's worst-first order. */
+function withScale(findings: ProbeFinding[], scale: ProbeFinding | null): ProbeFinding[] {
+  return scale ? [...findings, scale] : findings;
+}
+
+/**
+ * The one configuration that encodes cleanly, deploys cleanly, credits progress — and still means
+ * something the project almost certainly did not intend.
+ *
+ * In `count` mode `indexerCore.rawAmount` returns exactly 1 per matching log, so there is no magnitude
+ * for a scale to normalize; the divisor only makes thresholds harder to reach. It is *legal* and
+ * expressible — "ten deposits per unit" is a real thing to want — so this is a `warn` and never a
+ * block, per the form's stated posture. But it is how Base Sepolia's lynx campaign came to credit 51
+ * WETH deposits as 5 units against a first tier of 50, which is 500 wraps.
+ *
+ * A scale of 1 (or a blank, or a zero, which `effectiveScale` reads as 1) is the correct setting here
+ * and says nothing.
+ */
+function classifyCountScale(input: ProbeInput): ProbeFinding | null {
+  if (input.amountMode !== AMOUNT_MODE.count) return null;
+
+  const raw = input.scale?.trim();
+  if (!raw) return null;
+
+  // Anything unparseable is the form's own "Enter a whole number." to report, not this.
+  let scale: bigint;
+  try {
+    scale = BigInt(raw);
+  } catch {
+    return null;
+  }
+
+  if (scale <= BigInt(1)) return null;
+
+  return {
+    severity: "warn",
+    message:
+      `In count mode every matching event is worth 1, so a scale of ${scale.toLocaleString("en-US")} ` +
+      `means ${scale.toLocaleString("en-US")} events per unit of progress — it cannot measure size. ` +
+      "Set the scale to 1, or switch Amount to First data word to credit the event's own value.",
+  };
 }
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const SIGNATURE_RE = /^[A-Za-z_]\w*\([^)]*\)$/;
 
-/** The reads a probe makes. Narrowed from `PublicClient` so a test can pass a stub. */
-export type ProbeClient = Pick<PublicClient, "getCode" | "getBlockNumber" | "getLogs">;
+/**
+ * The reads a probe makes. Narrowed from `PublicClient` so a test can pass a stub.
+ *
+ * `readContract` is optional because it is only used for the advisory identity line: every existing
+ * caller and every stub predates it, and a probe that cannot name a contract is strictly less useful
+ * rather than broken.
+ */
+export type ProbeClient = Pick<PublicClient, "getCode" | "getBlockNumber" | "getLogs"> &
+  Partial<Pick<PublicClient, "readContract">>;
+
+/** Context the probe cannot read off the client. */
+export type ProbeOptions = {
+  /** Which chain the address is on, for `knownContracts`. Without it, only a scan can name it. */
+  chainId?: number;
+};
 
 /**
  * Asks the chain whether this source could ever credit anything.
  *
- * Two questions, in order, because the second is only meaningful if the first passes:
+ * Three questions, in order, because each is only meaningful if the one before it passes:
  *
  *  1. **Is there code at the address?** `getCode` returning empty means an EOA or an address
  *     nobody has deployed to on *this* chain. This is the failure the form could not previously
  *     catch: a well-formed, correctly-checksummed address that emits nothing. It is reported as an
  *     error because no amount of promoter effort will ever move that KPI.
  *
- *  2. **Has the event fired recently?** One `getLogs` over `PROBE_BLOCK_RANGE`. A hit proves the
+ *  2. **What is this contract?** A known address, or whatever it calls itself. Pasting a contract
+ *     address is the one step of the form with no feedback loop at all — a project cannot tell a
+ *     mistyped pool from the right one by looking at the hex, and the campaign is immutable once
+ *     deployed. Naming it back closes that loop. Advisory: an unnamed contract is completely normal.
+ *
+ *  3. **Has the event fired recently?** One `getLogs` over `PROBE_BLOCK_RANGE`. A hit proves the
  *     signature hashes to a topic this contract really emits — the strongest confirmation
  *     available short of running the indexer. A miss proves nothing on its own, so it downgrades
  *     to a warning naming both plausible causes.
@@ -330,10 +419,30 @@ export type ProbeClient = Pick<PublicClient, "getCode" | "getBlockNumber" | "get
 export async function probeEventSource(
   client: ProbeClient,
   input: ProbeInput,
+  options: ProbeOptions = {},
 ): Promise<ProbeFinding[]> {
   const structural = classifyEventSource(input);
   if (structural.some((f) => f.severity === "error")) return structural;
 
+  /*
+    Advisory structural findings survive the chain probe.
+
+    They describe the KPI's *configuration* — a scale that cannot act in the chosen mode — so nothing
+    the chain reports about the contract can resolve them. Appended here, once, because every return
+    path in `probeChain` builds a fresh list and would otherwise drop them the moment the address
+    turned out to be real.
+  */
+  const advisory = structural.filter((f) => f.severity === "warn");
+  const chain = await probeChain(client, input, options);
+
+  return [...chain, ...advisory];
+}
+
+async function probeChain(
+  client: ProbeClient,
+  input: ProbeInput,
+  options: ProbeOptions,
+): Promise<ProbeFinding[]> {
   const source = input.source.trim() as `0x${string}`;
   const signature = input.signature.trim();
 
@@ -354,7 +463,11 @@ export async function probeEventSource(
     ];
   }
 
-  if (!signature) return [];
+  // Appended to whatever the event check concludes rather than returned on its own, so the list
+  // stays ordered worst-first — the identity line is never the most important thing on it.
+  const identity = await identifyContract(client, source, options.chainId);
+
+  if (!signature) return identity;
 
   const topic0 = eventTopic(signature);
 
@@ -377,6 +490,7 @@ export async function probeEventSource(
           severity: "warn",
           message: `Contract found, but no ${signature} in the last ${PROBE_BLOCK_RANGE} blocks — either it is idle, or the signature does not match what it emits.`,
         },
+        ...identity,
       ];
     }
 
@@ -389,6 +503,7 @@ export async function probeEventSource(
     // skip every log (`indexerCore.ts:actorFromTopic` returns null). Worth naming here because the
     // sample log is the only place the real topic count is visible before launch.
     findings.push(...actorTopicFindings(sample.topics.length));
+    findings.push(...identity);
 
     return findings;
   } catch {
@@ -397,8 +512,62 @@ export async function probeEventSource(
         severity: "warn",
         message: "Contract found, but the event history could not be read.",
       },
+      ...identity,
     ];
   }
+}
+
+/**
+ * Names the contract, if anything can.
+ *
+ * The catalog first, because the contracts worth naming are exactly the ones that will not name
+ * themselves — Aave's Pool proxy and Sygma's bridge implement neither `name()` nor `symbol()`, so a
+ * scan of either returns nothing at all. Tokens answer, and a token is what most campaigns watch.
+ *
+ * Returns `[]` rather than a finding when nothing resolves: "this contract does not publish a name"
+ * is not a problem with the KPI, and a line saying so would train a reader to ignore the list.
+ */
+async function identifyContract(
+  client: ProbeClient,
+  address: `0x${string}`,
+  chainId: number | undefined,
+): Promise<ProbeFinding[]> {
+  const known = knownContractName(chainId, address);
+  if (known) {
+    return [{severity: "ok", message: `Known contract: ${known}.`}];
+  }
+
+  if (!client.readContract) return [];
+
+  const [name, symbol] = await Promise.all([
+    readContractString(client, address, "name"),
+    readContractString(client, address, "symbol"),
+  ]);
+
+  const label = contractLabel({name, symbol});
+  if (!label) return [];
+
+  return [{severity: "ok", message: `This contract calls itself ${label}.`}];
+}
+
+/**
+ * One `name()`/`symbol()` read, or `undefined`.
+ *
+ * Every failure is expected and none is interesting: a contract without the metadata extension
+ * reverts, and a proxy may return data that does not decode as a string. Swallowed individually so
+ * one of the pair still names the contract when the other does not.
+ */
+function readContractString(
+  client: ProbeClient,
+  address: `0x${string}`,
+  functionName: "name" | "symbol",
+): Promise<string | undefined> {
+  if (!client.readContract) return Promise.resolve(undefined);
+
+  return client
+    .readContract({address, abi: IERC20MetadataAbi, functionName})
+    .then((value) => (typeof value === "string" ? value : undefined))
+    .catch(() => undefined);
 }
 
 /**

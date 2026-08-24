@@ -74,11 +74,14 @@ contract SeedGated is Script {
     function _createFundedGated(uint256 minReputation) internal returns (address campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            // The gate is what distinguishes these campaigns, so it names them. Names are unique per
+            // registry and each of these carries a different `minReputation`, so no two collide.
+            name: string.concat("Gated ", vm.toString(minReputation)),
             token: address(token),
             rewardPool: POOL,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 60 days),
-            attributionWindow: 7 days,
+            attributionWindow: 30 minutes,
             minReputation: minReputation
         });
 

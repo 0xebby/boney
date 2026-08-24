@@ -145,6 +145,8 @@ contract PromoterSwitchTest is Test {
         assertEq(campaign.progressOf(promoterB, 0), 20, "B receives only the delta");
         assertEq(token.balanceOf(promoterA), TIER_REWARD, "A is paid");
         assertEq(token.balanceOf(promoterB), TIER_REWARD, "B is paid too");
+
+        attribution.domain();
     }
 
     /// @dev A lapse with no replacement is different from a switch: the stored touch is still A's,
@@ -177,7 +179,7 @@ contract PromoterSwitchTest is Test {
 
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _sign(idB, 7 days);
         vm.expectRevert(
-            abi.encodeWithSelector(AttributionRegistry.TouchNotNewer.selector, t.signedAt, t.signedAt)
+            abi.encodeWithSelector(IAttributionRegistry.TouchNotNewer.selector, t.signedAt, t.signedAt)
         );
         attribution.storeTouch(user, t, sig, promoterB);
 
@@ -200,7 +202,7 @@ contract PromoterSwitchTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                AttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 7 days
+                IAttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 7 days
             )
         );
         attribution.storeTouch(user, t, sig, promoterA);
@@ -215,6 +217,7 @@ contract PromoterSwitchTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Promoter Switch Test",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,

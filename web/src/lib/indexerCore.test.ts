@@ -2,6 +2,7 @@ import {describe, it, expect} from "vitest";
 import {decodeAbiParameters, pad, toHex} from "viem";
 import {
   actorFromTopic,
+  aggregateActions,
   aggregateByActor,
   blockChunks,
   decideReport,
@@ -79,6 +80,95 @@ describe("rawAmount", () => {
   });
 });
 
+describe("aggregateByActor — the attribution floor", () => {
+  const T = BigInt(1_700_000_000);
+
+  it("drops activity from before the actor's floor", () => {
+    const logs = [
+      depositLog(ALICE, BigInt(1e15), BigInt(10), T - BigInt(60)), // before attribution
+      depositLog(ALICE, BigInt(1e15), BigInt(11), T),
+      depositLog(ALICE, BigInt(1e15), BigInt(12), T + BigInt(60)),
+    ];
+
+    const totals = aggregateByActor(logs, source(), new Map([[ALICE.toLowerCase(), T]]));
+    // 2 of the 3 deposits, not 3 — the pre-attribution one credits a promoter who did not cause it.
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
+  });
+
+  it("counts activity exactly at the floor", () => {
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(1e15), BigInt(10), T)],
+      source(),
+      new Map([[ALICE.toLowerCase(), T]]),
+    );
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
+  });
+
+  it("drops an actor with no floor entry — never attributed", () => {
+    const totals = aggregateByActor(
+      [depositLog(BOB, BigInt(5e15), BigInt(10), T)],
+      source(),
+      new Map([[ALICE.toLowerCase(), T]]),
+    );
+    expect(totals.has(BOB.toLowerCase())).toBe(false);
+  });
+
+  it("drops an actor whose floor is zero", () => {
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(5e15), BigInt(10), T)],
+      source(),
+      new Map([[ALICE.toLowerCase(), BigInt(0)]]),
+    );
+    expect(totals.has(ALICE.toLowerCase())).toBe(false);
+  });
+
+  /** Matches the relayer: unresolved is excluded rather than assumed to clear the floor. */
+  it("drops a log whose timestamp could not be resolved", () => {
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(5e15), BigInt(10), BigInt(0))],
+      source(),
+      new Map([[ALICE.toLowerCase(), T]]),
+    );
+    expect(totals.has(ALICE.toLowerCase())).toBe(false);
+  });
+
+  it("null opts out entirely, for diagnostics", () => {
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(5e15), BigInt(10), BigInt(0))],
+      source(),
+      null,
+    );
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(5));
+  });
+
+  it("applies the same floor on the indexed path, so the two cannot disagree", () => {
+    const src = source();
+    const floors = new Map([[ALICE.toLowerCase(), T]]);
+
+    const fromLogs = aggregateByActor(
+      [
+        depositLog(ALICE, BigInt(1e15), BigInt(10), T - BigInt(60)),
+        depositLog(ALICE, BigInt(1e15), BigInt(11), T),
+      ],
+      src,
+      floors,
+    );
+    const fromIndexer = aggregateActions(
+      [
+        {user: ALICE, value: BigInt(1e15), blockNumber: BigInt(10), timestamp: T - BigInt(60)},
+        {user: ALICE, value: BigInt(1e15), blockNumber: BigInt(11), timestamp: T},
+      ],
+      src,
+      floors,
+    );
+
+    expect(fromIndexer.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
+    expect(fromIndexer.get(ALICE.toLowerCase())?.amount).toBe(
+      fromLogs.get(ALICE.toLowerCase())?.amount,
+    );
+  });
+});
+
 describe("aggregateByActor", () => {
   it("sums one user's deposits and scales the total", () => {
     // 3 x 0.001 WETH at a 0.001 scale = 3 units of progress.
@@ -88,7 +178,7 @@ describe("aggregateByActor", () => {
       depositLog(ALICE, BigInt(1e15), BigInt(12)),
     ];
 
-    const totals = aggregateByActor(logs, source());
+    const totals = aggregateByActor(logs, source(), null);
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(3));
   });
 
@@ -96,6 +186,7 @@ describe("aggregateByActor", () => {
     const totals = aggregateByActor(
       [depositLog(ALICE, BigInt(5e15), BigInt(10)), depositLog(BOB, BigInt(2e15), BigInt(11))],
       source(),
+      null,
     );
 
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(5));
@@ -113,12 +204,12 @@ describe("aggregateByActor", () => {
       depositLog(ALICE, BigInt(2e14), BigInt(10 + i)),
     );
 
-    expect(aggregateByActor(logs, source()).get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
+    expect(aggregateByActor(logs, source(), null).get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
   });
 
   it("drops a referral whose total still rounds to nothing", () => {
     // Below scale with nothing to add to — reporting 0 is a no-op the campaign ignores anyway.
-    const totals = aggregateByActor([depositLog(ALICE, BigInt(1e14), BigInt(10))], source());
+    const totals = aggregateByActor([depositLog(ALICE, BigInt(1e14), BigInt(10))], source(), null);
     expect(totals.has(ALICE.toLowerCase())).toBe(false);
   });
 
@@ -130,6 +221,7 @@ describe("aggregateByActor", () => {
         depositLog(ALICE, BigInt(1e15), BigInt(20), BigInt(2_000)),
       ],
       source(),
+      null,
     );
 
     const actions = totals.get(ALICE.toLowerCase())!.actions;
@@ -146,7 +238,7 @@ describe("aggregateByActor", () => {
       depositLog(ALICE, BigInt(1_500_000_000_000_000), BigInt(11)),
     ];
 
-    const total = aggregateByActor(logs, source())!.get(ALICE.toLowerCase())!;
+    const total = aggregateByActor(logs, source(), null)!.get(ALICE.toLowerCase())!;
     const sum = total.actions.reduce((a, b) => a + b.amount, BigInt(0));
 
     expect(total.amount).toBe(BigInt(3));
@@ -157,6 +249,7 @@ describe("aggregateByActor", () => {
     const totals = aggregateByActor(
       [depositLog(ALICE, BigInt(1e15), BigInt(10)), depositLog(ALICE, BigInt(1e15), BigInt(42))],
       source(),
+      null,
     );
     expect(totals.get(ALICE.toLowerCase())?.lastBlock).toBe(BigInt(42));
   });
@@ -168,9 +261,124 @@ describe("aggregateByActor", () => {
         depositLog(ALICE, BigInt(888), BigInt(11)),
       ],
       source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+      null,
     );
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
   });
+
+  /**
+   * The bug this pins: `apportion` used to re-read each log's data word regardless of amount mode, so
+   * a count-mode KPI split a total of *n events* across shares derived from token amounts. These two
+   * logs produced `[999, -997]` — the sum was right, which is why the assertion above never caught it,
+   * but a negative `uint256` cannot be encoded and the evidence was unusable on chain.
+   */
+  it("apportions count-mode evidence as whole events, never negatively", () => {
+    const total = aggregateByActor(
+      [depositLog(ALICE, BigInt(999), BigInt(10)), depositLog(ALICE, BigInt(888), BigInt(11))],
+      source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+      null,
+    ).get(ALICE.toLowerCase())!;
+
+    expect(total.actions.map((a) => a.amount)).toEqual([BigInt(1), BigInt(1)]);
+    for (const action of total.actions) expect(action.amount >= BigInt(0)).toBe(true);
+    // Still exactly the claim, or `TouchWindowVerifier` reverts `EvidenceExceedsClaim`.
+    expect(total.actions.reduce((a, b) => a + b.amount, BigInt(0))).toBe(total.amount);
+  });
+
+  /** Count-mode evidence has to survive the encoder a real report would put it through. */
+  it("produces count-mode evidence that actually encodes", () => {
+    const total = aggregateByActor(
+      [depositLog(ALICE, BigInt(999), BigInt(10)), depositLog(ALICE, BigInt(888), BigInt(11))],
+      source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+      null,
+    ).get(ALICE.toLowerCase())!;
+
+    expect(() => encodeActions(total.actions)).not.toThrow();
+  });
+});
+
+/**
+ * The indexed path must agree with the log-scanning path.
+ *
+ * Not a nice-to-have: the report panel and `pnpm index` can each take either route, and a referral
+ * credited one figure by one and a different figure by the other is the silent-corruption failure this
+ * module exists to prevent. Both funnel into the same fold, and these tests are what hold that.
+ */
+describe("aggregateActions", () => {
+  const decoded = (value: bigint, blockNumber: bigint, timestamp: bigint) => ({
+    user: ALICE,
+    value,
+    blockNumber,
+    timestamp,
+  });
+
+  it("matches aggregateByActor on the same activity", () => {
+    const src = source();
+    const wads = [BigInt(1_500_000_000_000_000), BigInt(1_500_000_000_000_000)];
+
+    const fromLogs = aggregateByActor(
+      [depositLog(ALICE, wads[0]!, BigInt(10)), depositLog(ALICE, wads[1]!, BigInt(11))],
+      src,
+      null,
+    ).get(ALICE.toLowerCase())!;
+
+    const fromIndexer = aggregateActions(
+      [
+        decoded(wads[0]!, BigInt(10), BigInt(1_700_000_000)),
+        decoded(wads[1]!, BigInt(11), BigInt(1_700_000_000)),
+      ],
+      src,
+      null,
+    ).get(ALICE.toLowerCase())!;
+
+    expect(fromIndexer.amount).toBe(fromLogs.amount);
+    expect(fromIndexer.actions).toEqual(fromLogs.actions);
+    expect(fromIndexer.lastBlock).toBe(fromLogs.lastBlock);
+  });
+
+  it("applies count mode to the KPI, not to the stored value", () => {
+    const totals = aggregateActions(
+      [decoded(BigInt(999), BigInt(10), BigInt(1)), decoded(BigInt(888), BigInt(11), BigInt(2))],
+      source({amountMode: AMOUNT_MODE.count, scale: BigInt(1)}),
+      null,
+    );
+
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
+  });
+
+  /** Same reason the log path sorts: out-of-order evidence verifies but reads as corrupt. */
+  it("orders actions chronologically regardless of the order returned", () => {
+    const totals = aggregateActions(
+      [
+        decoded(BigInt(1e15), BigInt(30), BigInt(3_000)),
+        decoded(BigInt(1e15), BigInt(10), BigInt(1_000)),
+        decoded(BigInt(1e15), BigInt(20), BigInt(2_000)),
+      ],
+      source({scale: BigInt(1e15)}),
+    );
+
+    expect(totals.get(ALICE.toLowerCase())!.actions.map((a) => a.timestamp)).toEqual([
+      BigInt(1_000),
+      BigInt(2_000),
+      BigInt(3_000),
+    ]);
+  });
+
+  /** Sub-scale activity accumulates rather than flooring away — the fixture's original bug. */
+  it("accumulates sub-scale activity instead of dropping it", () => {
+    const totals = aggregateActions(
+      [
+        decoded(BigInt(6e14), BigInt(10), BigInt(1)),
+        decoded(BigInt(6e14), BigInt(11), BigInt(2)),
+      ],
+      source({scale: BigInt(1e15)}),
+    );
+
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
+  });
+});
+
+describe("aggregateByActor — log-shape edge cases", () => {
 
   it("skips logs whose actor topic is missing", () => {
     const orphan: IndexedLog = {
@@ -179,7 +387,7 @@ describe("aggregateByActor", () => {
       blockNumber: BigInt(10),
       timestamp: BigInt(1_000),
     };
-    expect(aggregateByActor([orphan], source()).size).toBe(0);
+    expect(aggregateByActor([orphan], source(), null).size).toBe(0);
   });
 });
 

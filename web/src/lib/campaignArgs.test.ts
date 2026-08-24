@@ -26,6 +26,7 @@ const VERIFIER = "0x3333333333333333333333333333333333333333" as const;
 
 function draft(overrides: Partial<CampaignDraft> = {}): CampaignDraft {
   return {
+    name: "Test Campaign",
     token: TOKEN,
     rewardPool: "1000",
     startTime: 1_800_000_000,

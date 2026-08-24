@@ -75,6 +75,7 @@ contract OracleCoordinatorTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Oracle Test",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,
@@ -149,7 +150,7 @@ contract OracleCoordinatorTest is Test {
 
     function test_Stake_revertsZeroValue() public {
         vm.prank(reporter);
-        vm.expectRevert(OracleCoordinator.NothingStaked.selector);
+        vm.expectRevert(IOracleCoordinator.NothingStaked.selector);
         coordinator.stake{value: 0}();
     }
 
@@ -176,7 +177,7 @@ contract OracleCoordinatorTest is Test {
 
     function test_Unstake_revertsNothingStaked() public {
         vm.prank(reporter);
-        vm.expectRevert(OracleCoordinator.NothingStaked.selector);
+        vm.expectRevert(IOracleCoordinator.NothingStaked.selector);
         coordinator.unstake();
     }
 
@@ -190,7 +191,7 @@ contract OracleCoordinatorTest is Test {
         vm.prank(reporter);
         vm.expectRevert(
             abi.encodeWithSelector(
-                OracleCoordinator.StakeLocked.selector, block.timestamp + DISPUTE_WINDOW + UNSTAKE_DELAY
+                IOracleCoordinator.StakeLocked.selector, block.timestamp + DISPUTE_WINDOW + UNSTAKE_DELAY
             )
         );
         coordinator.unstake();
@@ -225,7 +226,7 @@ contract OracleCoordinatorTest is Test {
     function test_Submit_revertsNoStake() public {
         _activateAndFund();
         vm.prank(reporter);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotAReporter.selector, reporter));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAReporter.selector, reporter));
         coordinator.submitReport(
             IOracleCoordinator.Report({campaign: address(campaign), kpiIndex: 0, amount: 1, evidence: ""})
         );
@@ -234,7 +235,7 @@ contract OracleCoordinatorTest is Test {
     function test_Submit_revertsUnknownCampaign() public {
         _stakeReporter(reporter);
         vm.prank(reporter);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.UnknownCampaign.selector, address(0xDEAD)));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.UnknownCampaign.selector, address(0xDEAD)));
         coordinator.submitReport(
             IOracleCoordinator.Report({campaign: address(0xDEAD), kpiIndex: 0, amount: 1, evidence: ""})
         );
@@ -273,7 +274,7 @@ contract OracleCoordinatorTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                OracleCoordinator.DisputeWindowOpen.selector, block.timestamp + DISPUTE_WINDOW
+                IOracleCoordinator.DisputeWindowOpen.selector, block.timestamp + DISPUTE_WINDOW
             )
         );
         coordinator.applyReport(reportId);
@@ -287,13 +288,13 @@ contract OracleCoordinatorTest is Test {
         _advancePastDispute(reportId);
         coordinator.applyReport(reportId);
 
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.ReportAlreadyApplied.selector, reportId));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportAlreadyApplied.selector, reportId));
         coordinator.applyReport(reportId);
         assertEq(campaign.totalProgress(0), 500_000, "no double application");
     }
 
     function test_ApplyReport_revertsUnknown() public {
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.UnknownReport.selector, bytes32(0)));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.UnknownReport.selector, bytes32(0)));
         coordinator.applyReport(bytes32(0));
     }
 
@@ -312,7 +313,7 @@ contract OracleCoordinatorTest is Test {
         assertEq(coordinator.slashPool(), MIN_STAKE);
 
         _advancePastDispute(reportId);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.ReportIsDisputed.selector, reportId));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportIsDisputed.selector, reportId));
         coordinator.applyReport(reportId);
         assertEq(campaign.totalProgress(0), 0, "disputed report never lands");
     }
@@ -335,7 +336,7 @@ contract OracleCoordinatorTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(
-            abi.encodeWithSelector(OracleCoordinator.DisputeWindowClosed.selector, block.timestamp)
+            abi.encodeWithSelector(IOracleCoordinator.DisputeWindowClosed.selector, block.timestamp)
         );
         coordinator.disputeReport(reportId);
     }
@@ -348,7 +349,7 @@ contract OracleCoordinatorTest is Test {
         coordinator.applyReport(reportId);
 
         vm.prank(governor);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.ReportAlreadyApplied.selector, reportId));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportAlreadyApplied.selector, reportId));
         coordinator.disputeReport(reportId);
     }
 
@@ -397,7 +398,7 @@ contract OracleCoordinatorTest is Test {
 
     function test_SetCampaignRegistry_onlyOnce() public {
         vm.prank(governor);
-        vm.expectRevert(OracleCoordinator.RegistryAlreadySet.selector);
+        vm.expectRevert(IOracleCoordinator.RegistryAlreadySet.selector);
         coordinator.setCampaignRegistry(address(0x1111));
     }
 
@@ -408,7 +409,7 @@ contract OracleCoordinatorTest is Test {
         fresh.stake{value: MIN_STAKE}();
 
         vm.prank(reporter);
-        vm.expectRevert(OracleCoordinator.RegistryNotSet.selector);
+        vm.expectRevert(IOracleCoordinator.RegistryNotSet.selector);
         fresh.submitReport(
             IOracleCoordinator.Report({campaign: address(campaign), kpiIndex: 0, amount: 1, evidence: ""})
         );

@@ -3,7 +3,8 @@
 import {useMemo} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
-import {useCampaigns, type TokenMeta} from "@/hooks/useCampaigns";
+import {useCampaigns} from "@/hooks/useCampaigns";
+import {denominations, type TokenMeta} from "@/lib/token";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
@@ -44,12 +45,14 @@ export function MyCampaignsPage() {
     );
   }, [mine]);
 
-  // Mixed-token totals do not add up to anything meaningful, so the tiles fall back to a count.
-  const tokenList = useMemo(
-    () => [...new Set(mine.map((c) => c.token.toLowerCase()))],
-    [mine],
-  );
-  const singleToken = tokenList.length === 1 ? tokens[tokenList[0]] : undefined;
+  // Mixed-token totals do not add up to anything meaningful, so the tiles fall back to a count
+  // of units — see `denominations` for what makes two token contracts one unit.
+  const units = useMemo(() => denominations(mine, tokens), [mine, tokens]);
+  const singleToken = units.length === 1 ? units[0] : undefined;
+
+  // Only reached with zero or 2+ units, so there is no singular case to spell. No campaigns
+  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
+  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
   const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
 
@@ -93,10 +96,10 @@ export function MyCampaignsPage() {
           value={
             singleToken
               ? formatTokenAmount(totals.pool, singleToken.decimals, {compact: true})
-              : `${tokenList.length} tokens`
+              : mixedLabel
           }
-          hint={singleToken?.symbol}
-          accent="var(--series-1)"
+          unit={singleToken?.symbol}
+          //accent="var(--series-1)"
         />
         <StatTile
           label="Paid to promoters"
@@ -105,12 +108,18 @@ export function MyCampaignsPage() {
               ? formatTokenAmount(totals.paidOut, singleToken.decimals, {compact: true})
               : "—"
           }
-          hint={singleToken?.symbol}
-          accent="var(--series-3)"
+          unit={singleToken?.symbol}
+          //accent="var(--series-3)"
         />
+        {/*
+          Gated on a single unit like the two tiles beside it: the percentage looks unitless, but
+          it divides one sum of token amounts by another, so a mixed list makes it as meaningless
+          as the totals above — and quieter about it, since a bare "15.7%" gives no hint that two
+          different tokens went into it.
+        */}
         <StatTile
           label="Pool utilization"
-          value={formatPercent(Number(totals.paidOut), Number(totals.pool))}
+          value={singleToken ? formatPercent(Number(totals.paidOut), Number(totals.pool)) : "—"}
           hint="across your campaigns"
         />
       </StatRow>
@@ -129,14 +138,20 @@ export function MyCampaignsPage() {
             isRefreshing={isRefreshing}
             emptyState={
               <EmptyState
-                title="No campaigns yet"
-                description="Campaigns you create with this wallet appear here, with funding and lifecycle controls."
+                title="This wallet has no Campaigns yet."
+                description="Campaigns you create with this wallet appear here."
                 action={
                   <Link
                     href="/create"
-                    className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
                   >
-                    Create campaign
+                    {/*Create campaign*/}
+
+                    <button
+                              type="submit"
+                              className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:opacity-50"
+                            >
+                      Create campaign
+                            </button>
                   </Link>
                 }
               />
@@ -151,9 +166,9 @@ export function MyCampaignsPage() {
 function Header() {
   return (
     <header>
-      <h1 className="font-display text-2xl text-ink">My campaigns</h1>
+      <h1 className="font-display text-2xl text-ink">My Campaigns</h1>
       <p className="mt-0.5 text-xs text-ink-muted">
-        Campaigns you created. Open one to fund, activate, pause, end, or reclaim unspent escrow.
+        Campaigns you created. Click one to <b>Fund, Activate, Pause, End, or Reclaim Unspent Escrow</b> funds.
       </p>
     </header>
   );
@@ -177,6 +192,9 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
     {
       key: "project",
       header: "Project",
+      // On this page every row is the connected wallet's own campaign, so the project column repeats
+      // one value down the table. First to go on a phone.
+      hideOnMobile: true,
       sortValue: (c) => projectName(c),
       render: (c) =>
         hasProjectName(c) ? (
@@ -218,6 +236,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
       key: "utilization",
       header: "Progress",
       sortValue: (c) => utilization(c),
+      hideOnMobile: true,
       width: "140px",
       render: (c) => (
         <Meter
@@ -239,6 +258,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
       key: "ends",
       header: "Ends",
       numeric: true,
+      hideOnMobile: true,
       sortValue: (c) => c.endTime,
       render: (c) => {
         if (now === 0) return <span className="text-ink-muted">—</span>;

@@ -13,6 +13,7 @@ import {getDeployment} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {buildCreateCampaignArgs, toWireKpis} from "@/lib/campaignArgs";
 import {describeTxError} from "@/lib/txErrors";
+import {encodeActions} from "@/lib/indexerCore";
 import {
   buildTouch,
   fetchEffectiveMaxDuration,
@@ -136,6 +137,14 @@ export function useCreateCampaign() {
   const {publicClient, walletClient, deployment} = useWriteContext();
   const {state, setState, reset, run} = useTx();
   const [campaignId, setCampaignId] = useState<bigint | undefined>();
+  /*
+    The deployed `Campaign`'s own address, alongside the registry id.
+
+    Both come out of the same `CampaignCreated` log and both are needed: the id is what `/campaign/[id]`
+    routes on, and the address is what an off-chain campaign guide is keyed by (`lib/campaignGuide`) —
+    the registry has no address→id lookup, so recovering one from the other later means a browse scan.
+  */
+  const [campaignAddress, setCampaignAddress] = useState<`0x${string}` | undefined>();
 
   const create = useCallback(
     async (draft: CampaignDraft, tokenDecimals: number) => {
@@ -150,6 +159,7 @@ export function useCreateCampaign() {
 
       const account = walletClient.account;
       setCampaignId(undefined);
+      setCampaignAddress(undefined);
 
       await run(
         async () => {
@@ -180,7 +190,10 @@ export function useCreateCampaign() {
             logs: receipt.logs as never,
           });
           const created = events[0];
-          if (created) setCampaignId(created.args.campaignId);
+          if (created) {
+            setCampaignId(created.args.campaignId);
+            setCampaignAddress(created.args.campaign);
+          }
         },
         publicClient,
       );
@@ -188,7 +201,7 @@ export function useCreateCampaign() {
     [publicClient, walletClient, deployment, run, setState],
   );
 
-  return {state, create, reset, campaignId};
+  return {state, create, reset, campaignId, campaignAddress};
 }
 
 // ── fund ─────────────────────────────────────────────────────────
@@ -513,4 +526,115 @@ export function useStoreTouch() {
   );
 
   return {state, storeTouch, reset, touch};
+}
+
+// ── reporting (dev tool) ─────────────────────────────────────────
+
+/**
+ * `Campaign.reportUserAction` — the project crediting a referral's activity.
+ *
+ * Normally the indexer's job (`scripts/indexer.ts` watches KPI event sources and reports what it
+ * finds). This hook exists so a project wallet can push the same reports by hand while testing —
+ * which is why it lives behind `isProject` in `ReportPanel` rather than being part of the
+ * promoter-facing flow. What it reports is decided by `planObservedReport`, from the same logs the
+ * indexer reads; this hook only sends what it is handed.
+ *
+ * **Sequential, not batched.** One KOL can have several attributed referrals, and the contract
+ * takes one referral per call, so crediting a KOL is N transactions. They run in series and the
+ * loop stops at the first failure: `_settle` runs inline at the end of each call, so a partial
+ * sequence has already moved real money, and firing the rest after a revert would pile more state
+ * changes on top of a condition the caller has not seen yet. `sent` reports how many landed, so
+ * the panel can say "2 of 3 confirmed" rather than implying all-or-nothing.
+ *
+ * Each call is simulated first, for the same reason as every other write here: `NoAttribution`,
+ * `NonMonotonic` and `AggregateKpi` are named errors before signing and opaque failures after.
+ */
+export function useReportUserAction() {
+  const {publicClient, walletClient} = useWriteContext();
+  const [state, setState] = useState<TxState>(IDLE);
+  const [sent, setSent] = useState(0);
+  const [total, setTotal] = useState(0);
+
+  const reset = useCallback(() => {
+    setState(IDLE);
+    setSent(0);
+    setTotal(0);
+  }, []);
+
+  const report = useCallback(
+    async (
+      campaign: `0x${string}`,
+      kpiIndex: number,
+      calls: readonly {
+        referral: `0x${string}`;
+        newTotal: bigint;
+        actions?: readonly {timestamp: bigint; amount: bigint}[];
+      }[],
+    ) => {
+      if (!publicClient || !walletClient) {
+        setState({status: "error", message: "Connect a wallet to report progress."});
+        return;
+      }
+      if (calls.length === 0) return;
+
+      const account = walletClient.account;
+      setSent(0);
+      setTotal(calls.length);
+
+      for (const call of calls) {
+        try {
+          setState({status: "preparing"});
+
+          // Evidence is the observed actions when the plan carries them, `"0x"` otherwise. A KPI
+          // with `verifier == address(0)` ignores the argument either way (`Campaign.sol:325`); a
+          // verifier-gated one decodes it as `TouchWindowVerifier.Action[]`, so sending the empty
+          // blob there would fail the decode rather than credit a discounted amount.
+          const evidence = call.actions?.length ? encodeActions(call.actions) : "0x";
+
+          const {request} = await publicClient.simulateContract({
+            account,
+            address: campaign,
+            abi: CampaignAbi,
+            functionName: "reportUserAction",
+            args: [BigInt(kpiIndex), call.referral, call.newTotal, evidence],
+          });
+
+          const hash = await walletClient.writeContract(request);
+          setState({status: "submitted", hash});
+
+          const receipt = await publicClient.waitForTransactionReceipt({hash});
+          if (receipt.status !== "success") {
+            setState({
+              status: "error",
+              message:
+                "The report reverted on chain — the campaign's state changed after this page loaded. Reload and try again.",
+              detail: `receipt status: ${receipt.status} · referral ${call.referral}`,
+            });
+            return;
+          }
+
+          setSent((n) => n + 1);
+          setState({status: "confirmed", hash});
+        } catch (err) {
+          const {message, detail} = describeTxError(err);
+          setState({
+            status: "error",
+            message,
+            detail: [detail, `referral ${call.referral}`].filter(Boolean).join(" · "),
+          });
+          return;
+        }
+      }
+    },
+    [publicClient, walletClient],
+  );
+
+  return {
+    state,
+    report,
+    reset,
+    /** Reports confirmed so far, and how many the plan asked for. */
+    sent,
+    total,
+  };
 }

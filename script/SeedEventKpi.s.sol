@@ -6,6 +6,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Campaign} from "../src/campaign/Campaign.sol";
 import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
 import {EscrowVault} from "../src/escrow/EscrowVault.sol";
+import {EventMetricKpiVerifier} from "../src/verifiers/EventMetricKpiVerifier.sol";
+import {GuardedKpiVerifier} from "../src/verifiers/GuardedKpiVerifier.sol";
+import {IEventMetricKpiVerifier} from "../src/interfaces/IEventMetricKpiVerifier.sol";
+import {IGuardedKpiVerifier} from "../src/interfaces/IGuardedKpiVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
 
 /// @title SeedEventKpi
@@ -24,10 +28,14 @@ import {Types} from "../src/libraries/Types.sol";
 ///      `topics[1]` holds `dst` (so `actorTopic = 1`) and `data` is the single `uint256` `wad`
 ///      (so `amountMode = 1`).
 ///
-///      `verifier` is deliberately `address(0)`. A verifier's `params` is read by
-///      `TouchWindowVerifier` as a bare `uint64` lookback and ignored unless it is exactly 32
-///      bytes; a 160-byte event blob would silently yield a lookback of 0. The two encodings
-///      cannot share the field, and event sourcing is the one in use here.
+///      `verifier` is gated behind env vars and defaults to `address(0)`. The reason it *had* to be
+///      `address(0)` is gone: verifiers used to read their config from the same `params` field, where
+///      `TouchWindowVerifier` reads a bare `uint64` lookback and ignores anything that is not exactly
+///      32 bytes — so a 160-byte event blob silently yielded a lookback of 0 and the two encodings
+///      could not share the field. `EventMetricKpiVerifier` keeps its config in its own storage via
+///      `setKpiConfig`, so event sourcing and verification can now coexist on one KPI. Pass
+///      `KPI_VERIFIER_ADDRESS` and `GUARDED_VERIFIER_ADDRESS` to gate this campaign; leave them unset
+///      for the original ungated behavior.
 ///
 ///      Reuses the token the main seed already deployed rather than minting another, so the
 ///      campaign shows up under the same balance a wallet already holds. Pass it via
@@ -50,6 +58,23 @@ contract SeedEventKpi is Script {
     ///      the ladder would be decorative. This keeps `RewardTier.threshold` a human number.
     uint256 public constant SCALE = 1e15;
 
+    /// @notice The tracked event in the human-readable form `EventMetricKpiVerifier` stores.
+    /// @dev Declaration order is (dst, wad), so the user param is index 0 and the summed param is
+    ///      index 1. Consistent with `ACTOR_TOPIC = 1` above, which is `topics[1] == dst`.
+    string public constant DEPOSIT_EVENT = "Deposit(address indexed dst, uint256 wad)";
+
+    /// @notice Blocks of slack added past the campaign's projected reporting close.
+    /// @dev Biased high on purpose: `windowEndBlock` only bounds the relayer's checkpoint, while
+    ///      `Campaign` enforces its own report window regardless, so over-estimating wastes a little
+    ///      scanning and under-estimating under-credits promoters. `pnpm report-window` derives the
+    ///      exact value once the campaign exists.
+    uint256 public constant BLOCK_MARGIN = 10_000;
+
+    /// @dev Held as state rather than locals: `run()` is at the stack-slot limit without `via_ir`.
+    address kpiVerifier;
+    address guardedVerifier;
+    bool gated;
+
     function run() external {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address project = vm.addr(pk);
@@ -57,6 +82,12 @@ contract SeedEventKpi is Script {
         CampaignRegistry registry = CampaignRegistry(vm.envAddress("REGISTRY_ADDRESS"));
         EscrowVault vault = EscrowVault(vm.envAddress("VAULT_ADDRESS"));
         IERC20 token = IERC20(vm.envAddress("SEED_TOKEN"));
+
+        // Optional. Both must be set to gate the KPI; either one alone leaves it ungated, since a
+        // guard with no Boney verifier behind it has nothing to cap against.
+        kpiVerifier = vm.envOr("KPI_VERIFIER_ADDRESS", address(0));
+        guardedVerifier = vm.envOr("GUARDED_VERIFIER_ADDRESS", address(0));
+        gated = kpiVerifier != address(0) && guardedVerifier != address(0);
 
         // Small next to the 10M the seed minted: this campaign exists to prove the loop, and
         // escrow only returns after the claim grace window.
@@ -73,18 +104,22 @@ contract SeedEventKpi is Script {
 
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            // Names are unique per registry, so this appends the campaign id the registry is about
+            // to assign — re-running this script against the same chain would otherwise revert
+            // `NameTaken` on the second run.
+            name: string.concat("Event KPI Demo ", vm.toString(registry.campaignCount())),
             token: address(token),
             rewardPool: pool,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 30 days),
-            attributionWindow: 7 days,
+            attributionWindow: 30 minutes,
             minReputation: 0
         });
 
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](1);
         kpis[0] = Types.KpiSpec({
             kind: Types.KpiKind.Deposit,
-            verifier: address(0),
+            verifier: gated ? guardedVerifier : address(0),
             target: 100,
             aggregate: false,
             params: abi.encode(WETH, DEPOSIT_TOPIC, ACTOR_TOPIC, AMOUNT_MODE_DATA_WORD0, SCALE)
@@ -108,10 +143,45 @@ contract SeedEventKpi is Script {
 
         vm.stopBroadcast();
 
+        // Configured after creation because `kpiIndex`, `startTime` and `endTime` do not exist until
+        // the campaign does — the same ordering a real project has to follow.
+        if (gated) _configureVerification(campaign, pk);
+
         console.log("Event-sourced campaign created");
         console.log("  campaignId: ", campaignId);
         console.log("  campaign:   ", campaign);
         console.log("  tracking:   Deposit(address,uint256) on", WETH);
         console.log("  scale:      1 unit per 0.001 WETH");
+        console.log("  verifier:   ", gated ? guardedVerifier : address(0));
+    }
+
+    /// @dev Points the KPI at WETH's `Deposit` event on Boney's verifier and routes the guard through
+    ///      Boney alone. Split out of `run()` rather than inlined because `run()` is already at the
+    ///      stack-slot limit without `via_ir`.
+    /// @param campaign The freshly created campaign.
+    /// @param pk Key to broadcast with; must own both verifiers.
+    function _configureVerification(address campaign, uint256 pk) internal {
+        uint256 windowEndBlock =
+            block.number + (30 days + Campaign(campaign).CLAIM_GRACE()) / 2 + BLOCK_MARGIN;
+
+        vm.startBroadcast(pk);
+        EventMetricKpiVerifier(kpiVerifier).setKpiConfig(
+            campaign,
+            0,
+            WETH,
+            DEPOSIT_EVENT,
+            0, // userParamIndex — `dst`
+            IEventMetricKpiVerifier.Aggregation.SUM,
+            1, // valueParamIndex — `wad`
+            SCALE, // same divisor the indexer applies, so the cap is denominated in progress units
+            block.number,
+            windowEndBlock
+        );
+        // Boney alone: this campaign exists to prove event sourcing, and a second verifier would add
+        // a reason for it not to credit.
+        GuardedKpiVerifier(guardedVerifier).setGuardConfig(
+            campaign, 0, address(0), 0, IGuardedKpiVerifier.Mode.AGREE
+        );
+        vm.stopBroadcast();
     }
 }

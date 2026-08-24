@@ -7,13 +7,19 @@ import {IAttributionRegistry} from "./interfaces/IAttributionRegistry.sol";
 /// @title IBoney
 /// @notice Marketplace-facing entry point for the Boney protocol.
 /// @dev The facade holds no funds and no campaign state; it routes to the modules and provides
-///      the aggregated views a marketplace UI needs. Protocol logic lives in the modules
-///      (decision D9), so a new frontend never requires touching escrow or settlement code.
+///      the aggregated views a marketplace UI needs. Protocol logic lives in the modules.
 interface IBoney {
+    // ── errors ───────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error NotProject(address project, address caller);
+    error CampaignMismatch(address expected, address provided);
+
     /// @notice A campaign summarized for listing pages.
     /// @param campaignId Sequential id assigned by the registry.
     /// @param campaign Address of the campaign contract.
     /// @param project Owner of the campaign; receives unspent escrow on end/cancel.
+    /// @param name The campaign's display name, unique across the registry that created it.
     /// @param token ERC20 used for escrow and payouts.
     /// @param rewardPool Total escrow required before the campaign can be activated.
     /// @param paidOut Rewards released from the pool so far.
@@ -26,6 +32,7 @@ interface IBoney {
         uint256 campaignId;
         address campaign;
         address project;
+        string name;
         address token;
         uint256 rewardPool;
         uint256 paidOut;
@@ -48,7 +55,6 @@ interface IBoney {
         Types.RewardTier[][] calldata tiers
     ) external returns (uint256 campaignId, address campaign);
 
-    /// @notice Escrow `amount` of the campaign's token, pulled from the caller.
     /// @param campaignId The campaign to fund.
     /// @param amount Amount of the campaign's token to escrow.
     function fundCampaign(uint256 campaignId, uint256 amount) external;

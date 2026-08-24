@@ -37,14 +37,19 @@ import {
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, AttributionRegistryAbi, BoneyAbi} from "../src/lib/abis";
-import {decodeEventSource, knownSignature, type EventSource} from "../src/lib/kpiSource";
+import {decodeEventSource, type EventSource} from "../src/lib/kpiSource";
+import {catalogSignature} from "../src/lib/eventNames";
 import {
+  actorFromTopic,
   aggregateByActor,
   blockChunks,
   decideReport,
   encodeActions,
+  type ActorFloors,
   type IndexedLog,
 } from "../src/lib/indexerCore";
+import {GENERATED_DEPLOYMENTS} from "../src/lib/deployments";
+import {TOUCH_STORED} from "../src/lib/events";
 import {readBroadcast} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +67,12 @@ const MAX_LOG_RANGE = BigInt(2_000);
  *
  * Scanning from genesis on an L2 is thousands of requests. A campaign that needs deeper history
  * gets an explicit `--from-block`; silently scanning 40M blocks would look like a hang.
+ *
+ * This is an RPC bound, *not* the correctness boundary — see `actorFloors`. On its own it says
+ * nothing about when a campaign began: for any campaign younger than this many blocks (~28 hours on
+ * Base's 2s blocks) `head - DEFAULT_LOOKBACK` is a block from before the campaign existed, which is
+ * exactly when a freshly seeded one is being tested. The floor below keeps that from crediting
+ * anything; clamping to the deployment block just keeps it from being scanned.
  */
 const DEFAULT_LOOKBACK = BigInt(50_000);
 
@@ -158,6 +169,84 @@ async function fetchLogs(
   return out;
 }
 
+/**
+ * The earliest creditable timestamp for every actor these logs touched.
+ *
+ * This is the correctness boundary the block range is not. `reportUserAction` receives a total, never
+ * the blocks behind it, so the contract cannot tell that a figure includes activity from before the
+ * campaign existed or before the user was attributed — with `verifier == address(0)` it credits the
+ * number as-is. Only this filter stands between a wide scan and a wrong credit.
+ *
+ * `max(firstSignedAt, startTime)` because both bounds are real and neither implies the other: activity
+ * from before the user was ever attributed is nobody's doing, and the campaign's own start rules out
+ * everything before it regardless of who was attributed when.
+ *
+ * **The first touch, not the current one.** `Campaign` credits `newTotal - _userCredited[user][kpi]`
+ * and that guard is keyed by user alone, spanning every promoter the user ever had. `newTotal` must
+ * therefore be cumulative over the user's whole attributed history — measure it from the *latest*
+ * touch and a user who switched promoters recomputes a total at or below what the previous promoter
+ * was already credited, so the new one is credited nothing, permanently. `touchOf` returns only the
+ * live touch, so the floor comes from the `TouchStored` history instead.
+ *
+ * One log scan for the whole campaign rather than a read per actor, and it also answers "was this
+ * actor ever attributed at all" — absent from the history means dropped, which `aggregateByActor`
+ * treats as "no credit", matching `Campaign` reverting `NoAttribution`.
+ */
+async function actorFloors(
+  client: PublicClient,
+  registry: `0x${string}`,
+  campaign: `0x${string}`,
+  startTime: bigint,
+  fromBlock: bigint,
+  head: bigint,
+  logs: readonly IndexedLog[],
+  source: EventSource,
+): Promise<{floors: ActorFloors; unattributed: string[]}> {
+  const actors = new Set<string>();
+  for (const log of logs) {
+    const actor = actorFromTopic(log, source.actorTopic);
+    if (actor) actors.add(getAddress(actor));
+  }
+
+  // Every touch this campaign ever stored, oldest kept. Scanned from the same lower bound as the
+  // activity: a touch below it would be invisible here, and crediting from a floor we cannot see
+  // would be worse than reporting nothing.
+  const firstSignedAt = new Map<string, bigint>();
+  for (const chunk of blockChunks(fromBlock, head, MAX_LOG_RANGE)) {
+    const touchLogs = await client.getLogs({
+      address: registry,
+      event: TOUCH_STORED,
+      args: {campaign},
+      fromBlock: chunk.from,
+      toBlock: chunk.to,
+    });
+    for (const log of touchLogs) {
+      const user = log.args.user;
+      const signedAt = log.args.signedAt;
+      if (!user || signedAt === undefined) continue;
+      const key = getAddress(user).toLowerCase();
+      const seen = firstSignedAt.get(key);
+      const at = BigInt(signedAt);
+      if (seen === undefined || at < seen) firstSignedAt.set(key, at);
+    }
+  }
+
+  const floors = new Map<string, bigint>();
+  const unattributed: string[] = [];
+  for (const actor of actors) {
+    const first = firstSignedAt.get(actor.toLowerCase());
+    if (first === undefined || first === BigInt(0)) {
+      // Reported rather than dropped in silence: these used to each print a "no live attribution
+      // touch" line from the loop below, and losing that would make a busy source look quiet.
+      unattributed.push(actor);
+      continue;
+    }
+    floors.set(actor.toLowerCase(), first > startTime ? first : startTime);
+  }
+
+  return {floors, unattributed};
+}
+
 async function main(): Promise<void> {
   const publicClient = createPublicClient({transport: http(rpcUrl)}) as PublicClient;
 
@@ -222,7 +311,7 @@ async function main(): Promise<void> {
       if (!source) continue;
 
       const label = `campaign ${view.campaignId} kpi ${kpiIndex}`;
-      const signature = knownSignature(source.topic0) ?? source.topic0;
+      const signature = catalogSignature(source.topic0) ?? source.topic0;
       console.log(`\n${label} — ${signature} on ${source.source}`);
 
       // Pre-flight against the contract's own guards, so a skip prints a reason instead of
@@ -252,19 +341,37 @@ async function main(): Promise<void> {
       }
 
       const key = cursorKey(chainId, view.campaign, kpiIndex);
-      const fromBlock = fromBlockFlag
+      // Never below the deployment block: no campaign can predate the registry that created it, so a
+      // lookback reaching further is pure RPC spend. An explicit `--from-block` is honoured as given.
+      const deployedAt = GENERATED_DEPLOYMENTS[chainId]?.startBlock ?? BigInt(0);
+      const requested = fromBlockFlag
         ? BigInt(fromBlockFlag)
         : state[key]
           ? BigInt(state[key])
           : head > DEFAULT_LOOKBACK
             ? head - DEFAULT_LOOKBACK
             : BigInt(0);
+      const fromBlock = fromBlockFlag || requested > deployedAt ? requested : deployedAt;
 
       console.log(`  blocks ${fromBlock}..${head}`);
       const logs = await fetchLogs(publicClient, source, fromBlock, head);
       console.log(`  ${logs.length} matching log(s)`);
 
-      const totals = aggregateByActor(logs, source);
+      const {floors, unattributed} = await actorFloors(
+        publicClient,
+        attributionRegistry,
+        view.campaign,
+        startTime as bigint,
+        fromBlock,
+        head,
+        logs,
+        source,
+      );
+      for (const actor of unattributed) {
+        console.log(`  · ${actor}: no live attribution touch — Campaign would revert NoAttribution`);
+        skipped++;
+      }
+      const totals = aggregateByActor(logs, source, floors);
 
       for (const total of totals.values()) {
         const [promoterId, alreadyCredited] = await Promise.all([

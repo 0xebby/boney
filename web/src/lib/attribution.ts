@@ -158,6 +158,13 @@ export type TouchEligibility = {
   reason?: string;
 };
 
+/**
+ * First `Types.CampaignStatus` index the registry treats as terminal — `Ended`, and everything
+ * after it. Compared with `>=` rather than by name for the same reason the contract does: an
+ * unrecognised status fails closed instead of being waved through.
+ */
+const TERMINAL_STATUS = 3;
+
 function no(reason: string): TouchEligibility {
   return {ok: false, reason};
 }
@@ -173,6 +180,11 @@ function no(reason: string): TouchEligibility {
  * Passing the global cap alone would under-report `TouchTooLong` on a campaign with a tighter
  * window and let the UI wave through a touch the chain rejects.
  *
+ * `campaignEndTime` and `campaignStatus` are the campaign-life bound. Both are needed and neither
+ * implies the other: a campaign past its `endTime` that nobody has ended yet is still `Active`, and
+ * a campaign ended early is terminal while its `endTime` is still in the future. See
+ * `AttributionRegistry._requireCampaignOpen`.
+ *
  * Does not check signature validity — that is always deferred to the chain.
  */
 export function canStoreTouch(ctx: {
@@ -182,6 +194,14 @@ export function canStoreTouch(ctx: {
   now: number;
   /** The effective cap for this campaign — see `fetchEffectiveMaxDuration`. */
   maxTouchDuration: bigint;
+  /**
+   * The campaign's `endTime`. Zero means there is no campaign window to read — the registry
+   * treats a registrant that does not answer as unbounded, so this mirrors that rather than
+   * rejecting everything.
+   */
+  campaignEndTime: bigint;
+  /** The campaign's `status` as a `Types.CampaignStatus` index. */
+  campaignStatus: number;
 }): TouchEligibility {
   const nowTs = BigInt(ctx.now);
 
@@ -196,6 +216,15 @@ export function canStoreTouch(ctx: {
   if (ctx.touch.expiresAt > nowTs + ctx.maxTouchDuration) {
     const max = nowTs + ctx.maxTouchDuration;
     return no(`TouchTooLong: expires at ${ctx.touch.expiresAt}, max ${max}`);
+  }
+
+  // Inclusive, like the contract: `endTime` itself still credits a report.
+  if (ctx.campaignEndTime > BigInt(0) && nowTs > ctx.campaignEndTime) {
+    return no(`CampaignOver: ended at ${ctx.campaignEndTime}, now ${nowTs}`);
+  }
+
+  if (ctx.campaignStatus >= TERMINAL_STATUS) {
+    return no(`CampaignTerminal: status ${ctx.campaignStatus}`);
   }
 
   if (!ctx.promoterRegistered) {

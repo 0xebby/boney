@@ -276,11 +276,12 @@ contract SeedLocal is Script {
 
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Multi-KPI Demo",
             token: address(token),
             rewardPool: pool,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 60 days),
-            attributionWindow: 14 days,
+            attributionWindow: 1 hours,
             minReputation: 0
         });
 
@@ -331,11 +332,16 @@ contract SeedLocal is Script {
     function _create(uint256 pool, uint256 minReputation) internal returns (address campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            // This helper builds four campaigns that differ only by pool and gate, and names are
+            // unique per registry — so the id the registry is about to assign is what separates
+            // them. It also makes the script re-runnable against an already-seeded chain, which
+            // `_seedReputation` above already supports.
+            name: string.concat("Seed Campaign ", vm.toString(registry.campaignCount())),
             token: address(token),
             rewardPool: pool,
             startTime: uint64(block.timestamp),
             endTime: uint64(block.timestamp + 30 days),
-            attributionWindow: 7 days,
+            attributionWindow: 30 minutes,
             minReputation: minReputation
         });
 
@@ -374,7 +380,7 @@ contract SeedLocal is Script {
             campaign: campaign,
             promoterId: promoterId,
             signedAt: uint64(block.timestamp),
-            expiresAt: uint64(block.timestamp + 7 days)
+            expiresAt: uint64(block.timestamp + 30 minutes)
         });
 
         bytes32 structHash = keccak256(

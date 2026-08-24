@@ -4,10 +4,11 @@ import {
   parseAmount,
   parseCount,
   isAddress,
+  isPrintableAscii,
   maxSinglePromoterPayout,
   type CampaignDraft,
 } from "./validation";
-import {MAX_TIERS_PER_KPI} from "./types";
+import {MAX_TIERS_PER_KPI, MAX_CAMPAIGN_NAME_LENGTH} from "./types";
 import {MAX_BONEY_SCORE} from "./boneyscore";
 
 const TOKEN = "0x1234567890abcdef1234567890abcdef12345678";
@@ -15,6 +16,7 @@ const NOW = 1_000_000;
 
 function draft(overrides: Partial<CampaignDraft> = {}): CampaignDraft {
   return {
+    name: "Test Campaign",
     token: TOKEN,
     rewardPool: "10000",
     startTime: NOW,
@@ -40,6 +42,80 @@ function draft(overrides: Partial<CampaignDraft> = {}): CampaignDraft {
 function paths(d: CampaignDraft): string[] {
   return validateCampaignDraft(d, {tokenDecimals: 18, nowSeconds: NOW}).map((i) => i.path);
 }
+
+describe("name", () => {
+  it("accepts an ordinary name", () => {
+    expect(paths(draft({name: "Aave Protocol"}))).not.toContain("name");
+    expect(paths(draft({name: "Aave v3 (Base) - 2026!"}))).not.toContain("name");
+  });
+
+  it("requires a name", () => {
+    expect(paths(draft({name: ""}))).toContain("name");
+    // Solidity: EmptyName. All-spaces normalizes to empty on chain, so it is not a name either.
+    expect(paths(draft({name: "   "}))).toContain("name");
+  });
+
+  it("enforces the contract's length ceiling", () => {
+    const atMax = "a".repeat(MAX_CAMPAIGN_NAME_LENGTH);
+    expect(paths(draft({name: atMax}))).not.toContain("name");
+    // Solidity: NameTooLong
+    expect(paths(draft({name: `${atMax}a`}))).toContain("name");
+  });
+
+  it("rejects characters the contract cannot store", () => {
+    // Solidity: InvalidNameChar. Each of these is a real impersonation route rather than a style
+    // preference — the Cyrillic А and the zero-width joiner both render as an existing name.
+    expect(paths(draft({name: "Аave"}))).toContain("name"); // U+0410
+    expect(paths(draft({name: "Aa‍ve"}))).toContain("name"); // zero-width joiner
+    expect(paths(draft({name: "Aave 🚀"}))).toContain("name");
+    expect(paths(draft({name: "café"}))).toContain("name");
+    expect(paths(draft({name: "Aa\tve"}))).toContain("name");
+  });
+
+  it("counts characters the way the contract counts bytes", () => {
+    // The charset rule is what makes a character count equal a byte count. An emoji is four bytes
+    // on chain but would be one or two characters here, so it is rejected outright rather than
+    // measured — otherwise a 32-"character" name could exceed 32 bytes.
+    expect(paths(draft({name: "🚀".repeat(8)}))).toContain("name");
+  });
+
+  it("reports a taken name only when the caller says the registry holds it", () => {
+    // Uniqueness is not a property of the draft: the registry normalizes before comparing, so the
+    // answer comes from `isNameAvailable` rather than from anything checkable here.
+    const d = draft({name: "Aave"});
+    expect(
+      validateCampaignDraft(d, {tokenDecimals: 18, nowSeconds: NOW, nameTaken: true}).map((i) => i.path),
+    ).toContain("name");
+    expect(
+      validateCampaignDraft(d, {tokenDecimals: 18, nowSeconds: NOW, nameTaken: false}).map((i) => i.path),
+    ).not.toContain("name");
+    expect(paths(d)).not.toContain("name");
+  });
+
+  it("does not report a name as taken when it is also malformed", () => {
+    // One message per field: "too long" is the actionable one, and a malformed name was never
+    // checked against the registry anyway.
+    const issues = validateCampaignDraft(draft({name: "a".repeat(40)}), {
+      tokenDecimals: 18,
+      nowSeconds: NOW,
+      nameTaken: true,
+    });
+    expect(issues.filter((i) => i.path === "name")).toHaveLength(1);
+    expect(issues.find((i) => i.path === "name")?.message).toMatch(/characters or fewer/);
+  });
+});
+
+describe("isPrintableAscii", () => {
+  it("mirrors the contract's 0x20-0x7E range", () => {
+    expect(isPrintableAscii(" ")).toBe(true);
+    expect(isPrintableAscii("~")).toBe(true);
+    expect(isPrintableAscii("Aa0 !~")).toBe(true);
+    expect(isPrintableAscii("ab")).toBe(false); // one below the low bound
+    expect(isPrintableAscii("")).toBe(false);
+    expect(isPrintableAscii("é")).toBe(false);
+    expect(isPrintableAscii("")).toBe(true);
+  });
+});
 
 describe("minReputation", () => {
   it("accepts 0, an empty gate, and anything up to the ceiling", () => {
@@ -69,6 +145,61 @@ describe("minReputation", () => {
     expect(paths(draft({minReputation: "20k"}))).toContain("minReputation");
     expect(paths(draft({minReputation: "-1"}))).toContain("minReputation");
     expect(paths(draft({minReputation: "1.5"}))).toContain("minReputation");
+  });
+});
+
+/*
+  The live ceiling, which is what `Campaign`'s constructor compares against
+  (`ReputationRegistry.maxScore`). The local constant is only the arithmetic for the *seeded* schema
+  configuration, and the two parting company is not theoretical: a registry deployed without
+  `SeedDevRep` has no weighted schemas, reports 0, and reverts `UnreachableReputation(15000, 0)` on a
+  gate this file had just approved.
+*/
+describe("minReputation against a live ceiling", () => {
+  function gateIssue(minReputation: string, scoreCeiling?: bigint) {
+    return validateCampaignDraft(draft({minReputation}), {
+      tokenDecimals: 18,
+      nowSeconds: NOW,
+      scoreCeiling,
+    }).find((i) => i.path === "minReputation");
+  }
+
+  it("rejects a gate the chain's ceiling cannot reach, even below the local constant", () => {
+    const issue = gateIssue("15000", BigInt(5_000));
+
+    expect(issue?.message).toContain("5,000");
+    expect(gateIssue("5000", BigInt(5_000))).toBeUndefined();
+  });
+
+  it("allows a gate above the local constant when the chain permits it", () => {
+    // Governance can re-weight schemas without redeploying the frontend, and the constructor is the
+    // authority — so the form must not refuse a gate the chain would accept.
+    expect(gateIssue(String(MAX_BONEY_SCORE + 1_000), BigInt(50_000))).toBeUndefined();
+  });
+
+  it("names the unseeded registry rather than telling the creator to pick a lower number", () => {
+    const issue = gateIssue("15000", BigInt(0));
+
+    expect(issue?.message).toMatch(/no weighted schemas/i);
+    expect(issue?.message).toMatch(/SeedDevRep/);
+    // 0 stays valid: an ungated campaign is exactly what that registry can support.
+    expect(gateIssue("0", BigInt(0))).toBeUndefined();
+    expect(gateIssue("", BigInt(0))).toBeUndefined();
+  });
+
+  it("treats an uncapped ceiling as no ceiling", () => {
+    // `maxScore` returns type(uint256).max when a weighted schema has no value cap.
+    const uncapped = BigInt(2) ** BigInt(256) - BigInt(1);
+
+    expect(gateIssue(uncapped.toString(), uncapped)).toBeUndefined();
+    expect(gateIssue("40000", uncapped)).toBeUndefined();
+  });
+
+  it("falls back to the local constant when the ceiling could not be read", () => {
+    expect(gateIssue(String(MAX_BONEY_SCORE + 1), undefined)?.message).toContain(
+      MAX_BONEY_SCORE.toLocaleString(),
+    );
+    expect(gateIssue("26000", undefined)).toBeUndefined();
   });
 });
 

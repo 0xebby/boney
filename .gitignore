@@ -7,13 +7,25 @@ out/
 /broadcast/*/31337/
 /broadcast/**/dry-run/
 
-# Docs
+# Docs. `docs/` is `forge doc` output — regenerable from the sources it documents, like out/ above,
+# and 4 MB of it. The prose a reader needs is in README.md and boneyMd/.
 docs/
 BoneyDocs.md
 todo.md
 todo-frontend.md
 plan.md
 future.md
+changes.md
+
+# Internal code reviews and the unpublished protocol spec. Both live in boneyMd/ alongside the
+# published docs, and this repo is public — findings.md details high-severity bugs, so it must never
+# be staged. Drop the spec/ rule when the spec is ready to publish.
+boneyMd/findings.md
+boneyMd/spec/
+
+# One-off HTML explainers written to the repo root while working something out. The version of any
+# of this that ships is prose in boneyMd/ or a page in the app.
+/*.html
 
 # Web app
 web/node_modules/
@@ -23,6 +35,11 @@ web/.vercel
 
 # Dotenv file
 .env
+# Timestamped backups of the above, written when a deploy/seed script rewrites addresses. They carry
+# the same PRIVATE_KEY / ATTESTOR_PRIVATE_KEY / ETHOS_PK, and a bare `.env` rule does not match them
+# — so `git add -A` would have staged live deployer keys into a public repo.
+.env.*
+!.env.example
 
 # Indexer block cursors — per-machine scan position, not shared state. Losing it costs a rescan,
 # which is a no-op because reports are cumulative.
@@ -34,5 +51,14 @@ web/.vercel
 # and must never be committed; the branches themselves carry the work.
 .claude/worktrees/
 
-# Per-machine tool settings, not shared state.
+# Per-machine tool settings, not shared state. `.vscode/extensions.json` and `launch.json` are
+# tracked because they are shared procedure; settings.json is whatever this machine happened to set.
 .claude/settings.local.json
+.vscode/settings.json
+
+# Local agent skills. Kept out for now — promote one here if it becomes shared procedure.
+.claude/skills/
+
+# Campaign guides written by /api/campaign-guide — a local-dev convenience, not shared state.
+# The committed catalog in web/src/lib/campaignGuide.ts is the path a deploy relies on.
+web/.data/

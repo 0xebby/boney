@@ -2,12 +2,15 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.17.0",
   "scripts": {
     "dev": "next dev",
+    "dev:up": "./scripts/dev-up.sh",
     "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "node --max-old-space-size=8192 ./node_modules/typescript/bin/tsc --noEmit",
+    "typecheck:scripts": "node --max-old-space-size=3072 ./node_modules/typescript/bin/tsc -p tsconfig.scripts.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "abis": "tsx scripts/extract-abis.ts",
@@ -17,7 +20,12 @@
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "deployments": "tsx scripts/generate-deployments.ts",
     "seed": "tsx scripts/seed-local.ts",
-    "index": "tsx scripts/indexer.ts"
+    "index": "tsx scripts/indexer.ts",
+    "relay": "tsx scripts/relay-kpi-metric.ts",
+    "sygma:deposit": "tsx scripts/sygma-deposit.ts",
+    "demo:seed": "tsx scripts/demo-seed.ts",
+    "swap:weth-usdc": "tsx scripts/uniswap-swap.ts",
+    "report-window": "tsx scripts/compute-report-window.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

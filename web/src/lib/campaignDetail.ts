@@ -34,6 +34,8 @@ export type KpiDetail = {
 export type CampaignDetail = {
   address: `0x${string}`;
   project: `0x${string}`;
+  /** The campaign's display name, unique across the registry that created it. */
+  name: string;
   token: `0x${string}`;
   rewardPool: bigint;
   paidOut: bigint;
@@ -92,11 +94,11 @@ function currentBlock(client: PublicClient): Promise<bigint> {
   return client.getBlockNumber({cacheTime: 0});
 }
 
-/** Reads one `Campaign` view function at a pinned block. */
+/** Reads one `Campaign` view function, pinned to a block when one is given. */
 function read<T>(
   client: PublicClient,
   address: `0x${string}`,
-  blockNumber: bigint,
+  blockNumber: bigint | undefined,
   functionName: string,
   args?: readonly unknown[],
 ): Promise<T> {
@@ -128,6 +130,7 @@ export async function fetchCampaignDetail(
 
   const [
     project,
+    name,
     token,
     rewardPool,
     paidOut,
@@ -143,6 +146,7 @@ export async function fetchCampaignDetail(
     escrowVault,
   ] = await Promise.all([
     at<`0x${string}`>("project"),
+    at<string>("name"),
     at<`0x${string}`>("token"),
     at<bigint>("rewardPool"),
     at<bigint>("paidOut"),
@@ -175,6 +179,7 @@ export async function fetchCampaignDetail(
   return {
     address,
     project,
+    name,
     token,
     rewardPool,
     paidOut,
@@ -205,14 +210,8 @@ async function fetchKpis(
 
   return Promise.all(
     indices.map(async (i) => {
-      const [raw, ladder, totalProgress] = await Promise.all([
-        read<{
-          kind: number;
-          verifier: `0x${string}`;
-          target: bigint;
-          aggregate: boolean;
-          params: `0x${string}`;
-        }>(client, address, blockNumber, "kpi", [BigInt(i)]),
+      const [spec, ladder, totalProgress] = await Promise.all([
+        readKpiSpec(client, address, i, blockNumber),
         read<readonly {threshold: bigint; reward: bigint}[]>(client, address, blockNumber, "tiers", [
           BigInt(i),
         ]),
@@ -221,17 +220,61 @@ async function fetchKpis(
 
       return {
         index: i,
-        spec: {
-          kind: kpiKindFromIndex(Number(raw.kind)),
-          verifier: raw.verifier,
-          target: raw.target,
-          aggregate: raw.aggregate,
-          params: raw.params,
-        },
+        spec,
         tiers: ladder.map((t) => ({threshold: t.threshold, reward: t.reward})),
         totalProgress,
       };
     }),
+  );
+}
+
+/**
+ * Reads and decodes one `kpi(i)` — the single `kpi(i)` call site.
+ *
+ * Shared so the enum index is mapped to a label in exactly one place. `kind` arrives as a `uint8`,
+ * and a second decode site is a second chance for the mapping to drift from `Types.KpiKind`.
+ */
+async function readKpiSpec(
+  client: PublicClient,
+  address: `0x${string}`,
+  index: number,
+  blockNumber?: bigint,
+): Promise<KpiSpec> {
+  const raw = await read<{
+    kind: number;
+    verifier: `0x${string}`;
+    target: bigint;
+    aggregate: boolean;
+    params: `0x${string}`;
+  }>(client, address, blockNumber, "kpi", [BigInt(index)]);
+
+  return {
+    kind: kpiKindFromIndex(Number(raw.kind)),
+    verifier: raw.verifier,
+    target: raw.target,
+    aggregate: raw.aggregate,
+    params: raw.params,
+  };
+}
+
+/**
+ * Just the KPI specs for a campaign — no ladders, no progress.
+ *
+ * For the marketplace list, which wants to say *what* each campaign measures without paying for the
+ * three reads per KPI the detail page needs. Left unpinned by default: a `KpiSpec` is written in
+ * `Campaign`'s constructor and has no setter, so there is no state here that a straddled block could
+ * make inconsistent — which is also why the caller can cache it forever.
+ */
+export function fetchKpiSpecs(
+  client: PublicClient,
+  address: `0x${string}`,
+  count: number,
+  atBlock?: bigint,
+): Promise<KpiSpec[]> {
+  if (count <= 0) return Promise.resolve([]);
+
+  return Promise.all(
+    Array.from({length: count}, (_, i) => readKpiSpec(client, address, i, atBlock)),
   );
 }
 

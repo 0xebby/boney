@@ -30,7 +30,25 @@ const KEY_BY_CONTRACT: Record<string, string> = {
   ReputationRegistry: "reputationRegistry",
   AttestationVerifier: "attestationVerifier",
   OracleCoordinator: "oracleCoordinator",
+  EventMetricKpiVerifier: "eventMetricKpiVerifier",
+  GuardedKpiVerifier: "guardedKpiVerifier",
+  TouchWindowVerifier: "touchWindowVerifier",
 };
+
+/**
+ * Keys that may be absent from a receipt without failing the run.
+ *
+ * The KPI verification layer was added after the live deployments were made, so a receipt from
+ * before that lands without these three. Requiring them would make `pnpm deployments`
+ * unrunnable against an existing receipt until a full redeploy — which is a bigger hammer than
+ * regenerating addresses warrants. They are optional on the `Deployment` type for the same reason,
+ * and get filled in automatically by the next deploy.
+ */
+const OPTIONAL_KEYS = new Set([
+  "eventMetricKpiVerifier",
+  "guardedKpiVerifier",
+  "touchWindowVerifier",
+]);
 
 export function readBroadcast(chainId: number): Record<string, string> {
   const path = resolve(
@@ -59,7 +77,9 @@ export function readBroadcast(chainId: number): Record<string, string> {
     out[key] = getAddress(tx.contractAddress);
   }
 
-  const missing = Object.values(KEY_BY_CONTRACT).filter((k) => !(k in out));
+  const missing = Object.values(KEY_BY_CONTRACT).filter(
+    (k) => !(k in out) && !OPTIONAL_KEYS.has(k),
+  );
   if (missing.length > 0) {
     throw new Error(`Broadcast receipt is missing: ${missing.join(", ")}`);
   }

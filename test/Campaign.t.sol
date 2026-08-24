@@ -13,6 +13,7 @@ import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IKpiVerifier} from "../src/interfaces/IKpiVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
 import {Vm} from "lib/forge-std/src/Vm.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -56,6 +57,12 @@ contract CampaignTest is Test {
     ReputationRegistry internal reputation;
     Campaign internal campaign;
 
+    /// @dev Campaign names are unique per registry, so fixtures cannot share one. Incremented per
+    ///      config built. A plain storage counter rather than `registry.campaignCount()`: that would
+    ///      be an external call, and an external call inside an argument list consumes the pending
+    ///      `vm.prank` or `vm.expectRevert` before the call under test ever runs.
+    uint256 private _nameNonce;
+
     address internal admin = address(0xA11CE);
     address internal project = address(0xC0DE);
     address internal oracle = address(0x0BAC);
@@ -93,9 +100,10 @@ contract CampaignTest is Test {
 
     // ── fixtures ─────────────────────────────────────────────────
 
-    function _defaultConfig(uint256 minReputation) internal view returns (Types.CampaignConfig memory) {
+    function _defaultConfig(uint256 minReputation) internal returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: string.concat("Campaign Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,
@@ -208,15 +216,15 @@ contract CampaignTest is Test {
         Campaign c = Campaign(addr);
 
         assertEq(c.project(), project, "project is whoever the config names");
-         _fund(c, POOL);
+        _fund(c, POOL);
 
         // The creator cannot drive it.
         vm.prank(outsider);
-        vm.expectRevert(Campaign.NotProject.selector);
+        vm.expectRevert(ICampaign.NotProject.selector);
         c.activate();
 
         vm.prank(outsider);
-        vm.expectRevert(Campaign.NotProject.selector);
+        vm.expectRevert(ICampaign.NotProject.selector);
         c.cancel();
 
         vm.prank(project);
@@ -246,7 +254,7 @@ contract CampaignTest is Test {
         Types.KpiSpec[] memory kpis = _defaultKpis();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.TiersNotAscending.selector, 0, 1));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TiersNotAscending.selector, 0, 1));
         registry.createCampaign(cfg, kpis, tiers);
     }
 
@@ -263,7 +271,7 @@ contract CampaignTest is Test {
         Types.RewardTier[][] memory tiers = _defaultTiers();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.CustomKpiNeedsVerifier.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.CustomKpiNeedsVerifier.selector, 0));
         registry.createCampaign(cfg, kpis, tiers);
     }
 
@@ -274,7 +282,7 @@ contract CampaignTest is Test {
         Types.RewardTier[][] memory tiers = _defaultTiers();
 
         vm.prank(project);
-        vm.expectRevert(Campaign.ZeroRewardPool.selector);
+        vm.expectRevert(ICampaign.ZeroRewardPool.selector);
         registry.createCampaign(cfg, kpis, tiers);
     }
 
@@ -285,7 +293,7 @@ contract CampaignTest is Test {
         Types.RewardTier[][] memory tiers = _defaultTiers();
 
         vm.prank(project);
-        vm.expectRevert(Campaign.InvalidWindow.selector);
+        vm.expectRevert(ICampaign.InvalidWindow.selector);
         registry.createCampaign(cfg, kpis, tiers);
     }
 
@@ -303,7 +311,7 @@ contract CampaignTest is Test {
         Types.KpiSpec[] memory kpis = _defaultKpis();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.TooManyTiers.selector, 0, max + 1, max));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TooManyTiers.selector, 0, max + 1, max));
         registry.createCampaign(cfg, kpis, tiers);
     }
 
@@ -325,7 +333,7 @@ contract CampaignTest is Test {
 
         Types.CampaignConfig memory cfg = _defaultConfig(0);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.TooManyKpis.selector, max + 1, max));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TooManyKpis.selector, max + 1, max));
         registry.createCampaign(cfg, kpis, tiers);
     }
 
@@ -358,21 +366,21 @@ contract CampaignTest is Test {
     function test_Activate_revertsUnderfunded() public {
         _fund(campaign, POOL - 1);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NotFunded.selector, POOL - 1, POOL));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotFunded.selector, POOL - 1, POOL));
         campaign.activate();
     }
 
     function test_Activate_onlyProject() public {
         _fund(campaign, POOL);
         vm.prank(outsider);
-        vm.expectRevert(Campaign.NotProject.selector);
+        vm.expectRevert(ICampaign.NotProject.selector);
         campaign.activate();
     }
 
     function test_Activate_revertsTwice() public {
         _activate(campaign);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Active));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Active));
         campaign.activate();
     }
 
@@ -397,7 +405,7 @@ contract CampaignTest is Test {
         _activate(campaign);
         _join(campaign, kol);
         vm.prank(kol);
-        vm.expectRevert(Campaign.AlreadyJoined.selector);
+        vm.expectRevert(ICampaign.AlreadyJoined.selector);
         campaign.join();
     }
 
@@ -422,7 +430,7 @@ contract CampaignTest is Test {
         _activate(gated);
 
         vm.prank(kol);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.InsufficientReputation.selector, 0, 5_000));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 0, 5_000));
         gated.join();
     }
 
@@ -449,7 +457,7 @@ contract CampaignTest is Test {
         uint256 cap = _boundReputationSchemas();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.UnreachableReputation.selector, cap + 1, cap));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.UnreachableReputation.selector, cap + 1, cap));
         registry.createCampaign(_defaultConfig(cap + 1), _defaultKpis(), _defaultTiers());
     }
 
@@ -511,7 +519,7 @@ contract CampaignTest is Test {
         _join(campaign, kol);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
     }
 
@@ -523,7 +531,7 @@ contract CampaignTest is Test {
         skip(1 days + 1);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
     }
 
@@ -540,7 +548,7 @@ contract CampaignTest is Test {
         skip(1 days + 1);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
 
         // The user re-engages through a different KOL and the same report now succeeds.
@@ -557,7 +565,7 @@ contract CampaignTest is Test {
         _touch(campaign, userPk, user, id, 7 days);
 
         vm.prank(outsider);
-        vm.expectRevert(Campaign.NotReporter.selector);
+        vm.expectRevert(ICampaign.NotReporter.selector);
         campaign.reportUserAction(0, user, 5, "");
     }
 
@@ -602,14 +610,14 @@ contract CampaignTest is Test {
         _report(campaign, project, user, 10);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NonMonotonic.selector, 10, 9));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NonMonotonic.selector, 10, 9));
         campaign.reportUserAction(0, user, 9, "");
     }
 
     function test_Report_revertsUnknownKpi() public {
         _activate(campaign);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.UnknownKpi.selector, 7));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.UnknownKpi.selector, 7));
         campaign.reportUserAction(7, user, 1, "");
     }
 
@@ -622,7 +630,7 @@ contract CampaignTest is Test {
         campaign.pause();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Paused));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Paused));
         campaign.reportUserAction(0, user, 5, "");
     }
 
@@ -633,7 +641,7 @@ contract CampaignTest is Test {
 
         vm.warp(endTime + 1);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.OutsideWindow.selector, startTime, endTime));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.OutsideWindow.selector, startTime, endTime));
         campaign.reportUserAction(0, user, 5, "");
     }
 
@@ -714,7 +722,7 @@ contract CampaignTest is Test {
         _activate(campaign);
         bytes32 id = _join(campaign, kol);
         _touch(campaign, userPk, user, id, 7 days);
-//
+        //
         _report(campaign, project, user, 10);
 
         assertEq(token.balanceOf(kol), 1_000 ether, "tier 0 auto-paid");
@@ -759,7 +767,7 @@ contract CampaignTest is Test {
 
     function test_Settle_revertsNotJoined() public {
         _activate(campaign);
-        vm.expectRevert(Campaign.NotJoined.selector);
+        vm.expectRevert(ICampaign.NotJoined.selector);
         campaign.settle(outsider, 0);
     }
 
@@ -851,7 +859,7 @@ contract CampaignTest is Test {
         _touch(c, userPk, user, id, 7 days);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.VerifierOvercredit.selector, 20, 10));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.VerifierOvercredit.selector, 20, 10));
         c.reportUserAction(0, user, 10, "");
     }
 
@@ -889,7 +897,7 @@ contract CampaignTest is Test {
         _activate(c);
 
         vm.prank(project);
-        vm.expectRevert(Campaign.NotOracle.selector);
+        vm.expectRevert(ICampaign.NotOracle.selector);
         c.applyAggregateUpdate(0, 1);
     }
 
@@ -901,7 +909,7 @@ contract CampaignTest is Test {
         c.applyAggregateUpdate(0, 500_000);
 
         vm.prank(oracle);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NonMonotonic.selector, 500_000, 400_000));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NonMonotonic.selector, 500_000, 400_000));
         c.applyAggregateUpdate(0, 400_000);
     }
 
@@ -913,14 +921,14 @@ contract CampaignTest is Test {
         _touch(c, userPk, user, id, 7 days);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.AggregateKpi.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AggregateKpi.selector, 0));
         c.reportUserAction(0, user, 5, "");
     }
 
     function test_Aggregate_userKpiRejectsAggregatePath() public {
         _activate(campaign);
         vm.prank(oracle);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NotAggregateKpi.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotAggregateKpi.selector, 0));
         campaign.applyAggregateUpdate(0, 100);
     }
 
@@ -940,7 +948,7 @@ contract CampaignTest is Test {
     function test_Pause_onlyProject() public {
         _activate(campaign);
         vm.prank(outsider);
-        vm.expectRevert(Campaign.NotProject.selector);
+        vm.expectRevert(ICampaign.NotProject.selector);
         campaign.pause();
     }
 
@@ -964,7 +972,7 @@ contract CampaignTest is Test {
     function test_End_revertsOutsiderBeforeEndTime() public {
         _activate(campaign);
         vm.prank(outsider);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.OutsideWindow.selector, startTime, endTime));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.OutsideWindow.selector, startTime, endTime));
         campaign.end();
     }
 
@@ -978,7 +986,7 @@ contract CampaignTest is Test {
     function test_Cancel_revertsWhenActive() public {
         _activate(campaign);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Active));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Active));
         campaign.cancel();
     }
 
@@ -996,7 +1004,9 @@ contract CampaignTest is Test {
         campaign.end();
 
         // Progress beyond tier 0 was credited before the end; settle after ending.
-        skip(1 days);
+        // Derived from CLAIM_GRACE rather than a fixed duration so the test still lands *inside*
+        // the grace window when the constant is shortened for testing.
+        skip(campaign.CLAIM_GRACE() / 2);
         campaign.settle(kol, 0);
         assertEq(token.balanceOf(kol), 1_000 ether);
     }
@@ -1008,7 +1018,7 @@ contract CampaignTest is Test {
         uint64 until = uint64(block.timestamp) + campaign.CLAIM_GRACE();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.ClaimWindowOpen.selector, until));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.ClaimWindowOpen.selector, until));
         campaign.reclaimUnspent();
     }
 
@@ -1048,14 +1058,14 @@ contract CampaignTest is Test {
         campaign.cancel();
 
         vm.prank(outsider);
-        vm.expectRevert(Campaign.NotProject.selector);
+        vm.expectRevert(ICampaign.NotProject.selector);
         campaign.reclaimUnspent();
     }
 
     function test_Reclaim_revertsWhenActive() public {
         _activate(campaign);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Active));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Active));
         campaign.reclaimUnspent();
     }
 

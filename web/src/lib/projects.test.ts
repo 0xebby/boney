@@ -2,51 +2,59 @@ import {describe, it, expect} from "vitest";
 import {projectName, hasProjectName} from "./projects";
 
 /**
- * The map is placeholder data, so these tests deliberately assert *behavior* rather than the
- * specific names: which campaign is called "Aave" is arbitrary and will change, but "a covered id
- * yields a name, an uncovered one yields a readable address, neither yields empty" is the contract
- * every caller depends on.
+ * These assert *behaviour*, not specific names: which campaign is called what is now supplied by
+ * whoever created it, so the contract every caller depends on is "a named campaign yields its name,
+ * an unnamed one yields a readable address, neither yields empty".
+ *
+ * The map this file used to test is gone — `Types.CampaignConfig` carries a `name`, so there is
+ * nothing left to fake. What remains worth pinning is the fallback, because an empty cell in the
+ * marketplace's name column reads as a broken row rather than as missing metadata.
  */
 
 const PROJECT = "0xba954E89cE301415964E9405f09F4Cc7c668976A" as const;
 
-const view = (campaignId: bigint, project: `0x${string}` = PROJECT) => ({campaignId, project});
+const view = (name: string, project: `0x${string}` = PROJECT) => ({name, project});
 
 describe("projectName", () => {
-  it("names every seeded campaign id", () => {
-    for (let id = 0n; id <= 11n; id++) {
-      expect(hasProjectName(view(id))).toBe(true);
-      expect(projectName(view(id))).not.toMatch(/^0x/);
-    }
+  it("returns the campaign's own name", () => {
+    expect(projectName(view("Aerodrome"))).toBe("Aerodrome");
+    expect(hasProjectName(view("Aerodrome"))).toBe(true);
   });
 
-  it("gives distinct names to campaigns sharing one project address", () => {
-    // The whole reason the map is keyed by id: every seeded campaign has the same `project`, so
-    // an address-keyed map would collapse the column to one repeated value.
-    const names = new Set(Array.from({length: 12}, (_, i) => projectName(view(BigInt(i)))));
-    expect(names.size).toBe(12);
+  it("keeps the capitalisation and spacing the creator chose", () => {
+    // The chain normalizes only to *compare* names; the stored string is verbatim.
+    expect(projectName(view("aAvE v3"))).toBe("aAvE v3");
   });
 
-  it("falls back to the shortened address for an uncovered id", () => {
-    expect(hasProjectName(view(12n))).toBe(false);
-    expect(projectName(view(12n))).toBe("0xba95…976A");
+  it("falls back to the shortened address for an unnamed campaign", () => {
+    expect(projectName(view(""))).toBe("0xba95…976A");
+    expect(hasProjectName(view(""))).toBe(false);
+  });
+
+  it("treats a whitespace-only name as unnamed", () => {
+    // `Names.validate` rejects this on chain, so it should be unreachable — but rendering a row of
+    // blank space would be indistinguishable from a rendering bug if it ever arrived.
+    expect(projectName(view("   "))).toBe("0xba95…976A");
+    expect(hasProjectName(view("   "))).toBe(false);
   });
 
   it("never returns an empty string", () => {
-    for (const id of [0n, 5n, 11n, 12n, 9999n]) {
-      expect(projectName(view(id)).length).toBeGreaterThan(0);
+    for (const name of ["Aerodrome", "", "   ", "a"]) {
+      expect(projectName(view(name)).length).toBeGreaterThan(0);
     }
   });
 
-  it("ignores the project address when the id is covered", () => {
-    // Covered ids resolve by id alone — changing the address must not change the name, which is
-    // what makes this a placeholder rather than a lookup.
+  it("uses the address of the row it was handed when falling back", () => {
     const other = "0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8" as const;
-    expect(projectName(view(3n, other))).toBe(projectName(view(3n)));
+    expect(projectName(view("", other))).toBe("0x9840…b2f8");
+    // A named campaign resolves by name alone, so the address is irrelevant to the result.
+    expect(projectName(view("Moonwell", other))).toBe("Moonwell");
   });
 
-  it("uses the address of the row it was handed for uncovered ids", () => {
-    const other = "0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8" as const;
-    expect(projectName(view(12n, other))).toBe("0x9840…b2f8");
+  it("gives campaigns from one project their own names", () => {
+    // The old placeholder keyed by campaign id, which made this true by accident. It is now true by
+    // design: a name belongs to a campaign, not to the wallet behind it.
+    const names = ["Aerodrome", "Velodrome", "Moonwell"].map((n) => projectName(view(n, PROJECT)));
+    expect(new Set(names).size).toBe(3);
   });
 });

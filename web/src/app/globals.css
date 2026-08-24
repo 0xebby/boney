@@ -157,7 +157,7 @@ body {
 }
 
 /* Visible focus ring for keyboard nav; never removed, only restyled. Brand yellow rather than
-   a series color — focus is chrome, and chrome must not borrow an identity hue. */
+     a series color — focus is chrome, and chrome must not borrow an identity hue. */
 :focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;

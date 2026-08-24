@@ -10,6 +10,7 @@ import {Campaign} from "../src/campaign/Campaign.sol";
 import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
 import {EscrowVault} from "../src/escrow/EscrowVault.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 /// @dev The gate tests never move this token; a campaign simply cannot be built without one.
 contract GateMockToken is ERC20 {
@@ -140,9 +141,15 @@ contract BoneyScoreTest is Test {
 
     /// Times are read from the clock at call time, so a campaign created after a `skip()` still
     /// opens a live window.
-    function _gateConfig(uint256 minReputation) internal view returns (Types.CampaignConfig memory) {
+    /// @dev Names are unique per registry, so each fixture campaign needs its own. A storage counter
+    ///      rather than an external read: an external call in an argument list would consume the
+    ///      pending `vm.prank`/`vm.expectRevert` before the call under test.
+    uint256 private _nameNonce;
+
+    function _gateConfig(uint256 minReputation) internal returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: string.concat("Gate Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: POOL,
             startTime: uint64(block.timestamp),
@@ -405,9 +412,7 @@ contract BoneyScoreTest is Test {
 
         vm.prank(kol2);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                Campaign.InsufficientReputation.selector, 14_863, GATED_MIN_REPUTATION
-            )
+            abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 14_863, GATED_MIN_REPUTATION)
         );
         gated.join();
     }
@@ -419,7 +424,7 @@ contract BoneyScoreTest is Test {
 
         vm.prank(fresh);
         vm.expectRevert(
-            abi.encodeWithSelector(Campaign.InsufficientReputation.selector, 0, GATED_MIN_REPUTATION)
+            abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 0, GATED_MIN_REPUTATION)
         );
         gated.join();
     }
@@ -433,7 +438,7 @@ contract BoneyScoreTest is Test {
         vm.prank(kol1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Campaign.InsufficientReputation.selector,
+                ICampaign.InsufficientReputation.selector,
                 REACH_WEIGHT * SCHEMA_MAX_VALUE,
                 GATED_MIN_REPUTATION
             )
@@ -455,9 +460,7 @@ contract BoneyScoreTest is Test {
         Campaign gated = _activeGatedCampaign(score + 1);
 
         vm.prank(kol1);
-        vm.expectRevert(
-            abi.encodeWithSelector(Campaign.InsufficientReputation.selector, score, score + 1)
-        );
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, score, score + 1));
         gated.join();
 
         assertEq(registry.valueOf(kol1, followersId), 50_000_000, "stored, readable, and inert");
@@ -487,9 +490,7 @@ contract BoneyScoreTest is Test {
         vm.prank(kol1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Campaign.InsufficientReputation.selector,
-                REACH_WEIGHT * KOL1_REACH,
-                GATED_MIN_REPUTATION
+                ICampaign.InsufficientReputation.selector, REACH_WEIGHT * KOL1_REACH, GATED_MIN_REPUTATION
             )
         );
         afterExpiry.join();
@@ -510,7 +511,7 @@ contract BoneyScoreTest is Test {
         vm.prank(project);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Campaign.UnreachableReputation.selector, MAX_BONEY_SCORE + 1, MAX_BONEY_SCORE
+                ICampaign.UnreachableReputation.selector, MAX_BONEY_SCORE + 1, MAX_BONEY_SCORE
             )
         );
         campaignRegistry.createCampaign(_gateConfig(MAX_BONEY_SCORE + 1), _kpis(), _tiers());
@@ -549,7 +550,7 @@ contract BoneyScoreTest is Test {
             vm.prank(kol1);
             vm.expectRevert(
                 abi.encodeWithSelector(
-                    Campaign.InsufficientReputation.selector, predicted, GATED_MIN_REPUTATION
+                    ICampaign.InsufficientReputation.selector, predicted, GATED_MIN_REPUTATION
                 )
             );
             gated.join();

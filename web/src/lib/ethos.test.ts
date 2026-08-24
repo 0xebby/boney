@@ -9,6 +9,7 @@ import {
   EthosError,
   type EthosProfile,
 } from "./ethos";
+import {addStubWallet, removeStubWallet, listStubWallets, isStubbedWallet} from "./stubWallets";
 import {reachFromFollowers} from "./boneyscore";
 
 /**
@@ -64,8 +65,60 @@ const profile = (over: Partial<EthosProfile> = {}): EthosProfile => ({
   ...over,
 });
 
+const originalEnv = {
+  ETHOS_API: process.env.ETHOS_API,
+  ETHOS_STUB_API: process.env.ETHOS_STUB_API,
+  FXTWITTER_API: process.env.FXTWITTER_API,
+  FXTWITTER_STUB_API: process.env.FXTWITTER_STUB_API,
+  VXTWITTER_API: process.env.VXTWITTER_API,
+  VXTWITTER_STUB_API: process.env.VXTWITTER_STUB_API,
+  KAITO_API: process.env.KAITO_API,
+  KAITO_STUB_API: process.env.KAITO_STUB_API,
+  BONEY_STUB_WALLETS: process.env.BONEY_STUB_WALLETS,
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  removeStubWallet(WALLET);
+  removeStubWallet(MIXED_CASE);
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+});
+
+describe("stub wallet routing", () => {
+  it("uses the live Ethos API by default for real wallets", async () => {
+    process.env.ETHOS_API = "https://live-ethos.example";
+    process.env.ETHOS_STUB_API = "http://127.0.0.1:8787/ethos";
+
+    const urls = stubFetch(() => ({body: profile()}));
+    await fetchEthosProfile(WALLET);
+
+    expect(urls[0]).toContain("https://live-ethos.example/api/v2/user/by/address/");
+    expect(isStubbedWallet(WALLET)).toBe(false);
+  });
+
+  it("routes allowlisted wallets to the stub and can remove them again", async () => {
+    process.env.ETHOS_API = "https://live-ethos.example";
+    process.env.ETHOS_STUB_API = "http://127.0.0.1:8787/ethos";
+    process.env.FXTWITTER_API = "https://live-x.example";
+    process.env.FXTWITTER_STUB_API = "http://127.0.0.1:8787/fx";
+
+    addStubWallet(WALLET);
+    expect(isStubbedWallet(WALLET)).toBe(true);
+    expect(listStubWallets()).toContain(WALLET.toLowerCase());
+
+    const urls = stubFetch(() => ({body: profile()}));
+    await fetchEthosProfile(WALLET);
+    expect(urls[0]).toContain("http://127.0.0.1:8787/ethos/api/v2/user/by/address/");
+
+    removeStubWallet(WALLET);
+    expect(isStubbedWallet(WALLET)).toBe(false);
+  });
 });
 
 describe("isAddress", () => {

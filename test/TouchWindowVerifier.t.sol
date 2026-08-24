@@ -12,6 +12,7 @@ import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {TouchWindowVerifier} from "../src/verifiers/TouchWindowVerifier.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ITouchWindowVerifier} from "../src/interfaces/ITouchWindowVerifier.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -37,6 +38,11 @@ contract TouchWindowVerifierTest is Test {
     ReputationRegistry internal reputation;
     TouchWindowVerifier internal verifier;
     Campaign internal campaign;
+
+    /// @dev Names are unique per registry, so each fixture campaign needs its own. A storage counter
+    ///      rather than an external read: an external call in an argument list would consume the
+    ///      pending `vm.prank`/`vm.expectRevert` before the call under test.
+    uint256 private _nameNonce;
 
     address internal admin = address(0xA11CE);
     address internal project = address(0xC0DE);
@@ -70,6 +76,7 @@ contract TouchWindowVerifierTest is Test {
     function _createCampaign(bytes memory params) internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: string.concat("Touch Window Test ", vm.toString(_nameNonce++)),
             token: address(token),
             rewardPool: POOL,
             startTime: uint64(block.timestamp),
@@ -287,7 +294,9 @@ contract TouchWindowVerifierTest is Test {
 
         vm.prank(project);
         vm.expectRevert(
-            abi.encodeWithSelector(TouchWindowVerifier.FutureAction.selector, future, uint64(block.timestamp))
+            abi.encodeWithSelector(
+                ITouchWindowVerifier.FutureAction.selector, future, uint64(block.timestamp)
+            )
         );
         campaign.reportUserAction(0, user, 10, _one(future, 10));
     }
@@ -298,7 +307,7 @@ contract TouchWindowVerifierTest is Test {
         _touch(campaign, id);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(TouchWindowVerifier.EvidenceExceedsClaim.selector, 11, 10));
+        vm.expectRevert(abi.encodeWithSelector(ITouchWindowVerifier.EvidenceExceedsClaim.selector, 11, 10));
         campaign.reportUserAction(0, user, 10, _one(uint64(block.timestamp), 11));
     }
 

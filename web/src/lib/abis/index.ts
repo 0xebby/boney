@@ -8,5 +8,8 @@ export {AttributionRegistryAbi} from "./AttributionRegistry";
 export {ReputationRegistryAbi} from "./ReputationRegistry";
 export {AttestationVerifierAbi} from "./AttestationVerifier";
 export {OracleCoordinatorAbi} from "./OracleCoordinator";
+export {EventMetricKpiVerifierAbi} from "./EventMetricKpiVerifier";
+export {GuardedKpiVerifierAbi} from "./GuardedKpiVerifier";
+export {TouchWindowVerifierAbi} from "./TouchWindowVerifier";
 export {IERC20Abi} from "./IERC20";
 export {IERC20MetadataAbi} from "./IERC20Metadata";

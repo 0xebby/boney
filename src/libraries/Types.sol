@@ -22,7 +22,8 @@ library Types {
         Volume,
         ActiveUser,
         signUps,
-        downloads
+        downloads,
+        withdraw
     }
 
     /// @notice Campaign lifecycle.
@@ -43,7 +44,7 @@ library Types {
     ///        amount is credited as-is (trusting the reporter/oracle).
     /// @param target Campaign-wide goal for this KPI. Informational; tiers drive payouts.
     /// @param aggregate If true this KPI is campaign-level and oracle-reported only; it never
-    ///        credits an individual promoter. See decision D7 in todo.md.
+    ///        credits an individual promoter. See decision D7 in boneyMd/todo.md.
     /// @param params Opaque configuration forwarded to the verifier (e.g. the contract address
     ///        and event signature being tracked).
     struct KpiSpec {
@@ -64,6 +65,8 @@ library Types {
 
     /// @notice Immutable campaign parameters, fixed at deployment.
     /// @param project Owner of the campaign; receives unspent escrow on end/cancel.
+    /// @param name Human-readable campaign name, shown wherever the campaign is listed. 
+    ///             the normalized form exists only as the registry's lookup key.
     /// @param token ERC20 used for escrow and payouts.
     /// @param rewardPool Total escrow required before the campaign can be activated.
     /// @param startTime Earliest timestamp at which the campaign may be activated.
@@ -72,6 +75,7 @@ library Types {
     /// @param minReputation Minimum reputation score required for a promoter to join.
     struct CampaignConfig {
         address project;
+        string name;
         address token;
         uint256 rewardPool;
         uint64 startTime;

@@ -3,7 +3,7 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
-import type {TokenMeta} from "@/hooks/useCampaigns";
+import type {TokenMeta} from "@/lib/token";
 import {Card} from "@/components/ui/Card";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";

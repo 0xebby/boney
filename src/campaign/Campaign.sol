@@ -8,6 +8,7 @@ import {IReputationRegistry} from "../interfaces/IReputationRegistry.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {Types} from "../libraries/Types.sol";
+import {Names} from "../libraries/Names.sol";
 
 /// @title Campaign
 /// @notice One performance campaign: escrowed rewards released automatically as attributed KPI
@@ -23,47 +24,16 @@ import {Types} from "../libraries/Types.sol";
 ///      tier the contract pays what remains and emits `PoolExhausted`; it never reverts, because
 ///      reverting would let one exhausted tier block all further reporting for everyone.
 contract Campaign is ICampaign, ReentrancyGuard {
-    error NotProject();
-    error NotReporter();
-    error NotOracle();
-    error WrongStatus(Types.CampaignStatus actual);
-    error AlreadyJoined();
-    error NotJoined();
-    error InsufficientReputation(uint256 score, uint256 required);
-    error UnreachableReputation(uint256 required, uint256 maxScore);
-    error UnknownKpi(uint256 kpiIndex);
-    error AggregateKpi(uint256 kpiIndex);
-    error NotAggregateKpi(uint256 kpiIndex);
-    error NoAttribution(address user);
-    error NonMonotonic(uint256 current, uint256 provided);
-    error VerifierOvercredit(uint256 credited, uint256 max);
-    error OutsideWindow(uint64 startTime, uint64 endTime);
-    error NotFunded(uint256 balance, uint256 required);
-    error ClaimWindowOpen(uint64 until);
-    error NothingToReclaim();
-    error ZeroAddress();
-    error InvalidWindow();
-    error ZeroRewardPool();
-    error NoKpis();
-    error TierLengthMismatch();
-    error EmptyTiers(uint256 kpiIndex);
-    error TiersNotAscending(uint256 kpiIndex, uint256 tierIndex);
-    error ZeroTierReward(uint256 kpiIndex, uint256 tierIndex);
-    error CustomKpiNeedsVerifier(uint256 kpiIndex);
-    error TooManyKpis(uint256 provided, uint256 max);
-    error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
-
     /// @notice Window after a campaign ends during which promoters may still settle earned tiers,
     ///         before the project can reclaim what is left.
-    uint64 public constant CLAIM_GRACE = 7 days;
+    uint64 public constant CLAIM_GRACE = 20 minutes;
 
     /// @notice Caps on campaign shape.
-    /// @dev `_settle` walks the tier ladder and `reportUserAction` indexes KPIs, both on
-    ///      user-facing paths. Without a bound, a campaign could be created with a ladder large
+    /// @dev Without a bound, a campaign could be created with a ladder large
     ///      enough that settlement exceeds the block gas limit — bricking payouts for promoters
     ///      who already did the work. Validated once at construction.
     uint256 public constant MAX_KPIS = 32;
-    /// @notice Cap on tiers per KPI, bounding the per-report settlement loop.
+    /// @notice Cap on tiers per KPI.
     uint256 public constant MAX_TIERS_PER_KPI = 32;
 
     // ── dependencies ─────────────────────────────────────────────
@@ -77,12 +47,15 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @notice Coordinator allowed to push aggregate updates and user reports.
     address public immutable oracleCoordinator;
 
-    // ── frozen parameters (D8) ───────────────────────────────────
-    // Stored as individual immutables because Solidity does not allow immutable structs;
-    // `config()` reassembles them for the ICampaign surface.
-
     /// @notice Owner of the campaign; funds it, controls its lifecycle, receives unspent escrow.
     address public immutable project;
+    /// @notice Human-readable campaign name, as supplied at creation.
+    /// @dev It is written once in the constructor
+    ///      and never again, so it is frozen in every sense but the keyword.
+    ///      Validated here (length, charset) but not checked for uniqueness — that requires an index
+    ///      across campaigns, which only `CampaignRegistry` has. A campaign constructed directly
+    ///      therefore carries a well-formed name that may duplicate another's.
+    string public name;
     /// @notice ERC20 used for escrow and payouts.
     address public immutable token;
     /// @notice Total escrow required before the campaign can be activated, and the ceiling on
@@ -132,7 +105,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         _;
     }
 
-    /// @dev Restricts a call to the Active status.
+    /// @dev Restricts a call to an Active campaign.
     modifier onlyActive() {
         if (status != Types.CampaignStatus.Active) revert WrongStatus(status);
         _;
@@ -164,18 +137,14 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
         if (cfg.attributionWindow == 0) revert InvalidWindow();
 
+        // Reverts EmptyName / NameTooLong / InvalidNameChar.
+        // lists campaigns.
+        Names.validate(cfg.name);
+
         // Reject a gate no wallet could ever clear. `minReputation` is immutable and `join()` is
         // the only thing that reads it, so an unreachable value produces a campaign that deploys
         // cleanly, accepts escrow, reports Active, and silently admits nobody for its whole life —
         // with no way to correct it short of redeploying and re-funding.
-        //
-        // Read from the registry rather than hard-coded: the ceiling is a product of the
-        // registered schemas and their weights, both of which governance can move, so a constant
-        // here would be wrong the first time anything is re-weighted.
-        //
-        // `try` because `maxScore` postdates the first deployments. A registry that predates it
-        // reverts on the call, and treating that as "no constraint" keeps campaign creation
-        // working against an older registry instead of bricking it protocol-wide. The comparison
         // is deliberately outside the `try` block so a genuine `UnreachableReputation` revert
         // cannot be swallowed by the `catch`.
         uint256 cap = type(uint256).max;
@@ -218,6 +187,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         }
 
         project = cfg.project;
+        name = cfg.name;
         token = cfg.token;
         rewardPool = cfg.rewardPool;
         startTime = cfg.startTime;
@@ -293,17 +263,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @dev Joining is allowed while `Pending` too, so KOLs can prepare links before launch.
-    ///
-    ///      **Sybil resistance**: `AlreadyJoined` stops one wallet from rejoining, but a KOL
-    ///      controlling multiple wallets can join from each. Under LAST_TOUCH the user can re-point
-    ///      attribution across those wallets with newer Touches. Each wallet walks the tier ladder
-    ///      from rung zero (`_settledTiers` and `_progress` are keyed by promoter address), so the
-    ///      bottom rungs can be farmed. Five wallets each taking the user +10 units extract 5,000
-    ///      from the same 50 units of activity, against 3,000 for one honest promoter at 50 (tested
-    ///      in `test/RejoinAttack.t.sol::test_SybilFarmingBottomRung`). `minReputation` is the
-    ///      existing lever — it raises the cost per sybil. A structural fix would require either
-    ///      making lower rungs non-repeatable for the same user across promoters, or keying the
-    ///      ladder to something sybil-resistant.
     function join() external returns (bytes32 promoterId) {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Pending) {
             revert WrongStatus(status);
@@ -330,10 +289,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
     /// @dev Accepted while Active and inside the campaign window, **and** for `CLAIM_GRACE` after
-    ///      `end()`. The post-end half is load-bearing: `end()` is callable by the project at any
-    ///      time, so a reporting cutoff pinned to Active alone let a project end early and strand
-    ///      progress its promoters had already earned — the referrals were attributed, the actions
-    ///      happened, and no transaction could ever record them. Reporting now closes on exactly
+    ///      `end()`. Reporting now closes on exactly
     ///      the second `reclaimUnspent` opens, so escrow is never reclaimable while credit is
     ///      still owed.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
@@ -351,8 +307,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         uint256 already = _userCredited[user][kpiIndex];
         if (newTotal < already) revert NonMonotonic(already, newTotal);
-        uint256 delta = newTotal - already;
-        if (delta == 0) return; // idempotent replay
+        if (newTotal == already) return; // idempotent replay
 
         // Resolve attribution before crediting: unattributed actions have no payee.
         bytes32 promoterId = _resolvePromoterId(user);
@@ -360,19 +315,23 @@ contract Campaign is ICampaign, ReentrancyGuard {
         address promoter = _promoterOf[promoterId];
         if (promoter == address(0)) revert NoAttribution(user);
 
-        uint256 credited = delta;
+        uint256 verifiedTotal = newTotal;
         if (spec.verifier != address(0)) {
-            credited = IKpiVerifier(spec.verifier).verify(
-                address(this), kpiIndex, user, delta, evidence, spec.params
+            // Verifier receives the cumulative total and returns what may be credited.
+            // This allows verifiers to validate against on-chain state (e.g., actual event counts).
+            verifiedTotal = IKpiVerifier(spec.verifier).verify(
+                address(this), kpiIndex, user, newTotal, evidence, spec.params
             );
             // A verifier may discount a claim but must never inflate it.
-            if (credited > delta) revert VerifierOvercredit(credited, delta);
-            if (credited == 0) return;
+            if (verifiedTotal > newTotal) revert VerifierOvercredit(verifiedTotal, newTotal);
         }
 
-        // Credit only the verified portion, so a discounted report can be retried later with
-        // better evidence rather than being permanently burned.
-        _userCredited[user][kpiIndex] = already + credited;
+        // Credit only the newly verified portion (verified total minus what was already credited).
+        if (verifiedTotal <= already) return;
+        uint256 credited = verifiedTotal - already;
+
+        // Update cumulative credited amount and propagate credit to the promoter.
+        _userCredited[user][kpiIndex] = verifiedTotal;
         _progress[promoter][kpiIndex] += credited;
         _totalProgress[kpiIndex] += credited;
 
@@ -383,7 +342,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @dev Aggregate KPIs (TVL, volume) are campaign-level and never credit an individual
-    ///      promoter — see D7. They advance totals for display only.
+    ///      promoter.
     function applyAggregateUpdate(uint256 kpiIndex, uint256 newTotal) external onlyActive {
         if (msg.sender != oracleCoordinator) revert NotOracle();
         if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
@@ -417,12 +376,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
     }
 
     /// @dev Walks the tier ladder for one `(promoter, kpi)` pair and pays every newly crossed
-    ///      tier. State is written before each external transfer (checks-effects-interactions);
-    ///      callers are `nonReentrant`.
-    ///      The ladder is per-promoter by design (each KOL earns their own tiers), which also means
-    ///      it is re-walkable by a KOL joining from a second wallet — see the sybil note on
-    ///      `join()`. `_settledTiers` is never cleared, so a given promoter address cannot re-earn
-    ///      a tier; the repetition is across addresses, not within one.
+    ///      tier.
+
+    ///      The ladder is per-promoter by design (each KOL earns their own tiers), so the loop is bounded by the number of tiers, not the number of promoters.
     /// @param promoter Wallet receiving the payouts.
     /// @param promoterId The promoter's campaign-bound id, used for event indexing.
     /// @param kpiIndex Index of the KPI whose ladder is walked.
@@ -456,8 +412,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
     // ── escrow return ────────────────────────────────────────────
 
     /// @inheritdoc ICampaign
-    /// @dev Cancelled campaigns return funds immediately (nobody earned anything). Ended
-    ///      campaigns wait out `CLAIM_GRACE` so promoters can settle first.
+    /// @dev Cancelled campaigns return funds immediately (nobody earned anything).
+    ///      Ended campaigns wait out `CLAIM_GRACE` so promoters can settle first.
     function reclaimUnspent() external nonReentrant onlyProject {
         if (status == Types.CampaignStatus.Ended) {
             uint64 until = endedAt + CLAIM_GRACE;
@@ -483,9 +439,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Who gets paid for `user`'s actions.
     ///
     ///      While the campaign is live this is strictly `activePromoter` — an expired touch credits
-    ///      nobody, which is the consent model `AttributionRegistry` is built on: attribution lapses,
-    ///      and a promoter who goes quiet loses it. `test_Report_recoverableAfterAttributionExpires`
-    ///      pins the consequence that a lapse hands everything to whoever the user signs for next.
+    ///      nobody,
+    ///      consequence that a lapse hands everything to whoever the user signs for next.
     ///
     ///      After `end()` that rule would defeat the reporting grace window it sits next to. Touch
     ///      TTLs are days and campaigns run for weeks, so by the time a withheld report can finally
@@ -494,12 +449,15 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ///      protect. So once the campaign is Ended, and only then, the stored touch is honoured even
     ///      if expired.
     ///
-    ///      That relaxation cannot be used to steal credit. `storeTouch` overwrites only with a
-    ///      strictly newer `signedAt`, so the stored touch is always the user's latest signed
-    ///      intent; it rejects an already-expired `expiresAt`, so no one can backfill a stale touch
-    ///      after the fact; and it is bounded to `CLAIM_GRACE`, after which reporting closes
-    ///      entirely. No new activity can occur post-end, so the only question left is who earned
-    ///      what already happened.
+    ///      That relaxation cannot be used to steal credit, but only because `storeTouch` bounds
+    ///      touch creation to the campaign's life. Four things hold together: the registry rejects
+    ///      a touch once this campaign is past `endTime` or terminal, so a post-end signature
+    ///      cannot displace the promoter who did the work; it overwrites only on a strictly newer
+    ///      `signedAt`, so the stored touch is the user's latest in-campaign intent; it rejects an
+    ///      already-expired `expiresAt`, so no one can backfill a stale touch after the fact; and
+    ///      reporting is bounded to `CLAIM_GRACE`, after which it closes entirely. Drop the first
+    ///      and the rest do not save it — a promoter who did nothing could collect a withheld
+    ///      report by having the user re-sign during the grace window.
     function _resolvePromoterId(address user) private view returns (bytes32) {
         bytes32 live = attributionRegistry.activePromoter(address(this), user);
         if (live != bytes32(0)) return live;
@@ -537,6 +495,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function config() external view returns (Types.CampaignConfig memory) {
         return Types.CampaignConfig({
             project: project,
+            name: name,
             token: token,
             rewardPool: rewardPool,
             startTime: startTime,
@@ -603,5 +562,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @return The unpaid remainder of the reward pool.
     function remainingPool() external view returns (uint256) {
         return rewardPool - paidOut;
+    }
+
+    function getProject() external view returns (address) {
+        return project;
+    }
+
+    function getOracle() external view returns (address) {
+        return oracleCoordinator;
     }
 }

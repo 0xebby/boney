@@ -6,6 +6,7 @@ pragma solidity ^0.8.30;
 /// @dev A campaign calls `verify` before crediting progress. Implementations are expected to be
 ///      view-only and must revert (or return 0) when the evidence does not substantiate the claim.
 interface IKpiVerifier {
+    
     /// @notice Substantiate a reported KPI delta and return how much of it may be credited.
     /// @param campaign The campaign requesting verification.
     /// @param kpiIndex Index of the KPI within that campaign.

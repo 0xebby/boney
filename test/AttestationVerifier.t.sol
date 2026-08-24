@@ -115,7 +115,7 @@ contract AttestationVerifierTest is Test {
 
         verifier.verifyAttestations(subject, SCHEMA, 5230, as_, sigs);
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidNonce.selector, attestor, 1, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidNonce.selector, attestor, 1, 0));
         verifier.verifyAttestations(subject, SCHEMA, 5230, as_, sigs);
     }
 
@@ -137,7 +137,7 @@ contract AttestationVerifierTest is Test {
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) =
             _single(a, _sign(attestorPk, a));
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.AttestationExpired.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.AttestationExpired.selector, 0));
         verifier.verifyAttestations(subject, SCHEMA, 1, as_, sigs);
     }
 
@@ -148,7 +148,7 @@ contract AttestationVerifierTest is Test {
             _attestation(rogue, 1, 0, uint64(block.timestamp + 1 hours));
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) = _single(a, _sign(roguePk, a));
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.NotAnAttestor.selector, rogue));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.NotAnAttestor.selector, rogue));
         verifier.verifyAttestations(subject, SCHEMA, 1, as_, sigs);
     }
 
@@ -158,7 +158,7 @@ contract AttestationVerifierTest is Test {
             _attestation(attestor, 1, 0, uint64(block.timestamp + 1 hours));
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) = _single(a, _sign(roguePk, a));
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidSignature.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidSignature.selector, 0));
         verifier.verifyAttestations(subject, SCHEMA, 1, as_, sigs);
     }
 
@@ -171,7 +171,7 @@ contract AttestationVerifierTest is Test {
             _single(a, _sign(attestorPk, a));
 
         // Caller claims a different value than the one signed.
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.AttestationMismatch.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.AttestationMismatch.selector, 0));
         verifier.verifyAttestations(subject, SCHEMA, 999_999, as_, sigs);
     }
 
@@ -181,7 +181,7 @@ contract AttestationVerifierTest is Test {
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) =
             _single(a, _sign(attestorPk, a));
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.AttestationMismatch.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.AttestationMismatch.selector, 0));
         verifier.verifyAttestations(address(0xBEEF), SCHEMA, 5230, as_, sigs);
     }
 
@@ -193,7 +193,7 @@ contract AttestationVerifierTest is Test {
         a.expiresAt = uint64(block.timestamp + 30 days);
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) = _single(a, sig);
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidSignature.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidSignature.selector, 0));
         verifier.verifyAttestations(subject, SCHEMA, 5230, as_, sigs);
     }
 
@@ -229,7 +229,7 @@ contract AttestationVerifierTest is Test {
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) =
             _single(a, _sign(attestorPk, a));
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.BelowThreshold.selector, 1, 2));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.BelowThreshold.selector, 1, 2));
         verifier.verifyAttestations(subject, SCHEMA, 42, as_, sigs);
     }
 
@@ -244,7 +244,7 @@ contract AttestationVerifierTest is Test {
         sigs[0] = _sign(attestorPk, as_[0]);
         sigs[1] = _sign(attestorPk, as_[1]);
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.DuplicateAttestor.selector, attestor));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.DuplicateAttestor.selector, attestor));
         verifier.verifyAttestations(subject, SCHEMA, 42, as_, sigs);
     }
 
@@ -264,13 +264,13 @@ contract AttestationVerifierTest is Test {
 
     function test_SetThreshold_revertsAboveAttestorCount() public {
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidThreshold.selector, 2, 1));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidThreshold.selector, 2, 1));
         verifier.setThreshold(2);
     }
 
     function test_SetThreshold_revertsZero() public {
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidThreshold.selector, 0, 1));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidThreshold.selector, 0, 1));
         verifier.setThreshold(0);
     }
 
@@ -279,7 +279,7 @@ contract AttestationVerifierTest is Test {
         _enableSecondAttestor();
 
         vm.prank(admin);
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidThreshold.selector, 2, 1));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidThreshold.selector, 2, 1));
         verifier.setAttestor(second, false);
     }
 
@@ -294,7 +294,7 @@ contract AttestationVerifierTest is Test {
         vm.prank(admin);
         verifier.setAttestor(second, false);
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.NotAnAttestor.selector, second));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.NotAnAttestor.selector, second));
         verifier.verifyAttestations(subject, SCHEMA, 7, as_, sigs);
     }
 
@@ -311,7 +311,7 @@ contract AttestationVerifierTest is Test {
         bytes[] memory sigs = new bytes[](2);
         as_[0] = _attestation(attestor, 1, 0, uint64(block.timestamp + 1 hours));
 
-        vm.expectRevert(AttestationVerifier.LengthMismatch.selector);
+        vm.expectRevert(IAttestationVerifier.LengthMismatch.selector);
         verifier.verifyAttestations(subject, SCHEMA, 1, as_, sigs);
     }
 
@@ -319,7 +319,7 @@ contract AttestationVerifierTest is Test {
         IAttestationVerifier.Attestation[] memory as_ = new IAttestationVerifier.Attestation[](0);
         bytes[] memory sigs = new bytes[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.BelowThreshold.selector, 0, 1));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.BelowThreshold.selector, 0, 1));
         verifier.verifyAttestations(subject, SCHEMA, 1, as_, sigs);
     }
 
@@ -335,7 +335,7 @@ contract AttestationVerifierTest is Test {
         (IAttestationVerifier.Attestation[] memory as_, bytes[] memory sigs) =
             _single(a, _sign(attestorPk, a));
 
-        vm.expectRevert(abi.encodeWithSelector(AttestationVerifier.InvalidSignature.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(IAttestationVerifier.InvalidSignature.selector, 0));
         other.verifyAttestations(subject, SCHEMA, 5230, as_, sigs);
     }
 

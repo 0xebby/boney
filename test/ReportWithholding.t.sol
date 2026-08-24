@@ -13,6 +13,7 @@ import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IOracleCoordinator} from "../src/interfaces/IOracleCoordinator.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -48,8 +49,12 @@ contract ReportWithholdingTest is Test {
     uint256 internal constant POOL = 10_000 ether;
     uint64 internal constant MAX_TOUCH = 30 days;
     uint256 internal constant MIN_STAKE = 100 ether;
-    uint256 internal constant DISPUTE_WINDOW = 1 days;
-    uint256 internal constant UNSTAKE_DELAY = 2 days;
+    /// @dev Must stay well inside `Campaign.CLAIM_GRACE`: the grace-window tests push an oracle
+    ///      report *after* `end()`, and that push has to clear its dispute window while the
+    ///      campaign is still reportable. Scaled off CLAIM_GRACE so shortening the constant for
+    ///      testing cannot silently invert the two.
+    uint256 internal constant DISPUTE_WINDOW = 1 minutes;
+    uint256 internal constant UNSTAKE_DELAY = 2 minutes;
 
     /// @dev Tier 0 pays at 10 units; the referral below delivers 50, clearing it five times over.
     uint256 internal constant THRESHOLD = 10;
@@ -108,6 +113,7 @@ contract ReportWithholdingTest is Test {
     function _createCampaign() internal returns (Campaign) {
         Types.CampaignConfig memory cfg = Types.CampaignConfig({
             project: project,
+            name: "Report Withholding",
             token: address(token),
             rewardPool: POOL,
             startTime: startTime,
@@ -188,6 +194,10 @@ contract ReportWithholdingTest is Test {
 
         assertEq(campaign.progressOf(promoter, 0), 0, "nothing credited while the project stalled");
 
+        // The report push must clear its dispute window before the campaign leaves the grace
+        // period: the oracle's window runs from submission, not from the campaign end, so it
+        // cannot be interleaved with the reclaim warp below. This is why DISPUTE_WINDOW has to
+        // stay comfortably shorter than CLAIM_GRACE.
         _stakeAndPushUserReport(DELIVERED);
 
         assertEq(campaign.progressOf(promoter, 0), DELIVERED, "credited after the campaign ended");
@@ -242,7 +252,7 @@ contract ReportWithholdingTest is Test {
 
         vm.warp(uint256(campaign.endedAt()) + campaign.CLAIM_GRACE() + 1);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Ended));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Ended));
         campaign.reportUserAction(0, user, DELIVERED, "");
     }
 
@@ -283,7 +293,7 @@ contract ReportWithholdingTest is Test {
         campaign.pause();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.WrongStatus.selector, Types.CampaignStatus.Paused));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Paused));
         campaign.reportUserAction(0, user, DELIVERED, "");
 
         // A promoter waits out the window and ends it themselves.
@@ -291,6 +301,9 @@ contract ReportWithholdingTest is Test {
         vm.prank(promoter);
         campaign.end();
 
+        // The push is bound by the grace window, so with the shortened CLAIM_GRACE the dispute
+        // window (1 minute) is the constraining one — a hardcoded multi-day skip would land the
+        // report after the campaign stopped being reportable.
         _stakeAndPushUserReport(DELIVERED);
         assertEq(token.balanceOf(promoter), TIER_REWARD, "paid despite the pause");
     }
@@ -316,7 +329,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NotAggregateKpi.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotAggregateKpi.selector, 0));
         coordinator.applyReport(reportId);
     }
 
@@ -350,10 +363,10 @@ contract ReportWithholdingTest is Test {
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
 
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotAggregateReport.selector, userReport));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAggregateReport.selector, userReport));
         coordinator.applyReport(userReport);
 
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotUserReport.selector, aggReport));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotUserReport.selector, aggReport));
         coordinator.applyUserReport(aggReport);
     }
 
@@ -380,7 +393,7 @@ contract ReportWithholdingTest is Test {
         assertEq(coordinator.stakeOf(reporter), 0, "reporter slashed");
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.ReportIsDisputed.selector, reportId));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportIsDisputed.selector, reportId));
         coordinator.applyUserReport(reportId);
 
         assertEq(campaign.progressOf(promoter, 0), 0, "nothing credited");
@@ -405,7 +418,7 @@ contract ReportWithholdingTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                OracleCoordinator.DisputeWindowOpen.selector, coordinator.reportDeadline(reportId)
+                IOracleCoordinator.DisputeWindowOpen.selector, coordinator.reportDeadline(reportId)
             )
         );
         coordinator.applyUserReport(reportId);
@@ -416,7 +429,7 @@ contract ReportWithholdingTest is Test {
         _joinAndTouch();
 
         vm.prank(reporter);
-        vm.expectRevert(abi.encodeWithSelector(OracleCoordinator.NotAReporter.selector, reporter));
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAReporter.selector, reporter));
         coordinator.submitUserReport(
             IOracleCoordinator.UserReport({
                 campaign: address(campaign),
@@ -434,7 +447,7 @@ contract ReportWithholdingTest is Test {
         _stake(reporter);
 
         vm.prank(reporter);
-        vm.expectRevert(OracleCoordinator.ZeroAddress.selector);
+        vm.expectRevert(IOracleCoordinator.ZeroAddress.selector);
         coordinator.submitUserReport(
             IOracleCoordinator.UserReport({
                 campaign: address(campaign),
@@ -466,7 +479,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, stranger));
         coordinator.applyUserReport(reportId);
     }
 
@@ -501,7 +514,7 @@ contract ReportWithholdingTest is Test {
         skip(1 days + 1);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(Campaign.NoAttribution.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, DELIVERED, "");
     }
 

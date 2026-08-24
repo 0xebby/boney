@@ -28,6 +28,18 @@ export type Deployment = {
   attestationVerifier: `0x${string}`;
   oracleCoordinator: `0x${string}`;
   /**
+   * Boney's canonical KPI verifier — the one the relayer reports observed metrics to.
+   *
+   * Optional because the KPI verification layer postdates the live deployments: a broadcast
+   * receipt from before it lands without these three, and requiring them would break
+   * `pnpm deployments` until a full redeploy. Filled in automatically by the next deploy.
+   */
+  eventMetricKpiVerifier?: `0x${string}`;
+  /** The wrapper a campaign's `KpiSpec.verifier` points at. Optional; see above. */
+  guardedKpiVerifier?: `0x${string}`;
+  /** Attribution-timing lens, composable as the guard's second verifier. Optional; see above. */
+  touchWindowVerifier?: `0x${string}`;
+  /**
    * Block the protocol was deployed in — the floor for any log scan.
    *
    * Nothing on chain enumerates a campaign's promoters, so listing them means `getLogs` over
@@ -47,6 +59,18 @@ function env(key: string): `0x${string}` {
 }
 
 /**
+ * Like `env`, but absent means `undefined` rather than the zero address.
+ *
+ * Only for the optional KPI-verifier keys. Collapsing "not deployed" into `0x0` would let the
+ * relayer happily point at the zero address and fail with a decode error instead of saying the
+ * verifier is missing.
+ */
+function optionalEnv(key: string): `0x${string}` | undefined {
+  const value = process.env[key];
+  return value ? (value as `0x${string}`) : undefined;
+}
+
+/**
  * Deployment addresses by chain id. The anvil entry is generated from the broadcast receipt;
  * the others come from env vars and are zero until set.
  */
@@ -59,6 +83,9 @@ export const DEPLOYMENTS: Partial<Record<number, Deployment>> = {
     reputationRegistry: env("NEXT_PUBLIC_SEPOLIA_REPUTATION_REGISTRY"),
     attestationVerifier: env("NEXT_PUBLIC_SEPOLIA_ATTESTATION_VERIFIER"),
     oracleCoordinator: env("NEXT_PUBLIC_SEPOLIA_ORACLE_COORDINATOR"),
+    eventMetricKpiVerifier: optionalEnv("NEXT_PUBLIC_SEPOLIA_KPI_VERIFIER"),
+    guardedKpiVerifier: optionalEnv("NEXT_PUBLIC_SEPOLIA_GUARDED_VERIFIER"),
+    touchWindowVerifier: optionalEnv("NEXT_PUBLIC_SEPOLIA_TOUCH_VERIFIER"),
     startBlock: BigInt(process.env.NEXT_PUBLIC_SEPOLIA_START_BLOCK ?? 0),
   },
   [baseSepolia.id]: {
@@ -69,6 +96,9 @@ export const DEPLOYMENTS: Partial<Record<number, Deployment>> = {
     reputationRegistry: env("NEXT_PUBLIC_BASE_SEPOLIA_REPUTATION_REGISTRY"),
     attestationVerifier: env("NEXT_PUBLIC_BASE_SEPOLIA_ATTESTATION_VERIFIER"),
     oracleCoordinator: env("NEXT_PUBLIC_BASE_SEPOLIA_ORACLE_COORDINATOR"),
+    eventMetricKpiVerifier: optionalEnv("NEXT_PUBLIC_BASE_SEPOLIA_KPI_VERIFIER"),
+    guardedKpiVerifier: optionalEnv("NEXT_PUBLIC_BASE_SEPOLIA_GUARDED_VERIFIER"),
+    touchWindowVerifier: optionalEnv("NEXT_PUBLIC_BASE_SEPOLIA_TOUCH_VERIFIER"),
     startBlock: BigInt(process.env.NEXT_PUBLIC_BASE_SEPOLIA_START_BLOCK ?? 0),
   },
   // Generated entries come last so they win: they are read from the broadcast receipt, so they

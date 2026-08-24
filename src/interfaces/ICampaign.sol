@@ -7,6 +7,40 @@ import {Types} from "../libraries/Types.sol";
 /// @notice A single performance campaign: escrowed rewards released as attributed KPI progress
 ///         crosses per-promoter thresholds.
 interface ICampaign {
+    // ── errors ───────────────────────────────────────────────────
+
+    error NotProject();
+    error NotReporter();
+    error NotOracle();
+    error WrongStatus(Types.CampaignStatus actual);
+    error AlreadyJoined();
+    error NotJoined();
+    error InsufficientReputation(uint256 score, uint256 required);
+    error UnreachableReputation(uint256 required, uint256 maxScore);
+    error UnknownKpi(uint256 kpiIndex);
+    error AggregateKpi(uint256 kpiIndex);
+    error NotAggregateKpi(uint256 kpiIndex);
+    error NoAttribution(address user);
+    error NonMonotonic(uint256 current, uint256 provided);
+    error VerifierOvercredit(uint256 credited, uint256 max);
+    error OutsideWindow(uint64 startTime, uint64 endTime);
+    error NotFunded(uint256 balance, uint256 required);
+    error ClaimWindowOpen(uint64 until);
+    error NothingToReclaim();
+    error ZeroAddress();
+    error InvalidWindow();
+    error ZeroRewardPool();
+    error NoKpis();
+    error TierLengthMismatch();
+    error EmptyTiers(uint256 kpiIndex);
+    error TiersNotAscending(uint256 kpiIndex, uint256 tierIndex);
+    error ZeroTierReward(uint256 kpiIndex, uint256 tierIndex);
+    error CustomKpiNeedsVerifier(uint256 kpiIndex);
+    error TooManyKpis(uint256 provided, uint256 max);
+    error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
+
+    // ── events ───────────────────────────────────────────────────
+
     /// @notice Emitted once the reward pool is fully escrowed and reporting opens.
     /// @param startTime When reports begin being accepted.
     /// @param endTime When they stop.
@@ -153,4 +187,8 @@ interface ICampaign {
     /// @notice Rewards released from the pool so far.
     /// @return The cumulative amount paid out.
     function paidOut() external view returns (uint256);
+
+    function getProject() external view returns (address);
+
+    function getOracle() external view returns (address);
 }

@@ -6,11 +6,9 @@ import type {PublicClient} from "viem";
 import {fetchBrowseCampaigns, fetchCampaignCount, fetchReputation} from "@/lib/contracts";
 import {IERC20MetadataAbi} from "@/lib/abis";
 import {isDeployed} from "@/lib/chains";
+import {UNKNOWN_TOKEN, type TokenMeta} from "@/lib/token";
 import { useBoneyChainId } from "@/hooks/useBoneyChain";
 import type {CampaignView} from "@/lib/types";
-
-/** Token metadata, needed to format escrow amounts correctly. */
-export type TokenMeta = {symbol: string; decimals: number};
 
 /**
  * Loads every campaign plus the metadata for each distinct escrow token.
@@ -94,7 +92,7 @@ async function fetchTokenMetas(
       } catch {
         // A token that does not implement the metadata extension is still usable for escrow —
         // fall back rather than failing the whole list.
-        return [address, {symbol: "???", decimals: 18}] as const;
+        return [address, UNKNOWN_TOKEN] as const;
       }
     }),
   );

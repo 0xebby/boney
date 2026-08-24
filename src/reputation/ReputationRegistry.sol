@@ -28,16 +28,6 @@ import {IAttestationVerifier} from "../interfaces/IAttestationVerifier.sol";
 ///      immutable history (a wallet's first-transaction age cannot go down) and is the default so
 ///      registering a schema never silently expires data.
 contract ReputationRegistry is IReputationRegistry, Ownable {
-    error UnknownSchema(bytes32 schemaId);
-    error SchemaDisabled(bytes32 schemaId);
-    error SchemaAlreadyRegistered(bytes32 schemaId);
-    error AttestationAlreadyUsed(bytes32 attestationId);
-    error StaleValue(uint256 storedAt, uint256 incomingAt);
-    error ValueExceedsMax(bytes32 schemaId, uint256 value, uint256 maxValue);
-    error ZeroAddress();
-    error EmptyName();
-    error TooManySchemas(uint256 max);
-
     /// @notice Cap on registered schemas.
     /// @dev `scoreOf` iterates every schema and is called from `Campaign.join()`. An unbounded
     ///      schema set would let governance make joining prohibitively expensive, or impossible.

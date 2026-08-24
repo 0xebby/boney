@@ -12,19 +12,15 @@ import {IAttributionRegistry} from "./interfaces/IAttributionRegistry.sol";
 import {Types} from "./libraries/Types.sol";
 
 /// @title Boney - web3 rewards  accountability protocol.
-/// @dev Deliberately thin and stateless (decision D9). It holds no funds, owns no campaign state,
+/// @dev Deliberately thin and stateless. It holds no funds, owns no campaign state,
 ///      and has no privileged role in any module — every call it makes could be made directly.
 ///      Its job is ergonomics: resolve campaign ids to addresses, batch the token approval dance,
-///      and assemble the aggregate views a marketplace UI needs.
+///      and assemble the aggregate views a marketplace[boneyard] UI needs.
 ///
 ///      Because it is not trusted by the modules, replacing the facade (or running several in
 ///      parallel for different frontends) requires no migration of escrow or campaign state.
 contract Boney is IBoney {
     using SafeERC20 for IERC20;
-
-    error ZeroAddress();
-    error NotProject(address project, address caller);
-    error CampaignMismatch(address expected, address provided);
 
     /// @notice Factory and directory the facade resolves campaign ids through.
     ICampaignRegistry public immutable registry;
@@ -48,7 +44,7 @@ contract Boney is IBoney {
     // ── project actions ──────────────────────────────────────────
 
     /// @inheritdoc IBoney
-    /// @param cfg Immutable campaign parameters; `cfg.project` must be the caller.
+    /// @param cfg Immutable campaign parameters;
     /// @param kpis KPI specs; at least one required.
     /// @param tiers Per-KPI reward tiers, outer index aligned to `kpis`.
     /// @return campaignId Sequential id assigned by the registry.
@@ -82,8 +78,7 @@ contract Boney is IBoney {
 
     /// @notice Returns the campaign address for joining.
     /// @dev Promoters join by calling `Campaign.join()` directly from the wallet that will
-    ///      receive rewards. Intentionally not proxied: the campaign records `msg.sender` as the
-    ///      promoter, so a facade-relayed join would register the facade. Resolve the target with
+    ///      receive rewards.  Resolve the target with
     ///      this function, then call `join()` on it from the promoter's own wallet.
     /// @param campaignId The campaign id.
     /// @return The campaign contract address.
@@ -129,6 +124,7 @@ contract Boney is IBoney {
             campaignId: campaignId,
             campaign: addr,
             project: cfg.project,
+            name: cfg.name,
             token: cfg.token,
             rewardPool: cfg.rewardPool,
             paidOut: c.paidOut(),

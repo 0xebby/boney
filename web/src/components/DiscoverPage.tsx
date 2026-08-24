@@ -285,7 +285,14 @@ function PromoterTable({
               <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-ink-muted">
                 Promoter
               </th>
-              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-ink-muted">
+              {/*
+                Rank is derived from the BoneyScore beside it (`rankOf`), so on a phone the two
+                columns say the same thing twice and the number is the more precise of the pair.
+              */}
+              <th
+                scope="col"
+                className="hidden px-3 py-2 text-left text-xs font-medium text-ink-muted md:table-cell"
+              >
                 Rank
               </th>
               <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-ink-muted">
@@ -298,7 +305,10 @@ function PromoterTable({
                 otherwise read the split as the breakdown *of* the score next to it, which it is
                 not — so the difference is labelled in the header rather than left to the docs.
               */}
-              <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-ink-muted">
+              <th
+                scope="col"
+                className="hidden px-3 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
+              >
                 Trust / Reach
                 <span className="ml-1 font-normal text-ink-muted/70">now</span>
               </th>
@@ -325,13 +335,13 @@ function PromoterTable({
                   <td className="px-3 py-2.5 font-mono text-[13px] text-ink">
                     {shortAddress(row.entry.promoter)}
                   </td>
-                  <td className="px-3 py-2.5">
+                  <td className="hidden px-3 py-2.5 md:table-cell">
                     <RankBadge rank={row.rank} />
                   </td>
                   <td className="tnum px-3 py-2.5 text-right text-ink">
                     {row.scoreAtJoin.toLocaleString("en-US")}
                   </td>
-                  <td className="px-3 py-2.5 text-right">
+                  <td className="hidden px-3 py-2.5 text-right md:table-cell">
                     <SplitCell
                       parts={parts.get(row.entry.promoter.toLowerCase())}
                       loading={partsLoading}

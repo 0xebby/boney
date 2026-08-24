@@ -3,7 +3,8 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
-import {useCampaigns, type TokenMeta} from "@/hooks/useCampaigns";
+import {useCampaigns} from "@/hooks/useCampaigns";
+import type {TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useReferredCampaigns} from "@/hooks/useReferredCampaigns";
 import {useNow} from "@/hooks/useNow";
@@ -116,20 +117,20 @@ export function PromoterDashboard() {
 
       <StatRow>
         <StatTile
-          label="Joined campaigns"
+          label="Campaigns Joined"
           value={rows.length.toLocaleString("en-US")}
           hint={`${activeCount} active`}
         />
         <StatTile
-          label="Tracking links"
+          label="Promotion links"
           value={rows.length.toLocaleString("en-US")}
-          hint="one per campaign"
+          hint="(one per campaign)"
         />
         <StatTile
           label="Referred to"
           value={referredRows.length.toLocaleString("en-US")}
           hint={`${liveReferrals} still crediting`}
-          accent="var(--series-3)"
+         // accent="var(--series-3)"
         />
       </StatRow>
 
@@ -139,7 +140,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you promote"
-            subtitle="Memberships you joined, and the link to share for each"
+            subtitle="Campaigns you joined, and your promotion boneylink to share for each"
           />
         </div>
         {isLoading || joinedQuery.isLoading ? (
@@ -157,14 +158,14 @@ export function PromoterDashboard() {
             isRefreshing={joinedQuery.isRefreshing}
             emptyState={
               <EmptyState
-                title="No memberships yet"
+                title="Not Joined Any Campaign Yet."
                 description="Browse the boneyard and join campaigns that match your audience. Each membership gives you a tracking link to share."
                 action={
                   <Link
                     href="/"
                     className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
                   >
-                    Browse the boneyard
+                    Browse Boneyard
                   </Link>
                 }
               />
@@ -182,7 +183,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you were referred to"
-            subtitle="Attributions you signed through a promoter's link"
+            subtitle="Attributions you signed through a promoter's boneylink"
           />
         </div>
         {isLoading || referredQuery.isLoading ? (
@@ -201,7 +202,7 @@ export function PromoterDashboard() {
             emptyState={
               <EmptyState
                 title="No referrals yet"
-                description="When you follow a promoter's tracking link and confirm the attribution, the campaign shows up here."
+                description="When you follow a promoter's boneylink and confirm the attribution, the campaign shows up here."
               />
             }
           />
@@ -252,6 +253,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
     {
       key: "project",
       header: "Project",
+      hideOnMobile: true,
       sortValue: (r) => projectName(r.view),
       render: (r) =>
         hasProjectName(r.view) ? (
@@ -284,7 +286,7 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
     },
     {
       key: "link",
-      header: "Tracking link",
+      header: "Boneylink link",
       sortValue: () => 0,
       render: (r) => <CopyLinkButton link={r.link} />,
     },
@@ -292,6 +294,9 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       key: "ends",
       header: "Ends in",
       numeric: true,
+      // The tracking link is the reason this table exists, so it keeps its slot on a phone and the
+      // countdown yields — the campaign's own page carries it.
+      hideOnMobile: true,
       sortValue: (r) => r.view.endTime,
       render: (r) => {
         if (now === 0) return <span className="text-ink-muted">—</span>;
@@ -334,6 +339,7 @@ function buildReferredColumns(now: number): Column<ReferredCampaign>[] {
     {
       key: "project",
       header: "Project",
+      hideOnMobile: true,
       sortValue: (r) => projectName(r.view),
       render: (r) =>
         hasProjectName(r.view) ? (
@@ -427,7 +433,7 @@ function CopyLinkButton({link}: {link: string}) {
       <span aria-hidden className="text-[10px]">
         {state === "copied" ? "✓" : state === "failed" ? "!" : "⎘"}
       </span>
-      {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy link"}
+      {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : "Copy Promotion link"}
       {/* Announced to screen readers, which see no color change. */}
       <span role="status" aria-live="polite" className="sr-only">
         {state === "copied" ? "Tracking link copied" : state === "failed" ? "Copy failed" : ""}

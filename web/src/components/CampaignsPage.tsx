@@ -2,7 +2,9 @@
 
 import {useMemo, useState} from "react";
 import Link from "next/link";
-import {useCampaigns, useReputation, type TokenMeta} from "@/hooks/useCampaigns";
+import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
+import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
+import {denominations, type TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
@@ -20,9 +22,10 @@ import {
   type StatusFilter,
 } from "@/lib/filters";
 import {utilization} from "@/lib/campaign";
+import {summarizeKinds} from "@/lib/kpiSummary";
 import { projectName, hasProjectName } from "@/lib/projects";
 import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
-import type {CampaignView} from "@/lib/types";
+import type {CampaignView, KpiSpec} from "@/lib/types";
 
 /**
  * Filter order, most-asked-for first: a visitor scanning the marketplace wants what is running
@@ -42,9 +45,19 @@ const STATUS_OPTIONS = [
 ] as const satisfies readonly StatusFilter[];
 
 export function CampaignsPage() {
-  const {campaigns, tokens, isLoading, isRefreshing, error, refetch, deployed} = useCampaigns();
+  const {campaigns, tokens, isLoading, isRefreshing, error, refetch, deployed, chainId} =
+    useCampaigns();
   const {reputation} = useReputation();
   const [filters, setFilters] = useState<CampaignFilters>(EMPTY_FILTERS);
+
+  /*
+    What each campaign measures, for the KPI column.
+
+    One read per KPI across the page, fetched once and never polled — see `useCampaignKpiSpecs` for
+    why a `KpiSpec` cannot change under a reader. Keyed on the campaign set rather than the list
+    object, so `useCampaigns`' 30s poll does not drag this along with it.
+  */
+  const {specs: kpiSpecs, dropped: kpiSpecsDropped} = useCampaignKpiSpecs(campaigns);
 
   /*
     Which of these the connected wallet has already joined.
@@ -73,17 +86,23 @@ export function CampaignsPage() {
   );
   const summary = useMemo(() => summarize(visible), [visible]);
 
-  // The summary tiles read in whatever token the first campaign escrows. Mixed-token lists
-  // would make a single total meaningless, so the tiles show a count instead in that case.
-  const tokenList = useMemo(
-    () => [...new Set(campaigns.map((c) => c.token.toLowerCase()))],
-    [campaigns],
-  );
-  const singleToken = tokenList.length === 1 ? tokens[tokenList[0]] : undefined;
+  // The summary tiles read in whatever token the campaigns escrow. Mixed tokens would make a
+  // single total meaningless, so the tiles show a count of units instead in that case — see
+  // `denominations` for what makes two token contracts one unit.
+  //
+  // Derived from `visible`, not `campaigns`, because `summary` is: filtering down to a
+  // single-token slice should denominate the totals that filter produced, rather than leave the
+  // row reporting a mix the table below no longer shows.
+  const units = useMemo(() => denominations(visible, tokens), [visible, tokens]);
+  const singleToken = units.length === 1 ? units[0] : undefined;
+
+  // Only reached with zero or 2+ units, so there is no singular case to spell. Nothing visible
+  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
+  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
   const columns = useMemo(
-    () => buildColumns(tokens, now, joinedAddresses),
-    [tokens, now, joinedAddresses],
+    () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, chainId),
+    [tokens, now, joinedAddresses, kpiSpecs, chainId],
   );
 
   if (!deployed) {
@@ -106,10 +125,10 @@ export function CampaignsPage() {
       */}
       <header className="py-8 text-center sm:py-12">
         <h1 className="font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-          boneyard
+          Boneyard
         </h1>
-        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-ink-secondary sm:text-base">
-          The marketplace for verifiable Web3 growth.
+        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-brand sm:text-base">
+          The Marketplace for Verifiable Web3 Growth.
         </p>
 
         {/*
@@ -117,9 +136,9 @@ export function CampaignsPage() {
           page it is the primary way in, not one control among several. The status and
           "joinable" filters stay below, where they scope the table they sit above.
         */}
-        <div className="mt-6">
+        <div className="mx-auto mt-6 max-w-lg">
           <label className="sr-only" htmlFor="campaign-search">
-            Search campaigns, projects, or campaign IDs
+            Search campaigns, project names, or campaign IDs
           </label>
           <input
             id="campaign-search"
@@ -137,12 +156,12 @@ export function CampaignsPage() {
           to spell out what a project is actually signing up for.
         */}
         <p className="mt-5 text-xs text-ink-secondary">
-          Set your KPIs. Escrow Reward Pool. Pay for verified results.
+          Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
         </p>
 
         <p className="mt-2 text-xs text-ink-muted">
           <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
-            How it works
+            See how it works
           </Link>
         </p>
       </header>
@@ -151,32 +170,39 @@ export function CampaignsPage() {
         <StatTile
           label="Active campaigns"
           value={summary.activeCount.toLocaleString("en-US")}
-          hint={`of ${summary.count.toLocaleString("en-US")} shown`}
+          qualifier={`of ${summary.count.toLocaleString("en-US")}`}
         />
         <StatTile
-          label="Total rewards"
+          label="Total Reward Pool"
           value={
             singleToken
               ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
-              : `${tokenList.length} tokens`
+              : mixedLabel
           }
-          hint={singleToken?.symbol}
-          accent="var(--series-1)"
+          unit={singleToken?.symbol}
+          //accent="var(--series-1)"
         />
         <StatTile
-          label="Rewards earned"
+          label="Rewards Earned"
           value={
             singleToken
               ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
               : "—"
           }
-          hint={singleToken?.symbol}
-          accent="var(--series-3)"
+          unit={singleToken?.symbol}
+          //accent="var(--series-3)"
         />
+        {/*
+
+        */}
         <StatTile
-          label="Pool utilization"
-          value={formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))}
-          hint="across shown campaigns"
+          label="Pool Utilization across all campaigns"
+          value={
+            singleToken
+              ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
+              : "—"
+          }
+          //hint="across all campaigns"
         />
       </StatRow>
 
@@ -215,6 +241,15 @@ export function CampaignsPage() {
         {visible.length !== campaigns.length ? (
           <span className="text-xs text-ink-muted">
             {visible.length} of {campaigns.length}
+          </span>
+        ) : null}
+
+        {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a column
+            that quietly stopped describing the tail of the list would read as "no KPIs here". */}
+        {kpiSpecsDropped > 0 ? (
+          <span className="text-xs text-ink-muted">
+            KPI kinds not loaded for {kpiSpecsDropped} campaign
+            {kpiSpecsDropped === 1 ? "" : "s"}
           </span>
         ) : null}
       </div>
@@ -262,9 +297,29 @@ function buildColumns(
   tokens: Record<string, TokenMeta>,
   now: number,
   joinedAddresses: ReadonlySet<string>,
+  kpiSpecs: Record<string, KpiSpec[]>,
+  chainId?: number,
 ): Column<CampaignView>[] {
   const meta = (c: CampaignView) => tokens[c.token.toLowerCase()] ?? {symbol: "", decimals: 18};
   const hasJoined = (c: CampaignView) => joinedAddresses.has(c.campaign.toLowerCase());
+
+  /*
+    What this campaign measures, in words. Reads no chain state of its own: the kind comes from the
+    specs the hook fetched once, and the hover text names the watched contract from the local catalog
+    or — where a campaign watches the token it escrows, as most seeded ones do — the token metadata
+    already loaded for the reward-pool column.
+  */
+  const kindSummary = (c: CampaignView) => {
+    const specs = kpiSpecs[c.campaign.toLowerCase()];
+    if (!specs) return null;
+
+    return summarizeKinds(specs, {
+      chainId,
+      escrowToken: c.token.toLowerCase(),
+      tokenSymbol: meta(c).symbol || undefined,
+      campaignName: c.name,
+    });
+  };
 
   return [
     {
@@ -288,6 +343,7 @@ function buildColumns(
     {
       key: "project",
       header: "Project",
+      hideOnMobile: true,
       // Sorts on the displayed string, so the column orders the way it reads. Rows falling back
       // to an address sort among themselves under "0x" rather than being scattered by name.
       sortValue: (c) => projectName(c),
@@ -333,6 +389,9 @@ function buildColumns(
       key: "utilization",
       header: "Progress",
       sortValue: (c) => utilization(c),
+      // The fixed width is also why this is one of the first columns dropped on a phone: 140px of a
+      // 375px viewport spent on a bar whose number is already in "Paid out".
+      hideOnMobile: true,
       width: "140px",
       render: (c) => (
         <Meter
@@ -345,10 +404,28 @@ function buildColumns(
     {
       key: "kpis",
       header: "KPIs",
-      numeric: true,
       hideOnMobile: true,
-      sortValue: (c) => c.kpiCount,
-      render: (c) => c.kpiCount.toString(),
+      // Sorts on the label, so the column orders the way it reads. Rows whose specs have not landed
+      // (or were left out by the read budget) sort together under the empty string.
+      sortValue: (c) => kindSummary(c)?.sortValue ?? "",
+      render: (c) => {
+        const summary = kindSummary(c);
+
+        // No specs yet: the count is what this column showed before, and it is never wrong — just
+        // less useful than the kind. Better than an empty cell that reads as "no KPIs".
+        if (!summary) {
+          return <span className="text-ink-muted">{c.kpiCount.toString()}</span>;
+        }
+
+        return (
+          <span title={summary.title} className="text-ink-secondary">
+            {summary.label}
+            {summary.extra > 0 ? (
+              <span className="ml-1 text-ink-muted">+{summary.extra}</span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       key: "minRep",
@@ -367,6 +444,7 @@ function buildColumns(
       key: "ends",
       header: "Ends",
       numeric: true,
+      hideOnMobile: true,
       sortValue: (c) => c.endTime,
       render: (c) => {
         // `now === 0` means the clock effect has not run yet; show nothing rather than

@@ -7,6 +7,31 @@ pragma solidity ^0.8.30;
 ///         reporter and is never applied.
 /// @dev MVP keeps dispute authority with governance (permissionless dispute bonds are deferred).
 interface IOracleCoordinator {
+    // ── errors ───────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error NotAReporter(address who);
+    error NothingStaked();
+    error StakeLocked(uint256 until);
+    error UnknownReport(bytes32 reportId);
+    error ReportAlreadyExists(bytes32 reportId);
+    error DisputeWindowOpen(uint256 until);
+    error DisputeWindowClosed(uint256 until);
+    error ReportIsDisputed(bytes32 reportId);
+    error ReportAlreadyApplied(bytes32 reportId);
+    error UnknownCampaign(address campaign);
+    error NotUserReport(bytes32 reportId);
+    error NotAggregateReport(bytes32 reportId);
+    error TransferFailed();
+    error RegistryAlreadySet();
+    error RegistryNotSet();
+
+    // ── events ───────────────────────────────────────────────────
+
+    /// @notice Emitted once when the campaign registry is wired, enabling report submission.
+    /// @param registry The campaign registry used to validate report targets.
+    event RegistrySet(address indexed registry);
+
     /// @notice Emitted when a reporter posts collateral.
     /// @param reporter The reporter.
     /// @param amount Amount added to their stake.
