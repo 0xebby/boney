@@ -13,7 +13,7 @@
  * All three keys live in the repo-root `.env`, which is what lets this run unattended:
  *
  *   ETHOS_PK              the promoter. Registers, joins, receives tier payouts.
- *   ATTESTOR_PRIVATE_KEY  the referral. Signs the touch and performs the real on-chain action.
+ *   REFERRAL_PRIVATE_KEY  the referral. Signs the touch and performs the real on-chain action.
  *   PRIVATE_KEY           the project. Relays the touch and is the only wallet `reportUserAction` takes.
  *
  * The referral both signs *and* acts, which is the part a seed-derived throwaway wallet cannot do:
@@ -103,7 +103,7 @@ const rpc = arg("--rpc") ?? "https://base-sepolia-rpc.publicnode.com";
 const client = createPublicClient({transport: http(rpc)}) as PublicClient;
 
 const promoter = privateKeyToAccount(envKey("ETHOS_PK"));
-const referral = privateKeyToAccount(envKey("ATTESTOR_PRIVATE_KEY"));
+const referral = privateKeyToAccount(envKey("REFERRAL_PRIVATE_KEY"));
 const project = privateKeyToAccount(envKey("PRIVATE_KEY"));
 
 const wallet = (acct: typeof promoter) =>
