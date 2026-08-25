@@ -54,4 +54,6 @@
 # `NotAnAttestor` on submit, at the promoter's expense.
 #
 # `/api/attest` now checks this before signing and names the offending address, so the failure states
-# itself. On Base Sepolia the registered attestor is 0x98405c…, the same wallet as `ETHOS_PK`.
+# itself. On Base Sepolia the registered attestor is 0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8, the
+# same wallet as `ETHOS_PK`, and the verifier it is registered on is
+# 0xb4797645D1C323bF471C87830A391ED984647DCc.
