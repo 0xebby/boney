@@ -1,13 +1,17 @@
 /**
- * Chain lookup and RPC selection for server-side reads.
+ * Chain lookup for server-side reads.
  *
- * Extracted because three route handlers need it — `/api/attest` for a nonce read, `/api/campaign-guide`
- * for `Campaign.project()`, and `/api/stub-wallets` for signature verification — and a fourth copy of
- * the same eight lines was one too many. The endpoints must agree with what the client uses: a server
- * read that hits a different node than the browser can contradict what the user is looking at.
+ * Extracted because four server readers need it — `/api/attest` for a nonce read, `/api/campaign-guide`
+ * for `Campaign.project()`, `/api/stub-wallets` for signature verification, and `lib/cardServer.ts` for
+ * the public card's block times and token metadata — and a copy of the same eight lines in each was one
+ * too many. The endpoints must agree with what the client uses: a server read that hits a different node
+ * than the browser can contradict what the user is looking at.
+ *
+ * The URL selection itself now lives in `chains.rpcUrlFor`, which `wagmi.ts` reads too, so the browser
+ * and every server reader resolve one endpoint from one place.
  */
 
-import {anvil, sepolia, baseSepolia, mainnet} from "./chains";
+import {anvil, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
 
 /** viem chain objects by id. */
 const CHAINS = [anvil, sepolia, baseSepolia, mainnet];
@@ -24,11 +28,4 @@ export const chainFor = (id: number) => CHAINS.find((c) => c.id === id);
  * "no campaign at that address", "that signature is not the admin's" — so the one server read must
  * not be the flaky one.
  */
-export function rpcFor(chainId: number): string | undefined {
-  if (chainId === baseSepolia.id) {
-    return process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com";
-  }
-  if (chainId === anvil.id) return process.env.NEXT_PUBLIC_ANVIL_RPC ?? "http://127.0.0.1:8545";
-  if (chainId === sepolia.id) return process.env.NEXT_PUBLIC_SEPOLIA_RPC;
-  return process.env.NEXT_PUBLIC_MAINNET_RPC;
-}
+export const rpcFor = rpcUrlFor;

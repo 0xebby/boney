@@ -1,6 +1,7 @@
 "use client";
 
 import {useMemo} from "react";
+import Link from "next/link";
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
 import {useCampaignSettlements} from "@/hooks/useCampaignSettlements";
 import {Card, CardHeader} from "@/components/ui/Card";
@@ -15,6 +16,7 @@ import {
   type PromoterRow,
 } from "@/lib/settlements";
 import {explorerAddressUrl} from "@/lib/chains";
+import {cardLink} from "@/lib/publicCard";
 import {formatTokenAmount, formatPercent, shortAddress} from "@/lib/format";
 import type {CampaignDetail} from "@/lib/campaignDetail";
 import type {CampaignView} from "@/lib/types";
@@ -44,7 +46,7 @@ export function ProjectPromotersPanel({
   view: CampaignView;
   detail: CampaignDetail;
   token: {symbol: string; decimals: number};
-  /** Resolves the block explorer for a promoter address; absent on local chains. */
+  /** Resolves each promoter's destination — their BoneyCard, or the block explorer. */
   chainId?: number;
 }) {
   const directory = useCampaignPromoters([view]);
@@ -151,7 +153,23 @@ function buildColumns(
       key: "promoter",
       header: "Promoter",
       sortValue: (r) => r.promoter.toLowerCase(),
+      /*
+        The wallet's own BoneyCard where there is one, and the block explorer otherwise.
+
+        The card is the better destination for a project reading this table: it answers "who is this
+        promoter" with their cumulative Boneyard history rather than with a token balance, and it carries
+        the explorer link onward for anyone who wanted that instead. `cardLink` returns undefined off the
+        chain the card serves — see `lib/publicCard` — which is when the explorer is all there is.
+      */
       render: (r) => {
+        const card = cardLink(r.promoter, chainId);
+        if (card) {
+          return (
+            <Link href={card} className="font-mono text-ink hover:underline">
+              {shortAddress(r.promoter)}
+            </Link>
+          );
+        }
         const href = chainId === undefined ? undefined : explorerAddressUrl(chainId, r.promoter);
         return href ? (
           <a

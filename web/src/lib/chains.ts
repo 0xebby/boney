@@ -136,6 +136,36 @@ export const DEFAULT_CHAIN_ID = Number(
   process.env.NEXT_PUBLIC_DEFAULT_CHAIN_ID ?? baseSepolia.id,
 );
 
+/**
+ * The RPC endpoint for a chain, or undefined to let viem use the chain's own default.
+ *
+ * Shared by `wagmi.ts` (the browser) and the server-rendered public card, which is the whole point:
+ * two copies of these URLs would eventually disagree, and the way that failure presents is a page
+ * quietly reading a different chain from the one the rest of the app is on.
+ *
+ * Base's own public endpoint is rate-limited *and* 502s roughly one call in three, so the fallback
+ * here is publicnode rather than `sepolia.base.org`.
+ *
+ * The anvil URL is env-configurable because `127.0.0.1` is not a fixed point — it means whatever host
+ * is asking. A chain served from WSL2 or a container is not on the browser's loopback.
+ */
+export function rpcUrlFor(chainId: number): string | undefined {
+  switch (chainId) {
+    case anvil.id:
+      return process.env.NEXT_PUBLIC_ANVIL_RPC ?? "http://127.0.0.1:8545";
+    case baseSepolia.id:
+      return (
+        process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com"
+      );
+    case sepolia.id:
+      return process.env.NEXT_PUBLIC_SEPOLIA_RPC;
+    case mainnet.id:
+      return process.env.NEXT_PUBLIC_MAINNET_RPC;
+    default:
+      return undefined;
+  }
+}
+
 /** Block explorer URL for an address, or undefined for local chains. */
 export function explorerAddressUrl(chainId: number, address: string): string | undefined {
   const base: Record<number, string> = {
