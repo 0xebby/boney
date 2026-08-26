@@ -11,6 +11,7 @@ import {
   classifyEventSource,
   probeEventSource,
   actorTopicFindings,
+  dataWordFindings,
   EVENT_PRESETS,
   WETH_BASE,
   type EventSource,
@@ -24,8 +25,8 @@ const WETH_DEPOSIT_TOPIC =
  * A `getLogs` returning fixed logs.
  *
  * Cast, like `stubMetadata` below: viem types `getLogs`' return against the ABI event and block tags
- * it was called with, so no plain function satisfies that signature structurally. The probe only ever
- * reads `topics` off the result, which is what these carry.
+ * it was called with, so no plain function satisfies that signature structurally. The probe reads
+ * `topics` and `data` off the result, which is what these carry.
  */
 function stubLogs(
   logs: readonly {
@@ -39,8 +40,13 @@ function stubLogs(
 }
 
 const BASE_SEPOLIA = 84532;
-/** An address the catalog does not know, so the probe has to ask the contract itself. */
-const SOME_TOKEN = "0x2755a4A19B9B4d3B1e9Bd1cDe3B5DB2A0f9AdCc2" as const;
+/**
+ * An address the catalog does not know, so the probe has to ask the contract itself.
+ *
+ * Correctly checksummed on purpose: `dataWordFindings`' tests encode it with
+ * `encodeAbiParameters`, and viem rejects a mixed-case address that fails EIP-55.
+ */
+const SOME_TOKEN = "0x2755A4A19B9B4D3b1e9Bd1cDe3b5DB2a0f9adcc2" as const;
 
 /**
  * A `readContract` that answers `name()`/`symbol()` and nothing else.
@@ -376,6 +382,91 @@ describe("actorTopicFindings", () => {
   });
 });
 
+describe("dataWordFindings", () => {
+  const word = (type: "uint256" | "address", value: bigint | `0x${string}`) =>
+    encodeAbiParameters([{type}], [value]);
+
+  const ONE_FINNEY = BigInt(10) ** BigInt(15);
+
+  it("says nothing in count mode — there is no word to read", () => {
+    expect(
+      dataWordFindings({data: word("uint256", ONE_FINNEY), amountMode: AMOUNT_MODE.count}),
+    ).toEqual([]);
+  });
+
+  it("says nothing when the mode is unknown", () => {
+    // Every caller that predates the field omits it, and a probe cannot guess which mode is meant.
+    expect(dataWordFindings({data: word("uint256", ONE_FINNEY), amountMode: undefined})).toEqual([]);
+  });
+
+  it("names the number the indexer would read, and what it credits", () => {
+    const findings = dataWordFindings({
+      data: word("uint256", ONE_FINNEY),
+      amountMode: AMOUNT_MODE.dataWord0,
+      scale: ONE_FINNEY,
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("ok");
+    expect(findings[0].message).toMatch(/1,000,000,000,000,000/);
+    expect(findings[0].message).toMatch(/0\.001 if it is an 18-decimal token amount/);
+    expect(findings[0].message).toMatch(/1 unit of progress/);
+  });
+
+  it("reads a missing scale as 1, like effectiveScale", () => {
+    for (const scale of [undefined, BigInt(0)]) {
+      const findings = dataWordFindings({
+        data: word("uint256", BigInt(7)),
+        amountMode: AMOUNT_MODE.dataWord0,
+        scale,
+      });
+      expect(findings[0].message, String(scale)).toMatch(/7 units of progress/);
+    }
+  });
+
+  /*
+    The failure the old "First data word" label hid. `log.data` holds the *unindexed* params in
+    declaration order, so `Trade(address indexed user, address token, uint256 amount)` puts `token`
+    at word 0 — an address read as ~1e48. The form cannot catch it from the signature, which is
+    types-only and carries no `indexed` keywords, so the sampled log is the only witness.
+  */
+  it("flags a word shaped like an address", () => {
+    const findings = dataWordFindings({
+      data: word("address", SOME_TOKEN),
+      amountMode: AMOUNT_MODE.dataWord0,
+      scale: BigInt(1),
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("warn");
+    expect(findings[0].message).toMatch(/an address, not an amount/i);
+    expect(findings[0].message).toContain(SOME_TOKEN.toLowerCase());
+  });
+
+  /*
+    A heuristic, so the boundary is worth pinning: an ordinary amount leaves far more than 12 leading
+    bytes clear, and must not be called an address.
+  */
+  it("leaves ordinary amounts alone", () => {
+    for (const value of [BigInt(1), ONE_FINNEY, BigInt(10) ** BigInt(27)]) {
+      const findings = dataWordFindings({
+        data: word("uint256", value),
+        amountMode: AMOUNT_MODE.dataWord0,
+      });
+      expect(findings[0].severity, value.toString()).toBe("ok");
+    }
+  });
+
+  it("flags an event whose data is empty", () => {
+    const findings = dataWordFindings({data: "0x", amountMode: AMOUNT_MODE.dataWord0});
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("error");
+    expect(findings[0].message).toMatch(/nothing to read/i);
+    expect(findings[0].message).toMatch(/Switch Amount to Count/);
+  });
+});
+
 describe("probeEventSource", () => {
   function stubClient(overrides?: Partial<ProbeClient>): ProbeClient {
     return {
@@ -532,6 +623,36 @@ describe("probeEventSource", () => {
     );
 
     expect(findings).toEqual([]);
+  });
+
+  /*
+    The sampled log is the only place the create form can learn its event's data layout, so the
+    value-mode readout has to survive the trip out of `probeChain` — including the scale, which
+    arrives as a form string rather than a bigint.
+  */
+  it("reports what value mode would read from the sampled log", async () => {
+    const topic0 = eventTopic("Deposit(address,uint256)");
+    const client = stubClient({
+      getLogs: stubLogs([
+        {
+          topics: [topic0, `0x${"11".repeat(32)}`],
+          data: encodeAbiParameters([{type: "uint256"}], [BigInt(10) ** BigInt(15)]),
+          blockNumber: BigInt(9500),
+          address: WETH_BASE,
+        },
+      ]),
+    });
+
+    const findings = await probeEventSource(client, {
+      amountMode: AMOUNT_MODE.dataWord0,
+      scale: "1000000000000000",
+      signature: "Deposit(address,uint256)",
+      source: WETH_BASE,
+    });
+
+    const value = findings.find((f) => f.message.startsWith("Value mode reads"));
+    expect(value?.severity).toBe("ok");
+    expect(value?.message).toMatch(/1 unit of progress/);
   });
 
   it("keeps the identity line below anything more important", async () => {
