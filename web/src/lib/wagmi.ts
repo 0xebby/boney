@@ -1,6 +1,6 @@
 import {http, createConfig} from "wagmi";
 import {injected} from "wagmi/connectors";
-import {anvil, sepolia, baseSepolia, mainnet} from "./chains";
+import {anvil, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
 
 /**
  * wagmi configuration.
@@ -9,25 +9,18 @@ import {anvil, sepolia, baseSepolia, mainnet} from "./chains";
  * RainbowKit pulls in a large dependency tree. An injected wallet covers local development and
  * every browser-extension wallet, with no configuration to get wrong.
  *
- * The anvil RPC is env-configurable because `127.0.0.1` is not a fixed point — it means whatever
- * host the *browser* runs on. A chain served from WSL2, a container, or another machine is not on
- * the browser's loopback, and the resulting failure is confusing: pages render fine (they are
- * server-rendered) and only wallet and contract reads break. Set `NEXT_PUBLIC_ANVIL_RPC` to an
- * address the browser can actually resolve, and start anvil with `--host 0.0.0.0` so it listens
- * there.
+ * The endpoints come from `rpcUrlFor` rather than being written out here, so the browser and the
+ * server-rendered public card read the same chain from the same URL. See that function for why the
+ * Base Sepolia default is publicnode and why the anvil one has to be configurable.
  */
 export const wagmiConfig = createConfig({
   chains: [anvil, baseSepolia, sepolia, mainnet],
   connectors: [injected()],
   transports: {
-    [anvil.id]: http(process.env.NEXT_PUBLIC_ANVIL_RPC ?? "http://127.0.0.1:8545"),
-    // Base's own public endpoint is rate-limited *and* 502s roughly one call in three, so the
-    // fallback is publicnode rather than sepolia.base.org. Set the env var for a provider URL.
-    [baseSepolia.id]: http(
-      process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com",
-    ),
-    [sepolia.id]: http(process.env.NEXT_PUBLIC_SEPOLIA_RPC),
-    [mainnet.id]: http(process.env.NEXT_PUBLIC_MAINNET_RPC),
+    [anvil.id]: http(rpcUrlFor(anvil.id)),
+    [baseSepolia.id]: http(rpcUrlFor(baseSepolia.id)),
+    [sepolia.id]: http(rpcUrlFor(sepolia.id)),
+    [mainnet.id]: http(rpcUrlFor(mainnet.id)),
   },
   ssr: true,
 });

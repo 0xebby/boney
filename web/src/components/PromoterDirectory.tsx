@@ -3,12 +3,14 @@
 import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import type {TokenMeta} from "@/lib/token";
 import {Card} from "@/components/ui/Card";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {trackingLink} from "@/lib/promoter";
+import {cardLink} from "@/lib/publicCard";
 import {countPromoters, countDistinctPromoters} from "@/lib/promoters";
 import {formatTokenAmount, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
@@ -184,9 +186,7 @@ function CampaignPromoterCard({
             className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5"
           >
             <div className="flex min-w-0 items-center gap-3">
-              <span className="font-mono text-[13px] text-ink">
-                {shortAddress(promoter.promoter)}
-              </span>
+              <PromoterName wallet={promoter.promoter} />
               {promoter.reputation > BigInt(0) ? (
                 <span className="tnum text-xs text-ink-muted">
                   reputation {promoter.reputation.toLocaleString("en-US")}
@@ -199,6 +199,26 @@ function CampaignPromoterCard({
         ))}
       </ul>
     </Card>
+  );
+}
+
+/**
+ * A promoter's wallet, linked to their BoneyCard where that card exists.
+ *
+ * This is the page's one route to somebody else's card, and it is the reason `/b/<wallet>` is walletless:
+ * a visitor browsing the directory with no wallet connected can open any promoter's history. The link is
+ * dropped rather than disabled off the chain the card serves — `useBoneyChainId` reads anvil for a wallet
+ * connected locally, and a card for the wrong deployment is worse than no link.
+ */
+function PromoterName({wallet}: {wallet: `0x${string}`}) {
+  const href = cardLink(wallet, useBoneyChainId());
+  const label = shortAddress(wallet);
+  return href ? (
+    <Link href={href} className="font-mono text-[13px] text-ink hover:underline">
+      {label}
+    </Link>
+  ) : (
+    <span className="font-mono text-[13px] text-ink">{label}</span>
   );
 }
 
