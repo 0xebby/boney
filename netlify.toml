@@ -46,3 +46,14 @@
 # Deploy previews and branch deploys run this same build. They differ only in the environment
 # variables set per-context in the Netlify UI — a preview should not necessarily point at the same
 # RPC endpoint or attestor key as production.
+
+# ATTESTOR_PRIVATE_KEY must be a wallet that `AttestationVerifier.isAttestor` returns true for on the
+# chain the deploy serves. It is not interchangeable with the other keys in the repo-root `.env`:
+# `REFERRAL_PRIVATE_KEY` and `PRIVATE_KEY` are different wallets with different roles, and neither is
+# a registered attestor. Setting one of those here produces signatures that verify and then revert
+# `NotAnAttestor` on submit, at the promoter's expense.
+#
+# `/api/attest` now checks this before signing and names the offending address, so the failure states
+# itself. On Base Sepolia the registered attestor is 0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8, the
+# same wallet as `ETHOS_PK`, and the verifier it is registered on is
+# 0xb4797645D1C323bF471C87830A391ED984647DCc.

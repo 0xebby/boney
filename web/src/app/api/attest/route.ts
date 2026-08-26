@@ -4,7 +4,8 @@ import type {NextRequest} from "next/server";
 import {buildScoreReport, EthosError, isAddress} from "@/lib/ethos";
 import {SCHEMA_ETHOS, SCHEMA_REACH, SCHEMA_FOLLOWERS} from "@/lib/boneyscore";
 import {AttestationVerifierAbi} from "@/lib/abis";
-import {getDeployment, ZERO_ADDRESS, anvil, sepolia, baseSepolia, mainnet} from "@/lib/chains";
+import {getDeployment, ZERO_ADDRESS} from "@/lib/chains";
+import {chainFor, rpcFor} from "@/lib/serverChain";
 
 /**
  * Attestor endpoint — turns an Ethos profile into signed reputation attestations.
@@ -72,10 +73,6 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
 
 const schemaIdOf = (name: string) => keccak256(stringToHex(name));
 
-/** viem chain objects by id, for the RPC transport the nonce read needs. */
-const CHAINS = [anvil, sepolia, baseSepolia, mainnet];
-const chainFor = (id: number) => CHAINS.find((c) => c.id === id);
-
 function fail(code: string, message: string, status: number) {
   return Response.json({error: code, message}, {status});
 }
@@ -106,6 +103,53 @@ export async function POST(request: NextRequest) {
     return fail("unknown_chain", `No Boney deployment for chain ${chainId}.`, 400);
   }
 
+  const account = privateKeyToAccount(key as `0x${string}`);
+  // `rpcFor` rather than a bare `http()`: viem's default for Base Sepolia is `sepolia.base.org`, which
+  // 502s roughly one call in three, and a flaked nonce read mints a signature against a stale nonce.
+  const client = createPublicClient({chain, transport: http(rpcFor(chain.id))});
+
+  /**
+   * Refuse before signing if this key is not a registered attestor on the target chain.
+   *
+   * Without this the route happily signs, `submitAttestation` reverts `NotAnAttestor`, and the promoter
+   * discovers it from a failed transaction — having paid gas to learn that the *server* is
+   * misconfigured. The revert names the attestor address and nothing else, so the actual cause (this
+   * deployment is holding the wrong key for the chain it is pointed at) has to be worked out by hand.
+   *
+   * It is a real configuration hazard rather than a hypothetical: `ATTESTOR_PRIVATE_KEY` names the
+   * *referral* wallet in the repo-root `.env` that `scripts/demo-seed.ts` reads, and the *attestor* in
+   * `web/.env.local`. Any process that picks up the first while serving this route signs with a key the
+   * verifier has never heard of, and every attestation it mints is unusable.
+   *
+   * An outage on this read fails closed. A signature that cannot be checked is worth less than an
+   * error: the alternative is minting one that consumes a nonce and then reverts, and the monotonic
+   * nonce means that gap blocks every later attestation from this attestor.
+   */
+  try {
+    const registered = (await client.readContract({
+      address: deployment.attestationVerifier,
+      abi: AttestationVerifierAbi,
+      functionName: "isAttestor",
+      args: [account.address],
+    })) as boolean;
+
+    if (!registered) {
+      return fail(
+        "attestor_unregistered",
+        `The signing key on this deployment (${account.address}) is not a registered attestor on ` +
+          `${chain.name}. Point ATTESTOR_PRIVATE_KEY at a registered attestor, or register this one.`,
+        500,
+      );
+    }
+  } catch {
+    return fail(
+      "attestor_uncheckable",
+      `Could not confirm the attestor is registered on ${chain.name}. Refusing to sign rather than ` +
+        "mint an attestation that would consume a nonce and revert.",
+      502,
+    );
+  }
+
   // Gather the off-chain facts before taking the signing lock, so a slow upstream does not block
   // other callers' nonces.
   let report;
@@ -115,9 +159,6 @@ export async function POST(request: NextRequest) {
     if (error instanceof EthosError) return fail(error.code, error.message, error.httpStatus);
     return fail("ethos_unavailable", "Could not build a score for this wallet.", 502);
   }
-
-  const account = privateKeyToAccount(key as `0x${string}`);
-  const client = createPublicClient({chain, transport: http()});
 
   const values: Array<{schema: string; value: number}> = [
     {schema: SCHEMA_ETHOS, value: report.ethos},

@@ -1,4 +1,7 @@
-import {describe, it, expect, afterEach, vi} from "vitest";
+import {describe, it, expect, afterEach, beforeEach, vi} from "vitest";
+import {mkdirSync, mkdtempSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {
   fetchEthosProfile,
   xHandleOf,
@@ -9,7 +12,9 @@ import {
   EthosError,
   type EthosProfile,
 } from "./ethos";
-import {addStubWallet, removeStubWallet, listStubWallets, isStubbedWallet} from "./stubWallets";
+import {addStubWallet, removeStubWallet, listStubWallets, isStubbedWallet} from "./stubWalletStore";
+import {DEV_STUB_WALLET} from "./stubWallets";
+import {stubFiguresFor} from "./stubProfile";
 import {reachFromFollowers} from "./boneyscore";
 
 /**
@@ -67,20 +72,31 @@ const profile = (over: Partial<EthosProfile> = {}): EthosProfile => ({
 
 const originalEnv = {
   ETHOS_API: process.env.ETHOS_API,
-  ETHOS_STUB_API: process.env.ETHOS_STUB_API,
   FXTWITTER_API: process.env.FXTWITTER_API,
-  FXTWITTER_STUB_API: process.env.FXTWITTER_STUB_API,
   VXTWITTER_API: process.env.VXTWITTER_API,
-  VXTWITTER_STUB_API: process.env.VXTWITTER_STUB_API,
   KAITO_API: process.env.KAITO_API,
-  KAITO_STUB_API: process.env.KAITO_STUB_API,
   BONEY_STUB_WALLETS: process.env.BONEY_STUB_WALLETS,
+  BONEY_STUB_STORE: process.env.BONEY_STUB_STORE,
 };
+
+/**
+ * A throwaway store path, set before anything can write.
+ *
+ * `addStubWallet` persists to `.data/stub-wallets.json` by default, and a test that materialised that
+ * file would not just litter — the file *wins* over the committed defaults, so it would silently
+ * change which wallets the dev server stubs. Every test in this file redirects the store first.
+ */
+const STORE_DIR = mkdtempSync(join(tmpdir(), "boney-stub-ethos-"));
+
+beforeEach(() => {
+  process.env.BONEY_STUB_STORE = join(STORE_DIR, "stub-wallets.json");
+  delete process.env.BONEY_STUB_WALLETS;
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  removeStubWallet(WALLET);
-  removeStubWallet(MIXED_CASE);
+  rmSync(STORE_DIR, {recursive: true, force: true});
+  mkdirSync(STORE_DIR, {recursive: true});
   for (const [key, value] of Object.entries(originalEnv)) {
     if (value === undefined) {
       delete process.env[key];
@@ -93,7 +109,6 @@ afterEach(() => {
 describe("stub wallet routing", () => {
   it("uses the live Ethos API by default for real wallets", async () => {
     process.env.ETHOS_API = "https://live-ethos.example";
-    process.env.ETHOS_STUB_API = "http://127.0.0.1:8787/ethos";
 
     const urls = stubFetch(() => ({body: profile()}));
     await fetchEthosProfile(WALLET);
@@ -102,22 +117,49 @@ describe("stub wallet routing", () => {
     expect(isStubbedWallet(WALLET)).toBe(false);
   });
 
-  it("routes allowlisted wallets to the stub and can remove them again", async () => {
+  /**
+   * The allowlisted path must not touch the network at all. Asserting "no fetch" rather than "fetched
+   * a stub URL" is the whole point of the in-process design: a loopback stub cannot be reached from a
+   * deploy, so a request escaping here would work locally and fail there.
+   */
+  it("serves an allowlisted wallet in-process, without any fetch", async () => {
     process.env.ETHOS_API = "https://live-ethos.example";
-    process.env.ETHOS_STUB_API = "http://127.0.0.1:8787/ethos";
     process.env.FXTWITTER_API = "https://live-x.example";
-    process.env.FXTWITTER_STUB_API = "http://127.0.0.1:8787/fx";
 
     addStubWallet(WALLET);
     expect(isStubbedWallet(WALLET)).toBe(true);
     expect(listStubWallets()).toContain(WALLET.toLowerCase());
 
     const urls = stubFetch(() => ({body: profile()}));
-    await fetchEthosProfile(WALLET);
-    expect(urls[0]).toContain("http://127.0.0.1:8787/ethos/api/v2/user/by/address/");
+    const report = await buildScoreReport(WALLET);
 
+    expect(urls).toEqual([]);
+
+    const figures = stubFiguresFor(WALLET);
+    expect(report.ethos).toBe(figures.score);
+    expect(report.followers).toBe(figures.followers);
+    expect(report.handle).toBe(figures.handle);
+  });
+
+  it("stops stubbing a wallet once it is removed", async () => {
+    process.env.ETHOS_API = "https://live-ethos.example";
+
+    addStubWallet(WALLET);
     removeStubWallet(WALLET);
     expect(isStubbedWallet(WALLET)).toBe(false);
+
+    const urls = stubFetch(() => ({body: profile()}));
+    await fetchEthosProfile(WALLET);
+    expect(urls[0]).toContain("https://live-ethos.example/api/v2/user/by/address/");
+  });
+
+  /**
+   * The dev wallet is unclaimed on Ethos, so a fixture that depends on it cannot be driven unless it
+   * is stubbed with no configuration at all — including on a deploy with nothing writable, where the
+   * store file never comes into existence.
+   */
+  it("stubs the dev wallet with no configuration", () => {
+    expect(isStubbedWallet(DEV_STUB_WALLET)).toBe(true);
   });
 });
 
