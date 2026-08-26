@@ -876,8 +876,8 @@ function EventSourceFields({
                 onChange={(e) => set({amountMode: e.target.value})}
                 className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
               >
-                <option value="count">Count events</option>
-                <option value="dataWord0">First data word</option>
+                <option value="count">Count — 1 per event</option>
+                <option value="dataWord0">Value — the event&rsquo;s number</option>
               </select>
             </div>
             <Field

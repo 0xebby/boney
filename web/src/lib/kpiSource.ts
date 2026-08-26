@@ -9,6 +9,7 @@ import {
 } from "viem";
 import {isAddress as isViemAddress} from "viem/utils";
 import {IERC20MetadataAbi} from "./abis";
+import {formatTokenAmount} from "./format";
 import {contractLabel, knownContractName} from "./knownContracts";
 
 /**
@@ -369,12 +370,29 @@ function classifyCountScale(input: ProbeInput): ProbeFinding | null {
     message:
       `In count mode every matching event is worth 1, so a scale of ${scale.toLocaleString("en-US")} ` +
       `means ${scale.toLocaleString("en-US")} events per unit of progress — it cannot measure size. ` +
-      "Set the scale to 1, or switch Amount to First data word to credit the event's own value.",
+      "Set the scale to 1, or switch Amount to Value to credit the event's own number.",
   };
 }
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const SIGNATURE_RE = /^[A-Za-z_]\w*\([^)]*\)$/;
+
+/**
+ * The scale field as a bigint, or undefined when it is not one yet.
+ *
+ * A half-typed number is a normal state of a form, and the form's own "Enter a whole number." already
+ * reports the malformed case — so anything unparseable here means "no scale to apply", which
+ * `dataWordFindings` reads as 1, matching `effectiveScale`.
+ */
+function parseScaleField(raw: string | undefined): bigint | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  try {
+    return BigInt(trimmed);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * The reads a probe makes. Narrowed from `PublicClient` so a test can pass a stub.
@@ -503,6 +521,16 @@ async function probeChain(
     // skip every log (`indexerCore.ts:actorFromTopic` returns null). Worth naming here because the
     // sample log is the only place the real topic count is visible before launch.
     findings.push(...actorTopicFindings(sample.topics.length));
+
+    // And the only place the real *data* layout is, which is what `Value` mode depends on.
+    findings.push(
+      ...dataWordFindings({
+        data: sample.data,
+        amountMode: input.amountMode,
+        scale: parseScaleField(input.scale),
+      }),
+    );
+
     findings.push(...identity);
 
     return findings;
@@ -600,4 +628,99 @@ export function actorTopicFindings(topicCount: number, actorTopic?: number): Pro
   }
 
   return [];
+}
+
+/**
+ * What `Value` mode would actually read out of a sampled log.
+ *
+ * The form's hardest field to reason about, because the label names a *choice* — count the events or
+ * take their value — while the implementation takes the first 32-byte word of `log.data`
+ * (`indexerCore.rawAmount`). Those coincide only when the event's first unindexed parameter happens to
+ * be the number the project meant. `log.data` holds the unindexed parameters in declaration order, so
+ * for `Trade(address indexed user, address token, uint256 amount)` word 0 is `token` — an address, read
+ * as an integer around 1e48.
+ *
+ * Nothing else in the form can catch that. The signature field asks for **types only, no names**
+ * (`validation.ts`), so no `indexed` keyword is available to work out which parameters reach `data` at
+ * all; a sampled log is the only source of truth the create page has. Hence this reads the real word
+ * from a real event and states the number, rather than explaining the layout.
+ *
+ * Worth the three findings because the blast radius is asymmetric. A gated KPI survives a misread word:
+ * `min(claim, observed)` clamps it to Boney's own total, and the relayer decodes properly through
+ * `valueParamIndex` with `validateParamIndexes` refusing a non-uint. A KPI with `verifier == address(0)`
+ * has no such clamp — `Campaign.reportUserAction` credits `newTotal` as given — so one event crosses
+ * every tier on the ladder. And `KpiSpec.params` has no setter, so it can only be caught before deploy.
+ *
+ * Silent in `count` mode and when the mode is unknown: there is no word to read, and every caller that
+ * predates the field omits it.
+ */
+export function dataWordFindings(input: {
+  /** `log.data` of a log that matched the configured topic. */
+  data: Hex;
+  amountMode: AmountMode | undefined;
+  /** The configured scale, for the credited figure. Zero and undefined both mean 1. */
+  scale?: bigint;
+}): ProbeFinding[] {
+  if (input.amountMode !== AMOUNT_MODE.dataWord0) return [];
+
+  // "0x" plus one 32-byte word, the same floor `rawAmount` applies before it will read anything.
+  if (input.data.length < 66) {
+    return [
+      {
+        severity: "error",
+        message:
+          "Value mode has nothing to read: that log carries no unindexed data, so every parameter " +
+          "is in a topic. Switch Amount to Count.",
+      },
+    ];
+  }
+
+  let word: bigint;
+  try {
+    word = BigInt(input.data.slice(0, 66));
+  } catch {
+    return [];
+  }
+
+  if (isAddressShaped(word)) {
+    return [
+      {
+        severity: "warn",
+        message:
+          `Value mode would read 0x${input.data.slice(26, 66)} from that log — an address, not an ` +
+          `amount. This event's first unindexed parameter is probably not the number you want; as ` +
+          `written each event credits ${word.toLocaleString("en-US")}.`,
+      },
+    ];
+  }
+
+  const scale = !input.scale || input.scale === BigInt(0) ? BigInt(1) : input.scale;
+  const credited = word / scale;
+
+  return [
+    {
+      severity: "ok",
+      message:
+        `Value mode reads ${word.toLocaleString("en-US")} from that log — ` +
+        `${formatTokenAmount(word, 18, {maxFractionDigits: 18})} if it is an 18-decimal token ` +
+        `amount, and ${credited.toLocaleString("en-US")} unit${credited === BigInt(1) ? "" : "s"} ` +
+        `of progress at this scale.`,
+    },
+  ];
+}
+
+/**
+ * Whether a 32-byte word looks like a zero-padded address rather than a number.
+ *
+ * An address fills the low 20 bytes and nothing above them, so the test is: top 12 bytes clear
+ * (`word < 2**160`) and the 20-byte region's own high byte set (`word >= 2**152`). A small amount fails
+ * the second half — `1000 wei` leaves 30 bytes clear, not 12 — which is what keeps this off every
+ * ordinary deposit.
+ *
+ * It is a heuristic, and deliberately a `warn`: amounts in `[2**152, 2**160)` are expressible, roughly
+ * 5.7e27 tokens upward at 18 decimals. Absurd for a real token, not impossible, so the message states
+ * what was read and lets the project decide.
+ */
+function isAddressShaped(word: bigint): boolean {
+  return word >= BigInt(2) ** BigInt(152) && word < BigInt(2) ** BigInt(160);
 }

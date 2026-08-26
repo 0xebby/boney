@@ -3,6 +3,7 @@ import {Bagel_Fat_One, Space_Grotesk} from "next/font/google";
 import "./globals.css";
 import {Providers} from "@/components/Providers";
 import {AppShell} from "@/components/AppShell";
+import {siteUrl} from "@/lib/site";
 
 /**
  * Two faces, each with a job.
@@ -45,8 +46,13 @@ const spaceGrotesk = Space_Grotesk({
  * Metadata from nested segments is merged SHALLOWLY and duplicate keys are replaced, so a page
  * that exports its own `other` drops this tag for that route and has to repeat it. No page does
  * today. See `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/generate-metadata.md`.
+ *
+ * `metadataBase` is what makes the shared BoneyCard work. `/b/<wallet>` sets `openGraph.url` from
+ * `cardPath`, and a relative metadata URL with no base is a build error — while an *inferred* base is
+ * `http://localhost:3000`, which no crawler can fetch the share image from. See `lib/site.ts`.
  */
 export const metadata: Metadata = {
+  metadataBase: siteUrl(),
   title: "Boneyard",
   description: "Campaigns with rewards held in escrow and released as milestones are verified.",
   other: {"base:app_id": "695996314d3a403912ed8c02"},

@@ -16,7 +16,13 @@ describe("navItems", () => {
 
   /** My Campaigns sits beside the marketplace it filters, not appended at the end. */
   it("splices My Campaigns in after Campaigns once a wallet is connected", () => {
-    expect(labelsFor(true, false)).toEqual(["Campaigns", "My Campaigns", "Discover", "Docs"]);
+    expect(labelsFor(true, false)).toEqual([
+      "Campaigns",
+      "My Campaigns",
+      "Discover",
+      "BoneyCard",
+      "Docs",
+    ]);
   });
 
   it("splices Promoters in after Discover for a wallet that holds a membership", () => {
@@ -24,6 +30,7 @@ describe("navItems", () => {
       "Campaigns",
       "My Campaigns",
       "Discover",
+      "BoneyCard",
       "Promoters",
       "Docs",
     ]);
@@ -35,6 +42,19 @@ describe("navItems", () => {
    */
   it("handles promoter-without-connected, which the two async reads can produce", () => {
     expect(labelsFor(false, true)).toEqual(["Campaigns", "Discover", "Promoters", "Docs"]);
+  });
+
+  /**
+   * The card is the one personal entry that is worth opening with no history at all — a wallet that
+   * has never joined anything still has a score, a rank and a list of campaigns it qualifies for. So
+   * it follows the connection rather than `useIsPromoter`, and appears before Promoters does.
+   */
+  it("shows BoneyCard on the connection alone, ahead of Promoters", () => {
+    expect(labelsFor(true, false)).toContain("BoneyCard");
+    expect(labelsFor(false, false)).not.toContain("BoneyCard");
+
+    const withBoth = labelsFor(true, true);
+    expect(withBoth.indexOf("BoneyCard")).toBeLessThan(withBoth.indexOf("Promoters"));
   });
 
   it("keeps Docs last in every combination", () => {
