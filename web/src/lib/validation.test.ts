@@ -329,6 +329,35 @@ describe("validateCampaignDraft", () => {
     expect(paths(d)).toEqual([]);
   });
 
+  // ── no Solidity counterpart: the contract accepts this and it can never pay ──
+  it("rejects reward tiers on an aggregate KPI", () => {
+    // `reportUserAction` reverts `AggregateKpi` before attribution, and `applyAggregateUpdate` moves
+    // only `_totalProgress`, so no promoter can ever hold progress on one and no threshold can be
+    // crossed. Campaign 8 "Gyndore" escrowed 350,000 bUSD against a 27,000 bUSD ladder shaped exactly
+    // like this and was ended three hours later having paid nothing.
+    const d = draft();
+    d.kpis[0].aggregate = true;
+    expect(paths(d)).toContain("kpis.0.tiers");
+  });
+
+  it("says how to fix it, both ways", () => {
+    const d = draft();
+    d.kpis[0].aggregate = true;
+    const issue = validateCampaignDraft(d, {tokenDecimals: 18, nowSeconds: NOW}).find(
+      (i) => i.path === "kpis.0.tiers",
+    );
+    // Either edit resolves it, and which one is right depends on what the project meant — an analytics
+    // KPI, or a paying one. The message must not pick for them.
+    expect(issue?.message).toContain("Remove the tiers");
+    expect(issue?.message).toContain("untick aggregate");
+  });
+
+  it("flags the aggregate KPI that has tiers, not its siblings", () => {
+    const d = draft();
+    d.kpis = [d.kpis[0], {...d.kpis[0], aggregate: true, kind: "Tvl"}];
+    expect(paths(d)).toEqual(["kpis.1.tiers"]);
+  });
+
   // ── mirrors Solidity: TooManyTiers ──
   it("rejects more tiers than the contract cap", () => {
     const d = draft();
