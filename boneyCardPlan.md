@@ -570,24 +570,71 @@ two registries and two bUSD tokens exist today) · on-chain / NFT bone.
 
 ---
 
-## The stage-2 blocker
+## The stage-2 blocker — cleared
 
-**Stage 1 is demoable today. Stage 2 is not, because there is not enough history.** Base Sepolia has
+**Stage 1 was demoable; stage 2 was not, because there was not enough history.** Base Sepolia had
 9 campaigns, mostly light activity, one project address behind all of them, and Gyndore at zero. The
-history half of a card built today shows one or two campaigns, a handful of credits, one project —
+history half of a card built then showed one or two campaigns, a handful of credits, one project —
 level 1, no milestones past the first, no specialization badges.
 
 This is why the ordering above matters: P0–P2 have a real first-run experience with the chain exactly
-as it is, and nothing about stage 1 waits on this. But before P4 is worth building a UI around:
+as it is, and nothing about stage 1 waited on this. But before P4 was worth building a UI around:
 
-- [ ] `script/SeedHistory.s.sol` — several projects × campaigns × promoters with **deliberately
+- [x] `script/SeedHistory.s.sol` — several projects × campaigns × promoters with **deliberately
       varied** outcomes: one over-delivering across protocol types, one that joined and never
       delivered, one campaign ended early, one pool exhausted, one aggregate KPI, one promoter with a
       long dated milestone trail. Existing seeds to build from: `SeedFive.s.sol`, `SeedDemo.s.sol`,
       `web/scripts/demo-seed.ts`, `script/promoter.sh`.
+      *Five campaigns, two projects, three promoters, 45 transactions. **Append-only, unlike every
+      other seed here** — `SeedFive` and `SeedDemo` assert `campaignCount() == 0` because they define
+      a whole fixture, whereas this script's subject is what a *wallet* accumulates and the nine
+      campaigns that already exist are part of that history. So it asserts every name is free instead,
+      up front, and a second run refuses cleanly rather than reverting `NameTaken` partway through
+      after funding.*
 
-That single script is the demo, the fixture set for P4, and the only way to find out whether the
-progression actually feels good before the UI is built around it.
+      *Two things had to be deliberate for the numbers to be a fixture at all. Every KPI has
+      `verifier == address(0)`, so `reportUserAction` credits exactly what is reported and each
+      promoter's totals are **chosen rather than discovered** — a fixture whose numbers depend on
+      third-party contract activity is not a fixture. And every KPI has empty `params`, so `kpiSource`
+      reads them as not event-sourced and the running relay ignores them; without that the loop would
+      keep reporting its own view of these KPIs and overwrite the shapes below. Settlement needs no
+      call, since `_settle` runs inline at the end of `reportUserAction`.*
+
+      *The first broadcast died four transactions in, and the cause is worth writing down: the relay
+      loop sends from `PRIVATE_KEY` too, so forge and the relayer picked the same nonce and the node
+      rejected the second as an underpriced replacement. Stop the relay before broadcasting. Every
+      transfer in `_fund` is guarded on the recipient's balance, which is what made the retry free.*
+
+**What it produced, read back through the real path** (`web/scripts/__check-history.ts`, extended here
+to cover the two new promoters):
+
+- **The dev wallet's card moved on every axis the history half counts**: 9 → 12 campaigns, 31 → 43
+  tiers, 25 → 32 actions, 114.6K → 126.7K bUSD, and **projects 1 → 2**, which was the point. All seven
+  milestones now earned and correctly dated oldest-first.
+- **The exhausted pool does not make the arithmetic disagree.** `sh dryrun` puts three 400 rungs
+  against a 900 pool, so the third can only pay 100 and `remainingPool()` reads 0. Earnings rose by
+  exactly 12,100 = 8,400 (alpha) + 900 (dryrun) + 2,800 (bravo) — the ladder asked for 1,200 there and
+  the card counts three tiers crossed against 900 paid, which is the case P4 needed and could not
+  previously construct.
+- **The low end of the ladder was the untested half.** Every wallet on this deployment was either the
+  dev wallet at level 5 or a one-campaign wallet, so levels 1–2 had no live instance. Promoter 3 is now
+  level 1 — one campaign, ended under them, zero delivered — and promoter 2 is level 2, joined 2 and
+  delivered on 1 for 600 bUSD, with `sh telemetry` rendering "No credited actions yet". The top rung is
+  still uncalibrated against anything above it, because the dev wallet was already at 5 before this ran.
+- **`endedEarly` is invisible to the probe, and that is the design rather than a gap.** It needs an
+  on-chain `endTime` via `views`, which only the connected `/card` path supplies — `cardServer.ts:46`
+  already records why the public card claims nothing there. `sh cutshort` is Ended with an `endTime` 30
+  days out, so the precondition is confirmed on chain and the comparison itself is asserted at
+  `boneycard.test.ts:683`.
+
+That single script was the demo, the fixture set for P4, and the only way to find out whether the
+progression actually feels good before the UI was built around it. On the answer: it does at the
+bottom, where a wallet's first campaign and first paid tier are visible steps. But **levels 3 and 4
+still have no live instance.** The five wallets that exist now land on 1, 2, 2 and 5 — the dev wallet
+clears rung 5 by 11 delivered and 43 tiers against a 8/30 requirement, so it does not sit near a
+boundary either. The middle of the ladder is asserted by `boneycard.test.ts`'s grid and by nothing
+anyone has looked at. A wallet seeded to 3 delivered / 5 tiers is the fixture still missing, and it is
+cheap to add now that the script is append-only.
 
 ---
 

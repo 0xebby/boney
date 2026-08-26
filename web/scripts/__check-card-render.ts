@@ -61,7 +61,7 @@ async function render(label: string, wallet: string) {
 }
 
 async function main() {
-  await render("dev wallet — 9 campaigns", DEV_WALLET);
+  await render("dev wallet — every campaign", DEV_WALLET);
   await render("never joined anything", NEVER_JOINED);
 
   // The two states that must not render as zeros.
