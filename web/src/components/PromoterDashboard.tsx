@@ -218,15 +218,31 @@ export function PromoterDashboard() {
  */
 function Header({connected = true}: {connected?: boolean}) {
   return (
-    <header>
-      <h1 className="font-display text-2xl text-ink">
-        {connected ? "Promoter dashboard" : "Promoters"}
-      </h1>
-      <p className="mt-0.5 text-xs text-ink-muted">
-        {connected
-          ? "Campaigns you joined. Open one to see progress, what it has paid you, and your tracking link."
-          : "Promoters active on each campaign, and the links they share. Connect a wallet to join and get your own."}
-      </p>
+    <header className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="font-display text-2xl text-ink">
+          {connected ? "Promoter dashboard" : "Promoters"}
+        </h1>
+        <p className="mt-0.5 text-xs text-ink-muted">
+          {connected
+            ? "Campaigns you joined. Open one to see progress, what it has paid you, and your tracking link."
+            : "Promoters active on each campaign, and the links they share. Connect a wallet to join and get your own."}
+        </p>
+      </div>
+
+      {/*
+        This page is per-campaign; the card is the cumulative view of the same memberships — level,
+        tiers crossed, referrals, milestones. Offered only to a connected wallet because that is what
+        `/card` needs to have anything of its own to show, and it matches how the nav gates the entry.
+      */}
+      {connected ? (
+        <Link
+          className="shrink-0 rounded border border-hairline px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-surface-hover"
+          href="/card"
+        >
+          Your BoneyCard →
+        </Link>
+      ) : null}
     </header>
   );
 }
