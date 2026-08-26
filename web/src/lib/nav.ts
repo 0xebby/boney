@@ -27,22 +27,27 @@ const PUBLIC_NAV = [
 ] as const;
 
 const MY_CAMPAIGNS = {href: "/my", label: "My Campaigns", icon: "◈"} as const;
+const BONEYCARD = {href: "/card", label: "BoneyCard", icon: "⬡"} as const;
 const PROMOTERS = {href: "/promoters", label: "Promoters", icon: "◎"} as const;
 
 /**
  * The nav in display order, with the personal entries spliced into the positions they occupy when
- * present — "My Campaigns" beside the marketplace it filters, "Promoters" beside Discover, and Docs
- * last either way. Building the list rather than rendering conditionals inline keeps that ordering
- * in one place instead of spread across two components' JSX.
+ * present — "My Campaigns" beside the marketplace it filters, "BoneyCard" and "Promoters" beside
+ * Discover, and Docs last either way. Building the list rather than rendering conditionals inline
+ * keeps that ordering in one place instead of spread across two components' JSX.
  *
- * Two entries are personal rather than public, and appear only once they have something to show. A
+ * Three entries are personal rather than public, and appear only once they have something to show. A
  * tab that can only ever render "nothing here" is a dead end that costs a navigation to discover:
  *
  *  - **My Campaigns** needs a wallet to know whose campaigns to filter to.
+ *  - **BoneyCard** needs one to have a score and a qualification list to compute. It is the only
+ *    personal entry that is useful with *no* history at all — that is the whole point of it — so it
+ *    is gated on the connection and nothing more, and it sits before Promoters because it is what a
+ *    wallet sees before it has ever joined anything.
  *  - **Promoters** is a dashboard of memberships and tracking links, so it waits until the wallet
  *    actually holds one — see `useIsPromoter`.
  *
- * Both start hidden during the server render and the first client render, which is what keeps
+ * All three start hidden during the server render and the first client render, which is what keeps
  * hydration consistent: wagmi rehydrates its connection inside an effect, so there is no wallet to
  * read at markup time on either side. They appear a moment later rather than flashing wrong.
  */
@@ -58,6 +63,7 @@ export function navItems({
     campaigns,
     ...(isConnected ? [MY_CAMPAIGNS] : []),
     discover,
+    ...(isConnected ? [BONEYCARD] : []),
     ...(isPromoter ? [PROMOTERS] : []),
     docs,
   ];
