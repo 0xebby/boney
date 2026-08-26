@@ -12,8 +12,10 @@ import {fetchPromoterHistory} from "../src/lib/boneyHistory";
 import {foldHistory} from "../src/lib/boneycard";
 
 const WALLETS = [
-  "0x98405c5776a63547e7cb16000ba04ca53d9fb2f8", // dev wallet, all 9 campaigns
+  "0x98405c5776a63547e7cb16000ba04ca53d9fb2f8", // dev wallet, every campaign; the full milestone trail
   "0x0198fa30b0458b4775b8ba98a9a97dc243eaad22", // second promoter, lynx only
+  "0xf95012a967c39b2f54d01a5fe593cf4da3d84db5", // SeedHistory promoter 2: delivered on 1 of 2 joins
+  "0xe0ef0f2806019e86b1736d1e415ebc5b35bfaacf", // SeedHistory promoter 3: one campaign, ended under them
   "0x000000000000000000000000000000000000dEaD", // never joined anything
 ];
 
