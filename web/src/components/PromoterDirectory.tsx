@@ -90,7 +90,7 @@ export function PromoterDirectory({
       </StatRow>
 
       {/*
-        A partial scan must announce itself. Rendering a clipped directory as if it were the whole
+        A partial read must announce itself. Rendering a clipped directory as if it were the whole
         thing would tell a visitor "three promoters" when the real answer is "three, plus however
         many joined before the window we could afford to read".
       */}
@@ -98,6 +98,13 @@ export function PromoterDirectory({
         <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
           Showing joins from block {directory.scannedFrom.toString()} onward. Earlier memberships
           are not listed — this chain&rsquo;s history is longer than one scan can cover.
+        </p>
+      ) : null}
+
+      {directory.truncated ? (
+        <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
+          More memberships exist than one read returns, so the counts below are a floor rather than
+          the whole directory.
         </p>
       ) : null}
 

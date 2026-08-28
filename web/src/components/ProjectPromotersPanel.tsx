@@ -134,6 +134,7 @@ export function ProjectPromotersPanel({
 
       <ScanNotes
         scannedFrom={directory.scannedFrom ?? settlements.scannedFrom}
+        truncated={directory.truncated}
         unaccounted={unaccounted}
         orphans={orphans}
         decimals={token.decimals}
@@ -240,27 +241,32 @@ function buildColumns(
 }
 
 /**
- * What the scan could not see.
+ * What the read could not see.
  *
- * Three separate admissions rather than one, because they have different fixes: a floor means look
- * further back, a shortfall means the total below is not the campaign's total, and an orphan payout
- * means a promoter row is missing entirely. Renders nothing when the scan was complete, which is the
- * normal case on a fixture younger than the window budget.
+ * Four separate admissions rather than one, because they have different fixes: a floor means look
+ * further back, a truncated list means some members were never returned, a shortfall means the total
+ * below is not the campaign's total, and an orphan payout means a promoter row is missing entirely.
+ * Renders nothing when the read was complete, which is the normal case on a fixture younger than the
+ * window budget.
  */
 function ScanNotes({
   scannedFrom,
+  truncated,
   unaccounted,
   orphans,
   decimals,
   symbol,
 }: {
   scannedFrom?: bigint;
+  truncated: boolean;
   unaccounted: bigint;
   orphans: number;
   decimals: number;
   symbol: string;
 }) {
-  if (scannedFrom === undefined && unaccounted === BigInt(0) && orphans === 0) return null;
+  if (scannedFrom === undefined && !truncated && unaccounted === BigInt(0) && orphans === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-1 text-xs">
@@ -268,6 +274,13 @@ function ScanNotes({
         <p className="text-ink-muted">
           History was scanned from block {scannedFrom.toLocaleString("en-US")} only — joins and
           payouts before that block are not in this table.
+        </p>
+      ) : null}
+
+      {truncated ? (
+        <p className="text-ink-muted">
+          More promoters joined than one read returns, so some memberships are missing from the rows
+          above.
         </p>
       ) : null}
 

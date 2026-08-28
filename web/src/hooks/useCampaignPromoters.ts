@@ -5,6 +5,8 @@ import {usePublicClient} from "wagmi";
 import {type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
+import {subgraphUrl} from "@/lib/graph";
+import {fetchPromotersFromGraph, promoterEntries} from "@/lib/promoterGraph";
 import {
   planWindows,
   dedupePromoters,
@@ -21,47 +23,75 @@ export type PromoterDirectory = {
    * Set when the chain's history was too long to scan within the query budget. Promoters who
    * joined before this block are missing from `groups`, and the UI must say so — a directory
    * that is quietly partial is worse than one that admits its floor.
+   *
+   * Never set on the subgraph path, which has no block floor.
    */
   scannedFrom?: bigint;
+  /**
+   * Set when the subgraph path hit its page cap. `groups` is then a floor rather than the whole
+   * membership, and the UI must say so.
+   *
+   * Never set on the log path, whose partiality is `scannedFrom`.
+   */
+  truncated: boolean;
 };
 
 /**
  * Every promoter who has joined any of `campaigns`, for the public promoter directory.
  *
- * This reads logs rather than contract state because there is nothing else to read. A `Campaign`
- * records membership as `_promoterIdOf[wallet]` and exposes only point lookups — `promoterIdOf`,
- * `promoterOf` — so the chain can answer "is this wallet a promoter?" but not "who are the
- * promoters?". `PromoterJoined` is the only enumerable trace of a join.
+ * A `Campaign` records membership as `_promoterIdOf[wallet]` and exposes only point lookups —
+ * `promoterIdOf`, `promoterOf` — so the chain can answer "is this wallet a promoter?" but not "who
+ * are the promoters?". `PromoterJoined` is the only enumerable trace of a join, so the directory is
+ * reconstructed from it, by one of two sources.
  *
- * Three consequences worth knowing:
+ * **The subgraph is tried first, and is the only source without a block floor.** It indexes
+ * `PromoterJoined` from the campaign's first block, and reports `truncated` when a membership list
+ * runs past its page cap. The log scan below covers `MAX_WINDOWS * MAX_LOG_RANGE` blocks clamped to
+ * the newest span — about 45,600 blocks, which on Base Sepolia's 2s blocks is roughly a day. On a
+ * chain older than that, a promoter who joined earlier is absent from the log directory while every
+ * point lookup still finds them: their tracking link works, `PromoterPanel` shows their membership,
+ * and only this list omits them.
  *
- *  - **One query covers all campaigns.** `getLogs` takes an address array, so the scan is
- *    windowed by block range, not multiplied by campaign count. Adding campaigns costs nothing.
- *  - **Windows are capped at ~2000 blocks** because public RPCs reject wider ranges (Base returns
- *    `-32602: query exceeds max block range 2000`), and the whole scan is capped at a fixed number
- *    of windows so a nice-to-have directory cannot hammer a rate-limited endpoint. See
- *    `planWindows`.
- *  - **The floor is the deployment block**, recorded in `deployments.ts` from the broadcast
- *    receipt. Scanning from genesis on an L2 would be tens of thousands of requests.
+ * The log path therefore stays as a fallback for chains the subgraph does not cover, and reports its
+ * floor through `scannedFrom` rather than presenting a partial list as complete.
  *
- * Failure is per-window and non-fatal: a rate-limited window is skipped and the rest still
- * render, because a directory missing one block range is far more useful than an error page.
+ * Log failure is per-window and non-fatal: a rate-limited window is skipped and the rest still
+ * render, because a directory missing one block range is more useful than an error page.
  */
 export function useCampaignPromoters(campaigns: readonly CampaignView[]) {
   const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
   const deployment = getDeployment(chainId);
+  const graphUrl = subgraphUrl(chainId);
 
   const query = useQuery({
     queryKey: ["campaignPromoters", chainId, campaigns.map((c) => c.campaign).join(",")],
     enabled: Boolean(client) && isDeployed(chainId) && campaigns.length > 0,
-    // Joins are infrequent and this is the most expensive read in the app; a minute of staleness
-    // is a fair trade against re-scanning on every mount.
+    // Joins are infrequent and the log fallback is the most expensive read in the app; a minute of
+    // staleness is a fair trade against re-scanning on every mount.
     staleTime: 60_000,
-    queryFn: async (): Promise<PromoterDirectory> => {
-      if (!client || campaigns.length === 0) return {groups: []};
+    queryFn: async ({signal}): Promise<PromoterDirectory> => {
+      if (!client || campaigns.length === 0) return {groups: [], truncated: false};
 
       const addresses = campaigns.map((c) => c.campaign);
+
+      if (graphUrl) {
+        const result = await fetchPromotersFromGraph({
+          url: graphUrl,
+          campaigns: addresses,
+          signal,
+        });
+        // Only an `ok` result replaces the log scan. An unavailable subgraph must fall through
+        // rather than render as an empty directory.
+        if (result.kind === "ok") {
+          const entries = promoterEntries(result.data);
+          return {
+            groups: groupByCampaign(campaigns, dedupePromoters(entries)),
+            truncated: result.data.truncated,
+          };
+        }
+      }
+
       const head = await (client as PublicClient).getBlockNumber({cacheTime: 0});
       const {windows, skippedBefore} = planWindows(deployment?.startBlock ?? BigInt(0), head);
 
@@ -94,13 +124,16 @@ export function useCampaignPromoters(campaigns: readonly CampaignView[]) {
       }
 
       const groups = groupByCampaign(campaigns, dedupePromoters(entries));
-      return skippedBefore === undefined ? {groups} : {groups, scannedFrom: skippedBefore};
+      return skippedBefore === undefined
+        ? {groups, truncated: false}
+        : {groups, scannedFrom: skippedBefore, truncated: false};
     },
   });
 
   return {
     groups: query.data?.groups ?? [],
     scannedFrom: query.data?.scannedFrom,
+    truncated: query.data?.truncated ?? false,
     isLoading: query.isLoading,
     isRefreshing: query.isFetching && !query.isLoading,
     error: query.error,
