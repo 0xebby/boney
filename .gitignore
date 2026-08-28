@@ -7,9 +7,12 @@ out/
 /broadcast/*/31337/
 /broadcast/**/dry-run/
 
-# Docs. `docs/` is `forge doc` output — regenerable from the sources it documents, like out/ above,
+# Docs. `/docs/` is `forge doc` output — regenerable from the sources it documents, like out/ above,
 # and 4 MB of it. The prose a reader needs is in README.md and boneyMd/.
-docs/
+#
+# Anchored with a leading slash: unanchored, `docs/` matches a directory of that name at ANY depth,
+# which silently swept up `web/src/app/docs/` (the /docs route) and `.claude/docs/`. Both are source.
+/docs/
 BoneyDocs.md
 todo.md
 todo-frontend.md
