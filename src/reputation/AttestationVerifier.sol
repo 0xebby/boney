@@ -9,17 +9,13 @@ import {IAttestationVerifier} from "../interfaces/IAttestationVerifier.sol";
 /// @title AttestationVerifier
 /// @notice Verifies k-of-n threshold attestations about a wallet, signed off-chain by a
 ///         registered attestor set.
-/// @dev Roadmap phase 1 runs with a single attestor (`threshold = 1`); phase 2 raises the
-///      threshold and adds attestors, with no redeploy required.
+/// @dev Deploys with a single attestor and `threshold = 1`; the threshold and attestor set are
+///      adjustable with no redeploy.
 ///
-///      Security properties:
-///      - EIP-712 domain binding (chain id + this contract) prevents cross-chain and
-///        cross-deployment replay. OZ's `EIP712` recomputes the separator after a fork.
-///      - Sequential per-attestor nonces make each signature single-use.
-///      - Distinct-signer enforcement stops one attestor satisfying a k>1 threshold by
-///        submitting several signatures with consecutive nonces.
-///      - `ECDSA.tryRecover` rejects malleable (high-s) signatures and never returns
-///        `address(0)` as a valid signer.
+///      Enforced properties: EIP-712 domain binding against chain id and this contract; sequential
+///      per-attestor nonces, so each signature is single-use; distinct signers, so one attestor
+///      cannot satisfy a k>1 threshold alone; and `ECDSA.tryRecover`, which rejects malleable
+///      signatures and never returns `address(0)` as a valid signer.
 contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
     /// @notice EIP-712 type hash for `Attestation`. Exposed so signers can build the digest
     ///         off-chain without duplicating the struct definition.
@@ -43,8 +39,7 @@ contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
     mapping(address => uint256) public nonces;
 
     /// @notice Deploys the verifier with a single attestor and a threshold of one.
-    /// @dev Starting at `threshold = 1` is the phase-1 configuration; the admin raises it with
-    ///      `setThreshold` after adding attestors, with no redeploy.
+    /// @dev The admin raises the threshold with `setThreshold` after adding attestors.
     /// @param admin Address that may manage the attestor set and the threshold.
     /// @param initialAttestor The first attestor, active immediately.
     constructor(address admin, address initialAttestor) EIP712("Boney Attestations", "1") Ownable(admin) {
@@ -67,7 +62,7 @@ contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
             emit AttestorAdded(attestor);
         } else {
             uint256 newCount = attestorCount - 1;
-            // Never let the set shrink below the threshold: that would brick verification.
+            // The set must not shrink below the threshold.
             if (newCount < threshold) revert InvalidThreshold(threshold, newCount);
             attestorCount = newCount;
             emit AttestorRemoved(attestor);
@@ -102,7 +97,7 @@ contract AttestationVerifier is IAttestationVerifier, EIP712, Ownable {
         for (uint256 i; i < n; ++i) {
             Attestation calldata a = attestations[i];
 
-            // The signed payload must be about exactly what the caller claims.
+            // The signed payload must match what the caller claims.
             if (a.subject != subject || a.schemaId != schemaId || a.value != value) {
                 revert AttestationMismatch(i);
             }

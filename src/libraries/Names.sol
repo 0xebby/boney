@@ -3,14 +3,9 @@ pragma solidity ^0.8.30;
 
 /// @title Names
 /// @notice Validation and normalization for human-readable campaign names.
-/// @dev Split out as a pure library so the rules are unit-testable on their own, and so `Campaign`
-///      (which validates) and `CampaignRegistry` (which enforces uniqueness) cannot drift into two
-///      different definitions of what a name is.
-///
-///      **Why normalize at all.** Uniqueness on raw bytes is trivially defeated by accident:
-///      "Aave", "aave" and "Aave " are three distinct byte strings that read as the same name to a
-///      person, so a raw-bytes index would let three campaigns claim what looks like one identity.
-
+/// @dev A pure library, so `Campaign` (which validates) and `CampaignRegistry` (which enforces
+///      uniqueness) share one definition of what a name is. Normalization folds case and collapses
+///      whitespace, so "Aave", "aave" and "Aave " are one name rather than three.
 library Names {
     /// @dev Raised when a name is empty, or is nothing but spaces (which normalizes to empty).
     error EmptyName();
@@ -32,8 +27,7 @@ library Names {
         bool hasVisible;
         for (uint256 i; i < raw.length; ++i) {
             uint8 c = uint8(raw[i]);
-            // 0x20 (space) through 0x7E (~). Excludes control characters, DEL, and every byte with
-            // the high bit set — which is all of UTF-8's multi-byte space.
+            // 0x20 (space) through 0x7E (~): excludes control characters, DEL, and all multi-byte UTF-8.
             if (c < 0x20 || c > 0x7E) revert InvalidNameChar(i, raw[i]);
             if (c != 0x20) hasVisible = true;
         }
@@ -42,8 +36,7 @@ library Names {
     }
 
     /// @notice The uniqueness key for `name`: trimmed, inner spaces collapsed, lowercased, hashed.
-    /// @dev Validates first, so an invalid name can never claim a key. Returns a hash rather than
-    ///      the normalized string because the registry indexes on it and `bytes32` is one slot.
+    /// @dev Validates first, so an invalid name can never claim a key.
     /// @param name The raw name as supplied by the creator.
     /// @return The keccak256 hash of the normalized form.
     function key(string memory name) internal pure returns (bytes32) {
@@ -52,11 +45,8 @@ library Names {
     }
 
     /// @notice The normalized form of `name`, as bytes.
-    /// @dev Exposed alongside `key` so tests can assert on the normalization itself rather than
-    ///      only on hash equality — a hash tells you two names collide but not what they became.
-    ///
-    ///      Assumes `validate` has passed (or does not care): it treats any byte other than 0x20 as
-    ///      a visible character, and only folds A-Z. Callers wanting the guarantee use `key`.
+    /// @dev Does not validate: treats any byte other than 0x20 as visible, and folds only A-Z.
+    ///      Callers wanting the validation guarantee use `key`.
     /// @param name The raw name.
     /// @return out The trimmed, space-collapsed, lowercased bytes.
     function normalize(string memory name) internal pure returns (bytes memory out) {
@@ -67,8 +57,7 @@ library Names {
         while (start < end && raw[start] == 0x20) ++start;
         while (end > start && raw[end - 1] == 0x20) --end;
 
-        // Sized to the trimmed span, then shortened in place: collapsing runs of spaces can only
-        // make the result smaller, and assembly-truncating one buffer avoids a second pass to count.
+        // Sized to the trimmed span, then shortened in place; collapsing spaces only shrinks it.
         out = new bytes(end - start);
         uint256 n;
         bool previousWasSpace;

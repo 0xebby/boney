@@ -57,9 +57,7 @@ interface IEscrowVault {
     function setRegistrar(address registrar) external;
 
     /// @notice Pull `amount` of the campaign's token from the caller into escrow.
-    /// @dev Pulls from `msg.sender` only. An arbitrary `from` parameter would let anyone move
-    ///      tokens out of any address that had approved this vault and into a campaign of their
-    ///      choosing — where they would control the reclaim.
+    /// @dev Pulls from `msg.sender` only; there is no `from` parameter.
     /// @param campaign The campaign to credit.
     /// @param amount Amount to pull. The balance credited is the amount actually received, which
     ///        may be less for a fee-on-transfer token.

@@ -5,10 +5,8 @@ import {IKpiVerifier} from "./IKpiVerifier.sol";
 
 /// @title IEventMetricKpiVerifier
 /// @notice Declaration surface for `EventMetricKpiVerifier`.
-/// @dev `Aggregation` is declared here rather than in the implementation because `KpiConfigured`
-///      carries it: an event's parameter types are part of the declaration, so the enum has to live
-///      wherever the event does. `KpiConfig` stays with the implementation — it is storage layout
-///      rather than declared surface, and nothing here references it.
+/// @dev `Aggregation` is declared here because `KpiConfigured` carries it. `KpiConfig` stays with the
+///      implementation as storage layout.
 interface IEventMetricKpiVerifier is IKpiVerifier {
     // ── errors ───────────────────────────────────────────────────
 
@@ -53,9 +51,8 @@ interface IEventMetricKpiVerifier is IKpiVerifier {
     );
 
     /// @notice Emitted when a config change invalidates every total already observed for a KPI.
-    /// @dev Fires only when `setKpiConfig` changes *what is watched* — the contract, event signature,
-    ///      param indexes, aggregation, scale, or window start. Extending `windowEndBlock`, the reason
-    ///      replacement is allowed in the first place, does not fire it.
+    /// @dev Fires only when `setKpiConfig` changes what is watched — the contract, event signature,
+    ///      param indexes, aggregation, scale or window start. Extending `windowEndBlock` does not.
     ///
     ///      A bumped epoch is what makes the invalidation real rather than advisory: totals are keyed
     ///      by it, so every figure observed under the old config becomes unreachable in the same

@@ -11,14 +11,11 @@ import {IReputationRegistry} from "./interfaces/IReputationRegistry.sol";
 import {IAttributionRegistry} from "./interfaces/IAttributionRegistry.sol";
 import {Types} from "./libraries/Types.sol";
 
-/// @title Boney - web3 rewards  accountability protocol.
-/// @dev Deliberately thin and stateless. It holds no funds, owns no campaign state,
-///      and has no privileged role in any module — every call it makes could be made directly.
-///      Its job is ergonomics: resolve campaign ids to addresses, batch the token approval dance,
-///      and assemble the aggregate views a marketplace[boneyard] UI needs.
-///
-///      Because it is not trusted by the modules, replacing the facade (or running several in
-///      parallel for different frontends) requires no migration of escrow or campaign state.
+/// @title Boney
+/// @notice Marketplace facade over the protocol modules.
+/// @dev Thin and stateless: holds no funds, owns no campaign state, and has no privileged role in any
+///      module. It resolves campaign ids to addresses, batches the token approval dance, and
+///      assembles the aggregate views a marketplace UI needs.
 contract Boney is IBoney {
     using SafeERC20 for IERC20;
 
@@ -44,13 +41,12 @@ contract Boney is IBoney {
     // ── project actions ──────────────────────────────────────────
 
     /// @inheritdoc IBoney
-    /// @param cfg Immutable campaign parameters;
+    /// @param cfg Immutable campaign parameters.
     /// @param kpis KPI specs; at least one required.
     /// @param tiers Per-KPI reward tiers, outer index aligned to `kpis`.
     /// @return campaignId Sequential id assigned by the registry.
     /// @return campaign Address of the deployed campaign.
-    /// @dev `cfg.project` must be the caller: the registry enforces this too, but failing here
-    ///      gives a clearer error before deployment gas is spent.
+    /// @dev `cfg.project` must be the caller.
     function createCampaign(
         Types.CampaignConfig calldata cfg,
         Types.KpiSpec[] calldata kpis,
@@ -63,8 +59,8 @@ contract Boney is IBoney {
     /// @inheritdoc IBoney
     /// @param campaignId The campaign to fund.
     /// @param amount Amount of the campaign's token to escrow.
-    /// @dev Pulls tokens through the facade so a project needs only one approval (to this
-    ///      contract) rather than one per campaign. Funds land in the vault, never held here.
+    /// @dev Pulls tokens through the facade, so a project needs one approval rather than one per
+    ///      campaign. Funds land in the vault and are never held here.
     function fundCampaign(uint256 campaignId, uint256 amount) external {
         address campaign = registry.campaignAt(campaignId);
         address token = escrowVault.tokenOf(campaign);
@@ -77,9 +73,8 @@ contract Boney is IBoney {
     // ── promoter actions ─────────────────────────────────────────
 
     /// @notice Returns the campaign address for joining.
-    /// @dev Promoters join by calling `Campaign.join()` directly from the wallet that will
-    ///      receive rewards.  Resolve the target with
-    ///      this function, then call `join()` on it from the promoter's own wallet.
+    /// @dev Promoters join by calling `Campaign.join()` on this address from the wallet that will
+    ///      receive rewards.
     /// @param campaignId The campaign id.
     /// @return The campaign contract address.
     function campaignJoinTarget(uint256 campaignId) external view returns (address) {

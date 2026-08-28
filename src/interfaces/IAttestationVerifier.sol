@@ -3,8 +3,8 @@ pragma solidity ^0.8.30;
 
 /// @title IAttestationVerifier
 /// @notice Verifies k-of-n threshold attestations signed by a registered set of attestors.
-/// @dev Phase 1 uses a single attestor (`threshold = 1`). The contract is threshold-ready so
-///      moving to multi-attestor operation only requires `setThreshold`.
+/// @dev Deploys with a single attestor and `threshold = 1`; multi-attestor operation needs only
+///      `setThreshold`.
 interface IAttestationVerifier {
     // ── errors ───────────────────────────────────────────────────
 
