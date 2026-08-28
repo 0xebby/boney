@@ -3,13 +3,9 @@ pragma solidity ^0.8.30;
 
 /// @title IAttributionRegistry
 /// @notice Tracks which promoter (KOL) gets credit for which end-user wallet, per campaign.
-/// @dev Attribution is a user-signed touch: the end user signs a typed message binding their
-///      wallet to a promoter id within a campaign. A relayer submits it; this contract stores
-///      the mapping and its expiry. Model is LAST_TOUCH — a newer touch replaces an older one.
-///
-///      "Newer" is decided by the signed `signedAt`, never by relay order. Relayers are
-///      adversarial promoters, so the order transactions land in says nothing about what the user
-///      intended; only the timestamp inside the signature does.
+/// @dev Attribution is a user-signed touch: the end user signs a typed message binding their wallet
+///      to a promoter id within a campaign, and a relayer submits it. Model is LAST_TOUCH, with
+///      "newer" decided by the signed `signedAt` rather than relay order.
 interface IAttributionRegistry {
     // ── errors ───────────────────────────────────────────────────
 
@@ -22,10 +18,8 @@ interface IAttributionRegistry {
     error InvalidSignature();
     error PromoterNotRegistered(address campaign, bytes32 promoterId);
     error ZeroWindow();
-    /// @dev `endTime` is the full 32-byte word the campaign answered with, not a `uint64`, because the
-    ///      registry reads it from an untyped staticcall against a registrant that need not be a
-    ///      `Campaign`. Narrowing it here would either revert on a dirty word or report a garbage
-    ///      endTime as a plausible one. Same reasoning as `CampaignTerminal`.
+    /// @dev `endTime` is the full 32-byte word the campaign answered with, not a `uint64`, since it
+    ///      comes from an untyped staticcall. Same for `CampaignTerminal`.
     error CampaignOver(uint256 endTime, uint64 timestamp);
     error CampaignTerminal(uint256 status);
 
@@ -75,10 +69,7 @@ interface IAttributionRegistry {
     function registerPromoter(bytes32 promoterId) external;
 
     /// @notice Validate a user-signed touch and store the attribution mapping.
-    /// @dev Only while the named campaign can still accrue creditable work: a touch is refused once
-    ///      the campaign is past its `endTime` or has reached a terminal status. Attribution signed
-    ///      after the campaign is over represents no in-campaign work, and would otherwise displace
-    ///      the promoter who earned it during the post-end reporting grace window.
+    /// @dev Refused once the named campaign is past its `endTime` or has reached a terminal status.
     /// @param user The end user (signer of `touch`).
     /// @param touch The attribution message.
     /// @param signature EIP-712 signature over `touch` by `user`.

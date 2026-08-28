@@ -5,9 +5,7 @@ import {IKpiVerifier} from "./IKpiVerifier.sol";
 
 /// @title IGuardedKpiVerifier
 /// @notice Declaration surface for `GuardedKpiVerifier`.
-/// @dev `Mode` is declared here rather than in the implementation because `GuardConfigured` carries
-///      it: an event's parameter types are part of the declaration, so the enum has to live wherever
-///      the event does.
+/// @dev `Mode` is declared here because `GuardConfigured` carries it.
 interface IGuardedKpiVerifier is IKpiVerifier {
     // ── errors ───────────────────────────────────────────────────
 

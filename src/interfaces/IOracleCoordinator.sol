@@ -5,7 +5,7 @@ pragma solidity ^0.8.30;
 /// @notice Coordinates oracle-reported campaign updates. Reporters stake collateral; reports enter
 ///         a dispute window before being applied. A governance-disputed report slashes the
 ///         reporter and is never applied.
-/// @dev MVP keeps dispute authority with governance (permissionless dispute bonds are deferred).
+/// @dev Dispute authority is governance's.
 interface IOracleCoordinator {
     // ── errors ───────────────────────────────────────────────────
 
@@ -76,10 +76,8 @@ interface IOracleCoordinator {
     }
 
     /// @notice A candidate per-user update, routed to `Campaign.reportUserAction`.
-    /// @dev The counterpart to `Report`, which only ever reaches `applyAggregateUpdate` and so can
-    ///      never credit an individual promoter. Without this path the campaign's `project` key is
-    ///      the only account that can pay anyone, which makes an absent or hostile project
-    ///      indistinguishable from one whose promoters simply earned nothing.
+    /// @dev The counterpart to `Report`, which reaches only `applyAggregateUpdate` and credits no
+    ///      individual promoter.
     /// @param campaign Campaign receiving the update.
     /// @param kpiIndex KPI index within the campaign; must be a per-user (non-aggregate) KPI.
     /// @param user End user whose actions are being reported.
@@ -105,9 +103,8 @@ interface IOracleCoordinator {
     function submitReport(Report calldata report) external returns (bytes32 reportId);
 
     /// @notice Submit a candidate per-user report; it becomes applicable after `disputeWindow`.
-    /// @dev Same stake, dispute and slashing rules as `submitReport`. Ids are domain-separated
-    ///      from aggregate reports, so the two kinds can never collide or be applied through the
-    ///      wrong entry point.
+    /// @dev Same stake, dispute and slashing rules as `submitReport`. Ids are domain-separated from
+    ///      aggregate reports.
     /// @param report The candidate per-user update.
     /// @return reportId Content-derived id used to apply or dispute the report.
     function submitUserReport(UserReport calldata report) external returns (bytes32 reportId);
@@ -119,7 +116,7 @@ interface IOracleCoordinator {
 
     /// @notice Apply a previously submitted, un-disputed per-user report to its campaign.
     /// @dev Callable by anyone once the dispute window has elapsed. The campaign credits the
-    ///      promoter the user is attributed to and settles any tier this crosses, in one call.
+    ///      attributed promoter and settles any crossed tier in the same call.
     /// @param reportId Id returned by `submitUserReport`.
     function applyUserReport(bytes32 reportId) external;
 

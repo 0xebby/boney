@@ -8,14 +8,11 @@ import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 
 /// @title EscrowVault
 /// @notice Custody for campaign funds.
-/// @dev Deliberately dumb: it knows a campaign's token and balance, and nothing about KPIs,
-///      tiers, or reputation. Only a campaign may move its own funds, so a compromised campaign
-///      can never drain another campaign's escrow. The registrar (the CampaignRegistry) is the
-///      only account that may bind a campaign to a token.
+/// @dev Knows a campaign's token and balance, and nothing about KPIs, tiers or reputation. Only a
+///      campaign may move its own funds, and only the registrar may bind a campaign to a token.
 ///
-///      Accounting uses an internal ledger rather than `token.balanceOf(this)` so that a
-///      fee-on-transfer or rebasing token, or an unsolicited direct transfer, cannot shift one
-///      campaign's spendable balance. Deposits credit the *actually received* amount.
+///      Accounting uses an internal ledger rather than `token.balanceOf(this)`, and deposits credit
+///      the amount actually received.
 contract EscrowVault is IEscrowVault, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -24,11 +21,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     /// @notice Account allowed to register campaigns — the CampaignRegistry.
     /// @dev Not a constructor argument: the registry needs this vault's address at its own
-    ///      construction, so one of the two must be wired afterwards. Predicting the registry's
-    ///      address with `computeCreateAddress` is fragile (it breaks whenever the deployer's
-    ///      nonce differs between simulation and broadcast, silently producing a vault whose
-    ///      registrar can never register anything). A one-time setter makes the misconfiguration
-    ///      impossible instead of merely unlikely.
+    ///      construction, so it is wired afterwards by a one-time setter.
     address public registrar;
 
     /// @dev campaign => escrow token.
@@ -38,7 +31,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
 
     /// @dev Restricts a call to the registrar, rejecting before the registrar is wired.
     modifier onlyRegistrar() {
-        // Reject before wiring: an unset registrar must not match a zero-address caller.
+        // An unset registrar must not match a zero-address caller.
         if (registrar == address(0)) revert RegistrarNotSet();
         if (msg.sender != registrar) revert NotRegistrar();
         _;
@@ -94,7 +87,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     /// @inheritdoc IEscrowVault
     /// @param to Recipient of the payout.
     /// @param amount Amount to release from the caller's balance.
-    /// @dev The caller *is* the campaign; there is no campaign parameter to spoof.
+    /// @dev The caller is the campaign; there is no campaign parameter.
     function release(address to, uint256 amount) external nonReentrant {
         _spend(msg.sender, to, amount);
         emit Released(msg.sender, to, amount);
@@ -109,7 +102,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
     }
 
     /// @dev Debits `campaign`'s ledger entry and transfers out. Reverts if the campaign is
-    ///      unregistered or underfunded, so a campaign can only ever spend what it escrowed.
+    ///      unregistered or underfunded.
     /// @param campaign The campaign whose ledger entry is debited.
     /// @param to Recipient of the transfer.
     /// @param amount Amount to debit and transfer.
@@ -122,8 +115,7 @@ contract EscrowVault is IEscrowVault, ReentrancyGuard {
         uint256 available = _balance[campaign];
         if (amount > available) revert InsufficientBalance(available, amount);
 
-        // Debit before transferring; combined with nonReentrant this closes the reentrancy path
-        // for tokens with transfer hooks.
+        // Debit before transferring, for tokens with transfer hooks.
         _balance[campaign] = available - amount;
         IERC20(token_).safeTransfer(to, amount);
     }

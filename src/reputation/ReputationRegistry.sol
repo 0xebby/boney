@@ -7,31 +7,12 @@ import {IAttestationVerifier} from "../interfaces/IAttestationVerifier.sol";
 
 /// @title ReputationRegistry
 /// @notice Wallet-based reputation assembled from attested metrics.
-/// @dev Privacy model: this contract stores only `(wallet, schemaId) => value`. Social handles
-///      never touch the chain — the attestor sees them off-chain and signs a number. Projects
-///      read `scoreOf` / `qualifies`, so a KOL proves they clear a bar without revealing which
-///      accounts back it.
-///
-///      Anti-replay is layered: the AttestationVerifier consumes a per-attestor nonce, and this
-///      contract additionally rejects a previously seen `attestationId`, so the same verified
-///      bundle cannot be applied twice even if routed through a different caller.
-///
-///      Freshness: credibility is not a constant. An Ethos score moves with vouches, reviews and
-///      slashing; a follower count moves when an account is sold, suspended, or inflated. The
-///      attestation's own `expiresAt` bounds only when a signed bundle may be *submitted* — it says
-///      nothing about how long the resulting value should keep counting. So each schema carries a
-///      `maxAge`, and `scoreOf` ignores any record older than it. A KOL who verified once at a high
-///      score does not keep clearing gates on it forever; the value decays out of their score and
-///      they re-attest to restore it.
-///
-///      `maxAge = 0` disables expiry for that schema, which is correct for metrics derived from
-///      immutable history (a wallet's first-transaction age cannot go down) and is the default so
-///      registering a schema never silently expires data.
+/// @dev Stores only `(wallet, schemaId) => value`; no social handles. Replays are rejected twice:
+///      the verifier consumes a per-attestor nonce, and a previously seen `attestationId` is
+///      refused here. Each schema carries a `maxAge`, and `scoreOf` skips records older than it.
 contract ReputationRegistry is IReputationRegistry, Ownable {
     /// @notice Cap on registered schemas.
-    /// @dev `scoreOf` iterates every schema and is called from `Campaign.join()`. An unbounded
-    ///      schema set would let governance make joining prohibitively expensive, or impossible.
-    ///      Schemas are governance-controlled and few in practice; this is a backstop.
+    /// @dev `scoreOf` iterates every schema, so the set is bounded.
     uint256 public constant MAX_SCHEMAS = 64;
 
     /// @notice A registered metric that can be attested against.
@@ -98,9 +79,7 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
         bytes32 id = schemaId(name);
         if (_schemas[id].exists) revert SchemaAlreadyRegistered(id);
 
-        // maxAge 0 == never expires. Registration stays non-expiring by default so adding the
-        // freshness gate could not retroactively void data attested before it existed; governance
-        // opts a schema in with setSchemaMaxAge.
+        // maxAge 0 == never expires; governance opts a schema in with setSchemaMaxAge.
         _schemas[id] = Schema({name: name, weight: weight, maxAge: 0, exists: true, maxValue: 0});
         _schemaIds.push(id);
         emit SchemaRegistered(id, name, weight);
@@ -115,14 +94,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @inheritdoc IReputationRegistry
-    /// @dev Applies retroactively: lowering `maxAge` can immediately drop records out of every
-    ///      score that included them, which is the point — governance can tighten a stale metric
-    ///      without waiting for anyone to re-attest. Raising it brings expired records back, so it
-    ///      is not a way to erase data.
-    ///
-    ///      Tightening this shrinks scores, and `Campaign.minReputation` is immutable. A promoter
-    ///      who has already joined keeps their membership — `join()` reads the score once — but one
-    ///      who has not may find a previously-clearable gate now out of reach until they re-attest.
+    /// @dev Applies retroactively in both directions: lowering `maxAge` drops records out of scores
+    ///      immediately, raising it brings expired records back.
     function setSchemaMaxAge(bytes32 id, uint64 maxAge) external onlyOwner {
         if (!_schemas[id].exists) revert UnknownSchema(id);
         _schemas[id].maxAge = maxAge;
@@ -130,15 +103,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @inheritdoc IReputationRegistry
-    /// @dev Bounds what an attestor may report, which is what makes a composite ceiling definable
-    ///      at all: with unbounded values `scoreOf` has no maximum, and no `minReputation` a
-    ///      project sets can be shown to be unreachable. Enforced on write only — lowering it does
-    ///      not retroactively shrink values already stored, because a stored value that silently
-    ///      changed meaning would be worse than one that is merely out of date. Re-attesting
-    ///      applies the new bound.
-    ///
-    ///      Defaults to 0 (unbounded) at registration for the same reason `maxAge` does: adding
-    ///      this must not retroactively make an existing schema unwritable.
+    /// @dev Enforced on write only; values already stored are not shrunk. Re-attesting applies the
+    ///      new bound. Defaults to 0 (unbounded) at registration.
     function setSchemaMaxValue(bytes32 id, uint256 maxValue) external onlyOwner {
         if (!_schemas[id].exists) revert UnknownSchema(id);
         _schemas[id].maxValue = maxValue;
@@ -153,16 +119,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @inheritdoc IReputationRegistry
-    /// @dev Returns `type(uint256).max` to mean "no knowable ceiling", which happens when any
-    ///      weighted schema is unbounded. That sentinel rather than 0 because 0 is a legitimate
-    ///      answer — a registry whose every schema carries weight 0 genuinely has a maximum score
-    ///      of 0 — and callers gating on it must be able to tell the two apart. It also makes the
-    ///      consumer's check degrade correctly: `minReputation > type(uint256).max` is false for
-    ///      every uint256, so an unbounded registry imposes no constraint rather than blocking
-    ///      everything.
-    ///
-    ///      Unweighted schemas are skipped: they contribute nothing to `scoreOf`, so an unbounded
-    ///      display-only metric like FOLLOWERS must not poison the ceiling for everyone else.
+    /// @dev Returns `type(uint256).max` for "no knowable ceiling", which happens when any weighted
+    ///      schema is unbounded or the arithmetic would overflow. Unweighted schemas are skipped.
     function maxScore() external view returns (uint256 max) {
         uint256 len = _schemaIds.length;
         for (uint256 i; i < len; ++i) {
@@ -172,9 +130,7 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
             uint256 cap = s.maxValue;
             if (cap == 0) return type(uint256).max;
 
-            // Saturate rather than revert. This sits under `Campaign`'s constructor, and a
-            // registry configured into an overflow would otherwise block every campaign creation
-            // protocol-wide — a far worse failure than reporting a ceiling nobody can reach.
+            // Saturate rather than revert.
             unchecked {
                 uint256 term = cap * weight;
                 if (term / cap != weight) return type(uint256).max;
@@ -186,8 +142,7 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice Verify an attestation bundle and store the attested value.
-    /// @dev Permissionless to call: authority comes from the signatures, not the caller. This is
-    ///      what lets a KOL (or a relayer) submit their own reputation proof.
+    /// @dev Permissionless: authority comes from the signatures, not the caller.
     /// @param subject The wallet the attested value belongs to.
     /// @param id Registered schema the value is attested against.
     /// @param value The attested value.
@@ -216,13 +171,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @inheritdoc IReputationRegistry
-    /// @dev Retained for the `IReputationRegistry` surface: a trusted owner path for migrations
-    ///      and for metrics sourced from on-chain history rather than a signed attestation.
-    ///
-    ///      Bound by `maxValue` exactly as the signed path is. The owner is trusted, but the
-    ///      ceiling `maxScore` reports is only sound if *every* write respects it — an owner-stored
-    ///      value above the bound would make a gate that campaign creation certified as reachable
-    ///      quietly reachable by a different amount than advertised.
+    /// @dev Trusted owner path, for migrations and metrics sourced from on-chain history. Bound by
+    ///      `maxValue` exactly as the signed path is.
     function storeAttestation(address subject, bytes32 id, uint256 value, bytes32 attestationId)
         external
         onlyOwner
@@ -240,13 +190,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @inheritdoc IReputationRegistry
-    /// @dev O(number of registered schemas). The schema set is governance-controlled and small;
-    ///      campaigns read this at join time only.
-    ///
-    ///      Stale records contribute nothing. A value that has aged past its schema's `maxAge` is
-    ///      skipped rather than reverted on, so an expired attestation lowers a score instead of
-    ///      making the wallet unscoreable — `join()` must still be able to tell a promoter what
-    ///      their score *is* when refusing them.
+    /// @dev O(number of registered schemas). Records past their schema's `maxAge` are skipped, not
+    ///      reverted on.
     function scoreOf(address wallet) public view returns (uint256 score) {
         uint256 len = _schemaIds.length;
         for (uint256 i; i < len; ++i) {
@@ -263,15 +208,11 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice Whether a record written at `updatedAt` has aged out of a `maxAge` window.
-    /// @dev Subtracts rather than adding: `updatedAt + maxAge` overflows for a large `maxAge`, and
-    ///      because this sits under `scoreOf` an overflow would revert `Campaign.join()` — a gate
-    ///      nobody could pass. `block.timestamp >= updatedAt` always holds (records are stamped on
-    ///      write), so the subtraction cannot underflow.
-    ///
-    ///      A never-attested record is stale by definition, checked before `maxAge` so the answer
-    ///      does not depend on chain age: `block.timestamp - 0 > maxAge` is false on a young chain,
-    ///      which would report an absent record as fresh. Scoring cannot tell the difference (the
-    ///      value is 0 either way) but `isValueFresh` exists precisely to tell those states apart.
+    /// @dev Subtracts rather than adding, so a large `maxAge` cannot overflow. A never-attested
+    ///      record is stale, checked before `maxAge`.
+    /// @param updatedAt When the record was written; 0 if never.
+    /// @param maxAge The schema's freshness window; 0 means never expires.
+    /// @return True when the record no longer counts.
     function _isStale(uint64 updatedAt, uint64 maxAge) private view returns (bool) {
         if (updatedAt == 0) return true;
         if (maxAge == 0) return false;
@@ -298,9 +239,7 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice Whether `wallet`'s value for `id` still counts toward `scoreOf`.
-    /// @dev Distinct from "has a value": a wallet can hold a large attested value that contributes
-    ///      nothing because it aged out. Without this the UI can only show the raw `valueOf` and a
-    ///      score that silently disagrees with it, which reads as a bug rather than an expiry.
+    /// @dev Distinct from "has a value": an aged-out record still reads non-zero from `valueOf`.
     /// @param wallet The wallet to query.
     /// @param id The schema id.
     /// @return True when the record is within its schema's `maxAge`, or the schema never expires.
@@ -310,8 +249,6 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
 
     /// @notice When `wallet`'s value for `id` stops counting. 0 when it never expires or was never
     ///         attested.
-    /// @dev Lets a promoter be told "re-verify before <date>" instead of discovering the drop when a
-    ///      join reverts.
     /// @param wallet The wallet to query.
     /// @param id The schema id.
     /// @return Unix timestamp the record goes stale at, or 0 if it never does.
@@ -328,9 +265,8 @@ contract ReputationRegistry is IReputationRegistry, Ownable {
     }
 
     /// @notice Full schema definition.
-    /// @dev Deliberately unchanged when `maxAge` was added: this tuple is destructured positionally
-    ///      by callers (`SeedLocal.s.sol` reads the third element to decide whether to register),
-    ///      and widening it would break every one of them silently. `schemaMaxAge` is separate.
+    /// @dev Fixed three-element tuple; callers destructure it positionally. `maxAge` and `maxValue`
+    ///      have their own getters.
     /// @param id The schema id.
     /// @return name Human-readable schema name.
     /// @return weight Contribution to the composite score; 0 means disabled.

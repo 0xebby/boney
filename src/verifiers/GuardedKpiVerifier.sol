@@ -8,35 +8,21 @@ import {IGuardedKpiVerifier} from "../interfaces/IGuardedKpiVerifier.sol";
 /// @title GuardedKpiVerifier
 /// @notice Composes Boney's canonical `EventMetricKpiVerifier` with a second verifier, so a KPI is
 ///         gated by two independent readings rather than one.
-/// @dev This is the contract a campaign points `KpiSpec.verifier` at. Boney's value is always
-///      computed — the second verifier is a check, never an alternate source of truth. Without this
-///      wrapper, a project running its own verifier would be silently overridden by Boney's number
-///      every time, and nobody would learn that the two ever disagreed.
+/// @dev The contract a campaign points `KpiSpec.verifier` at. Boney's value is always computed; the
+///      second verifier is a check, never an alternate source of truth.
 ///
-///      **Two composition modes, because the second verifier can mean two different things.**
+///      `AGREE` is for a second independent measurement of the same quantity: divergence past
+///      `toleranceBps` reverts with `VerifierDisagreement`. Use 0 for `COUNT`, a small nonzero
+///      tolerance for `SUM`/volume.
 ///
-///      `AGREE` is for a project running its own *independent measurement of the same quantity*. The
-///      two values should match, so divergence past `toleranceBps` reverts the whole report with
-///      `VerifierDisagreement` rather than quietly taking the smaller one. That surfaces a broken
-///      indexer or a disputed metric as an actionable error. `toleranceBps = 0` (exact match) is
-///      right for `COUNT`; `SUM`/volume KPIs may want a small nonzero tolerance to absorb rounding
-///      and timing differences between two independent scans.
+///      `CAP` is for a stricter lens on a different quantity and credits `min(boney, project)`.
+///      `TouchWindowVerifier` is the motivating case.
 ///
-///      `CAP` is for layering a *stricter lens on a different quantity*, and it credits
-///      `min(boney, project)`. `TouchWindowVerifier` is the motivating case: it floors credit at the
-///      current attribution touch's `signedAt`, so after a promoter switch it deliberately discards
-///      pre-switch activity that Boney's cumulative totals still retain. Those two numbers differ by
-///      construction, not by fault — under `AGREE` every legitimate post-switch report would revert.
-///      `CAP` reads the smaller number as the stricter bound it is.
-///
-///      Either way the result can only shrink a claim: `Campaign.reportUserAction` independently
-///      rejects any verifier returning more than was claimed.
+///      Either mode can only shrink a claim.
 contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
     /// @notice How one KPI's second opinion is sourced and combined.
-    /// @param projectVerifier The second `IKpiVerifier`. `address(0)` skips the second reading
-    ///        entirely and trusts Boney alone — equivalent to pointing the campaign straight at
-    ///        `EventMetricKpiVerifier`, but kept routable through here so a KPI can gain a second
-    ///        verifier later without the campaign's immutable KPI spec changing.
+    /// @param projectVerifier The second `IKpiVerifier`. `address(0)` trusts Boney alone, while
+    ///        keeping the KPI routable through here so it can gain a second verifier later.
     /// @param toleranceBps Allowed divergence in basis points of the larger value. `AGREE` only.
     /// @param mode `AGREE` or `CAP`.
     /// @param configured Set once `setGuardConfig` has run.
@@ -50,6 +36,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
     /// @notice Boney's canonical verifier. Always consulted; never optional.
     address public immutable boneyVerifier;
 
+    /// @dev 100% in basis points; the ceiling on `toleranceBps` and the divisor for it.
     uint16 constant MAX_TOLERANCE = 10_000;
 
     /// @notice `keccak256(campaign, kpiIndex)` => how that KPI is guarded.
@@ -90,8 +77,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
     }
 
     /// @inheritdoc IKpiVerifier
-    /// @dev Fails closed on an unconfigured KPI: a campaign wired here before `setGuardConfig` runs
-    ///      is loudly broken rather than silently ungated.
+    /// @dev Reverts on an unconfigured KPI rather than passing the claim through ungated.
     function verify(
         address campaign,
         uint256 kpiIndex,
@@ -120,8 +106,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
         uint256 allowed = (base * cfg.toleranceBps) / MAX_TOLERANCE;
         if (diff > allowed) revert VerifierDisagreement(projectValue, boneyValue, diff, allowed);
 
-        // Agreement confirmed. Boney's value stays canonical, so the credited number comes from the
-        // same source across every KPI whether or not a second verifier happens to be configured.
+        // Agreement confirmed; Boney's value stays canonical.
         return boneyValue;
     }
 
@@ -133,8 +118,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
         return guardConfigs[_key(campaign, kpiIndex)];
     }
 
-    /// @dev Per-KPI storage key. Matches `EventMetricKpiVerifier`'s derivation so the two contracts
-    ///      can be reasoned about against the same key.
+    /// @dev Per-KPI storage key. Matches `EventMetricKpiVerifier`'s derivation.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @return The hashed key.

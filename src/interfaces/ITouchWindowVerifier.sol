@@ -5,10 +5,8 @@ import {IKpiVerifier} from "./IKpiVerifier.sol";
 
 /// @title ITouchWindowVerifier
 /// @notice Declaration surface for `TouchWindowVerifier`.
-/// @dev Errors live here rather than in the implementation so every revert this adapter can produce
-///      is declared in one place, alongside the events and errors of every other module. The
-///      `Action` struct stays with the implementation: it is evidence-encoding detail rather than
-///      part of this adapter's declared surface.
+/// @dev Errors are declared here; the `Action` struct stays with the implementation as
+///      evidence-encoding detail.
 interface ITouchWindowVerifier is IKpiVerifier {
     // ── errors ───────────────────────────────────────────────────
 

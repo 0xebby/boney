@@ -66,37 +66,24 @@ interface IReputationRegistry {
 
     /// @notice Set how long an attested value for `schemaId` keeps counting. Callable only by the
     ///         schema registrar.
-    /// @dev Reputation is not a constant — an Ethos score moves with vouches and slashing, a
-    ///      follower count moves when an account changes hands. The attestation's own `expiresAt`
-    ///      only bounds when a bundle may be submitted, so without this a value attested once
-    ///      counts forever. Schemas default to 0 (never expires) so registering one cannot silently
-    ///      expire data; governance opts each metric in.
+    /// @dev Distinct from an attestation's own `expiresAt`, which only bounds when a bundle may be
+    ///      submitted. Schemas default to 0 (never expires).
     /// @param schemaId The schema to set a freshness window on.
     /// @param maxAge Seconds a value stays countable after it is attested. 0 disables expiry.
     function setSchemaMaxAge(bytes32 schemaId, uint64 maxAge) external;
 
     /// @notice Set the largest value an attestor may report for `schemaId`. Callable only by the
     ///         schema registrar.
-    /// @dev Without a bound the composite score has no maximum, so nothing can distinguish a
-    ///      demanding `minReputation` from an impossible one. Bounding each weighted schema is
-    ///      what makes `maxScore` meaningful, and therefore what lets `Campaign` reject a gate no
-    ///      wallet could ever clear.
-    ///
-    ///      Enforced when a value is written, not when it is read, so lowering a ceiling leaves
-    ///      existing records intact until they are re-attested.
+    /// @dev Bounding each weighted schema is what makes `maxScore` derivable. Enforced on write, not
+    ///      on read, so lowering a ceiling leaves existing records intact until they are re-attested.
     /// @param schemaId The schema to bound.
     /// @param maxValue Largest reportable value. 0 disables the bound.
     function setSchemaMaxValue(bytes32 schemaId, uint256 maxValue) external;
 
     /// @notice Highest composite score any wallet could attain under the current configuration.
-    /// @dev The sum of `weight * maxValue` across weighted schemas. Returns `type(uint256).max`
-    ///      when any weighted schema is unbounded, meaning no ceiling can be derived — callers must
-    ///      treat that as "no constraint" rather than as a real maximum.
-    ///
-    ///      Not a constant: governance moves it with `setSchemaWeight`, `setSchemaMaxValue`, and
-    ///      `registerSchema`. A consumer that stored a bound derived from this can therefore find
-    ///      it out of date, which is why `Campaign` reads it at construction and treats the result
-    ///      as a point-in-time check rather than a permanent guarantee.
+    /// @dev The sum of `weight * maxValue` across weighted schemas, or `type(uint256).max` when any
+    ///      weighted schema is unbounded — treat that as "no constraint", not a real maximum. Moves
+    ///      with `registerSchema`, `setSchemaWeight` and `setSchemaMaxValue`, so it is point-in-time.
     /// @return The maximum attainable score, or `type(uint256).max` if unbounded.
     function maxScore() external view returns (uint256);
 
@@ -110,9 +97,8 @@ interface IReputationRegistry {
         external;
 
     /// @notice Composite reputation score for a wallet, computed from all schemas it has data for.
-    /// @dev Counts only fresh values. A record older than its schema's `maxAge` is skipped, so this
-    ///      can fall over time with no transaction touching the wallet. Do not cache it as a
-    ///      constant, and do not assume it equals the sum of `valueOf` reads.
+    /// @dev Counts only fresh values, so it can fall over time with no transaction touching the
+    ///      wallet. It does not equal the sum of `valueOf` reads.
     /// @param wallet The wallet to score.
     /// @return The weighted sum of the wallet's attested values that are still within their
     ///         freshness windows.
