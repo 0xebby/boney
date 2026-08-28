@@ -5,9 +5,8 @@ import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {ITouchWindowVerifier} from "../interfaces/ITouchWindowVerifier.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 
-/// @dev Campaigns expose their registry as a public immutable of interface type; declared locally
-///      so the verifier reads whichever registry the calling campaign actually uses rather than
-///      one wired in at deploy time.
+/// @dev Declared locally so the verifier reads whichever registry the calling campaign uses, rather
+///      than one wired in at deploy time.
 interface ICampaignAttribution {
     /// @notice The attribution registry the calling campaign resolves touches against.
     /// @return The registry this verifier should read.
@@ -17,29 +16,16 @@ interface ICampaignAttribution {
 /// @title TouchWindowVerifier
 /// @notice Credits only the actions a user performed while the currently attributed promoter held
 ///         the attribution.
-/// @dev Closes the reporting-interval gap in `Campaign.reportUserAction`. That function resolves
-///      attribution when a report *lands*, and the chain only ever sees a cumulative `newTotal` —
-///      it has no idea when the underlying actions happened. So without an adapter the effective
-///      granularity of attribution is the project's reporting cadence: everything accrued since
-///      the last report follows whoever holds the touch at report time, including activity that
-///      predates that touch entirely. A promoter who knows the cadence can farm it by getting the
-///      user to sign just before a batch.
+/// @dev `Campaign.reportUserAction` resolves attribution when a report lands and sees only a
+///      cumulative total, so without this adapter the granularity of attribution is the project's
+///      reporting cadence. `evidence` supplies the missing per-action timestamps, and only actions at
+///      or after the live touch's `signedAt` (less `lookback`) are credited.
 ///
-///      This adapter supplies the missing timestamps. `evidence` carries the individual actions
-///      making up the reported delta, and only those at or after the live touch's `signedAt`
-///      (less `lookback`) are credited.
+///      A verifier may only reduce `credited`, never redirect the payee, so uncredited progress stays
+///      uncredited and a corrected report can land later.
 ///
-///      What it can and cannot do: a verifier may only reduce `credited`, never redirect the
-///      payee. So it denies the late-arriving promoter the delta they did not earn — it cannot
-///      award that delta to the promoter who did. Uncredited progress stays uncredited, and
-///      `Campaign` leaves `_userCredited` unadvanced for it, so a corrected report can still land
-///      later once the right promoter is attributed again.
-///
-///      **Lookback.** A user typically clicks a link, acts, and only then is asked to sign — so
-///      the action legitimately predates the touch. `lookback` (from the KPI's `params`) is how
-///      far before `signedAt` an action still counts. It is a direct trade: the window is also
-///      exactly how much history a newly-signed touch can capture, so keep it near the real
-///      click-to-sign latency and far below the reporting interval. Zero means strict.
+///      `lookback` comes from the KPI's `params` and is how far before `signedAt` an action still
+///      counts; it is also how much history a newly-signed touch can capture. Zero means strict.
 ///
 ///      Stateless and view-only; one deployment serves every campaign.
 contract TouchWindowVerifier is ITouchWindowVerifier {
@@ -51,8 +37,7 @@ contract TouchWindowVerifier is ITouchWindowVerifier {
     }
 
     /// @inheritdoc IKpiVerifier
-    /// @dev Fails closed: no evidence or no live touch credits nothing, which `Campaign` treats as
-    ///      a no-op report rather than a revert.
+    /// @dev No evidence or no stored touch credits nothing, which `Campaign` treats as a no-op report.
     function verify(
         address campaign,
         uint256,
@@ -75,20 +60,18 @@ contract TouchWindowVerifier is ITouchWindowVerifier {
 
         for (uint256 i = 0; i < actions.length; i++) {
             Action memory a = actions[i];
-            // A future-dated action would clear any floor, so it is rejected rather than skipped.
+            // Future-dated actions are rejected rather than skipped.
             if (a.timestamp > nowTs) revert FutureAction(a.timestamp, nowTs);
 
             total += a.amount;
             if (a.timestamp >= floor) credited += a.amount;
         }
 
-        // Evidence may describe less than the reporter claimed — the remainder is simply not
-        // credited. Claiming *more* than the report means the two disagree about what happened.
+        // Evidence may describe less than was claimed; claiming more is a disagreement.
         if (total > amount) revert EvidenceExceedsClaim(total, amount);
     }
 
     /// @notice The earliest action timestamp this touch can credit.
-    /// @dev Exposed so frontends can show promoters which activity currently counts for them.
     /// @param campaign The campaign to read attribution from.
     /// @param user The end user whose touch sets the floor.
     /// @param params The KPI's configured `params` blob, carrying the lookback.
@@ -104,7 +87,7 @@ contract TouchWindowVerifier is ITouchWindowVerifier {
         return _floor(touch.signedAt, _lookback(params));
     }
 
-    /// @dev A KPI configured without params is strict — the safe reading of "unset".
+    /// @dev A KPI configured without params is strict.
     /// @param params The KPI's `params` blob; a single abi-encoded `uint64`.
     /// @return Seconds before `signedAt` that an action still counts, or 0 if params are unset or
     ///         not the expected width.

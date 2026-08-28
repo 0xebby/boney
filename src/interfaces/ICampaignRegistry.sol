@@ -12,8 +12,7 @@ interface ICampaignRegistry {
     error ZeroAddress();
     error UnknownCampaign(uint256 campaignId);
 
-    /// @dev Raised when a name is already claimed. Carries the holder so a UI can link to it rather
-    ///      than only saying "taken".
+    /// @dev Raised when a name is already claimed. Carries the holding campaign.
     error NameTaken(string name, address existing);
 
     // ── events ───────────────────────────────────────────────────

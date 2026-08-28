@@ -5,28 +5,15 @@ import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 
 /// @title OpenMintNFT
 /// @notice A permissionlessly mintable ERC-721, deployed so a campaign can watch real mints.
-/// @dev **Why this exists at all.** Every other source in the demo fixture is a third-party protocol
-///      Boney does not control — Sygma, Aave, WETH, Uniswap. An NFT project needs the same, and Base
-///      Sepolia does not supply one: a sweep of recent blocks found a single ERC-721 mint, and neither
-///      candidate contract (`0x2b2e1bcb…`, `0x2E0033cB…` "Cpeg") exposes a mint anyone can call — every
-///      standard entrypoint reverts, with and without value. So this is the one source the fixture
-///      deploys itself, chosen over a dead contract that would fail mid-demo.
+/// @dev The one KPI source the demo fixture deploys itself; every other is a third-party protocol.
+///      No allowlist, owner gate or phase — the only requirement is paying `PRICE`.
 ///
-///      **Open on purpose.** No allowlist, no owner gate, no phase — the only requirement is paying
-///      `PRICE`. Anything else would need the demo wallet to be provisioned before it could mint, which
-///      is the failure mode this replaces.
+///      Two events, so a campaign can measure mints and spend separately:
 ///
-///      ## Two events, because one KPI cannot measure both things
-///
-///      A campaign here wants "how many minted" *and* "how much was spent", and those need different
-///      readings of a log:
-///
-///       - `Transfer(address(0), to, tokenId)` — inherited from ERC-721, emitted once per token.
-///         `topics[2]` is `to`, so `actorTopic: 2` with COUNT credits the minter one unit per token.
-///         Its payload cannot be summed: `tokenId` is indexed, so `data` is empty.
-///       - `Minted(minter, paid, quantity)` — `paid` is deliberately the **first** non-indexed param,
-///         because `indexerCore.rawAmount` reads data word 0 as a raw slice with no ABI decoding. Put
-///         `quantity` first and a volume KPI would credit a count instead, silently.
+///       - `Transfer(address(0), to, tokenId)` — inherited, one per token. `topics[2]` is `to`, so
+///         `actorTopic: 2` with COUNT credits one unit per token. Its `data` is empty.
+///       - `Minted(minter, paid, quantity)` — `paid` is the first non-indexed param, which is the word
+///         `indexerCore.rawAmount` reads, so a SUM KPI credits spend rather than count.
 contract OpenMintNFT is ERC721 {
     /// @notice Wei per token. `1e15` scale on the KPI means one mint is exactly one unit of progress.
     uint256 public constant PRICE = 0.001 ether;
@@ -58,10 +45,7 @@ contract OpenMintNFT is ERC721 {
     }
 
     /// @notice Mint `quantity` tokens to the caller, paying `PRICE` each.
-    /// @dev Overpayment reverts rather than being refunded or kept: a refund would make `paid` in the
-    ///      event differ from `msg.value` for reasons the log cannot show, and keeping it would
-    ///      overstate a spend KPI. Exact payment keeps the credited figure equal to what left the
-    ///      wallet.
+    /// @dev Requires exact payment; overpayment reverts rather than being refunded or kept.
     /// @param quantity How many to mint, 1 to `MAX_PER_MINT`.
     function mint(uint256 quantity) external payable {
         if (quantity == 0 || quantity > MAX_PER_MINT) revert BadQuantity(quantity, MAX_PER_MINT);

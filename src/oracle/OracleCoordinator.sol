@@ -9,16 +9,10 @@ import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
 
 /// @title OracleCoordinator
 /// @notice Staked reporting of campaign-level KPI aggregates with an optimistic dispute window.
-/// @dev Roadmap phase 3 in miniature: reporters post collateral, submit a report, and the report
-///      only lands after `disputeWindow` elapses without a challenge. A successful dispute slashes
-///      the reporter and permanently voids the report.
-///
-///      MVP scope (tracked in boneyMd/todo.md): dispute authority is the governor's. Permissionless
-///      disputes with challenger bonds are the next step and do not change this contract's shape —
-///      only who may call `disputeReport`.
-///
-///      Reports are keyed by content hash including the reporter and a per-reporter sequence, so
-///      two reporters can make the same claim independently and neither can overwrite the other.
+/// @dev Reporters post collateral and submit a report, which lands only after `disputeWindow` elapses
+///      without a challenge. A successful dispute slashes the reporter and voids the report.
+///      Dispute authority is the governor's. Report ids hash the reporter and a per-reporter
+///      sequence, so two reporters can make the same claim without collision.
 contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     /// @notice Lifecycle state of a submitted report.
     /// @param reporter Account that submitted the report.
@@ -29,9 +23,8 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     /// @param deadline Timestamp after which the report may be applied.
     /// @param disputed Whether governance voided the report.
     /// @param applied Whether the report has already been pushed to the campaign.
-    /// @param user End user credited by a per-user report, or `address(0)` for an aggregate. This
-    ///        is the discriminator between the two kinds — a user report can never name the zero
-    ///        address, because `submitUserReport` rejects it.
+    /// @param user End user credited by a per-user report, or `address(0)` for an aggregate. The
+    ///        discriminator between the two kinds.
     /// @param evidence Verifier evidence forwarded to `reportUserAction`; empty for aggregates.
     struct ReportState {
         address reporter;
@@ -46,9 +39,8 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @notice Registry used to confirm a target address is a real campaign.
-    /// @dev Not immutable because the registry must know this coordinator's address at its own
-    ///      construction, and this coordinator must know the registry's — a cycle. The coordinator
-    ///      is deployed first with no registry, then wired exactly once via `setCampaignRegistry`.
+    /// @dev Not immutable: the coordinator is deployed before the registry, then wired exactly once
+    ///      via `setCampaignRegistry`.
     ICampaignRegistry public campaignRegistry;
 
     /// @notice Minimum collateral required to submit reports.
@@ -63,8 +55,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
 
     /// @dev reporter => collateral currently posted.
     mapping(address => uint256) private _stake;
-    /// @dev reporter => next report sequence number. Folded into the report id so a reporter can
-    ///      file the same claim twice without the second submission colliding with the first.
+    /// @dev reporter => next report sequence number, folded into the report id.
     mapping(address => uint256) private _sequence;
     /// @dev reporter => timestamp before which stake is locked.
     mapping(address => uint256) public stakeLockedUntil;
@@ -99,9 +90,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     // ── staking ──────────────────────────────────────────────────
 
     /// @inheritdoc IOracleCoordinator
-    /// @dev Accepts partial deposits so collateral can be accumulated over several transactions.
-    ///      Eligibility is enforced at `submitReport` (via `_stake >= minStake`), not here, so a
-    ///      reporter is not forced to reach the minimum in a single call.
+    /// @dev Accepts partial deposits; eligibility is enforced at submission, not here.
     function stake() external payable {
         if (msg.value == 0) revert NothingStaked();
         _stake[msg.sender] += msg.value;
@@ -109,8 +98,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc IOracleCoordinator
-    /// @dev Blocked until every report the reporter filed has passed its dispute window;
-    ///      otherwise a reporter could submit a false report and exit before being slashed.
+    /// @dev Blocked until every report the reporter filed has passed its dispute window.
     function unstake() external nonReentrant {
         uint256 amount = _stake[msg.sender];
         if (amount == 0) revert NothingStaked();
@@ -131,16 +119,20 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc IOracleCoordinator
-    /// @dev Rejects a zero user because `address(0)` is what marks a stored report as an aggregate;
-    ///      admitting one would let a per-user submission be applied through the aggregate branch.
+    /// @dev Rejects a zero user; `address(0)` marks a stored report as an aggregate.
     function submitUserReport(UserReport calldata report) external returns (bytes32 reportId) {
         if (report.user == address(0)) revert ZeroAddress();
         return _record(report.campaign, report.kpiIndex, report.newTotal, report.user, report.evidence);
     }
 
-    /// @dev Shared submission path for both report kinds: stake gate, campaign check, id
-    ///      derivation, and the collateral lock that keeps a reporter slashable while their report
-    ///      is in flight. `user` is folded into the id so the two kinds occupy disjoint id spaces.
+    /// @dev Shared submission path for both report kinds: stake gate, campaign check, id derivation,
+    ///      and the collateral lock. `user` is folded into the id, so the two kinds have disjoint ids.
+    /// @param campaign Campaign the report targets.
+    /// @param kpiIndex KPI index within that campaign.
+    /// @param amount New total being reported.
+    /// @param user End user for a per-user report, or `address(0)` for an aggregate.
+    /// @param evidence Verifier evidence forwarded on apply; empty for aggregates.
+    /// @return reportId Id of the stored report.
     function _record(address campaign, uint256 kpiIndex, uint256 amount, address user, bytes memory evidence)
         private
         returns (bytes32 reportId)
@@ -174,7 +166,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc IOracleCoordinator
-    /// @dev Permissionless once the window closes: anyone can push a good report through.
+    /// @dev Permissionless once the dispute window closes.
     function applyReport(bytes32 reportId) external nonReentrant {
         ReportState storage r = _reports[reportId];
         if (r.user != address(0)) revert NotAggregateReport(reportId);
@@ -185,9 +177,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
     }
 
     /// @inheritdoc IOracleCoordinator
-    /// @dev The path that makes a promoter payable without the project's cooperation. The campaign
-    ///      resolves attribution, credits the promoter, and settles any crossed tier inline, so a
-    ///      single call turns an unreported action into tokens in a promoter's wallet.
+    /// @dev The campaign resolves attribution, credits the promoter, and settles crossed tiers inline.
     function applyUserReport(bytes32 reportId) external nonReentrant {
         ReportState storage r = _reports[reportId];
         if (r.user == address(0)) revert NotUserReport(reportId);
@@ -197,9 +187,10 @@ contract OracleCoordinator is IOracleCoordinator, Ownable, ReentrancyGuard {
         emit ReportApplied(reportId, r.campaign);
     }
 
-    /// @dev The checks-and-effects half both apply paths share. Marks the report applied *before*
-    ///      the external campaign call, so a reverting campaign cannot be retried into a double
-    ///      apply and a re-entrant one finds the flag already set.
+    /// @dev Shared checks for both apply paths. Marks the report applied before the external campaign
+    ///      call.
+    /// @param r The stored report.
+    /// @param reportId Id of that report, for error reporting.
     function _clearForApply(ReportState storage r, bytes32 reportId) private {
         if (r.reporter == address(0)) revert UnknownReport(reportId);
         if (r.disputed) revert ReportIsDisputed(reportId);

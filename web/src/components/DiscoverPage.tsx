@@ -161,6 +161,13 @@ export function DiscoverPage({
         </p>
       ) : null}
 
+      {directory.truncated ? (
+        <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
+          More memberships exist than one read returns, so this ranking covers a floor rather than
+          every promoter on the network.
+        </p>
+      ) : null}
+
       {busy ? (
         <Card padded={false}>
           <SkeletonRows rows={5} cols={4} />
