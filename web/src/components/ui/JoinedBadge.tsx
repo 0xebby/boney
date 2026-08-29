@@ -10,16 +10,16 @@
  * Only ever rendered in the affirmative — there is no "not joined" badge. Absence is the default
  * state of every row, so marking it would add noise to most of the table to say nothing.
  *
- * Colour is not the only carrier: the label is always present and the glyph is decorative, which
- * keeps the marker legible in monochrome and to anyone who does not distinguish the hue.
+ * Colour is not the only carrier: the word is always present, which keeps the marker legible in
+ * monochrome and to anyone who does not distinguish the hue. It carries no glyph — a decorative tick
+ * was the widest part of the badge and said nothing the word does not.
  */
 export function JoinedBadge() {
   return (
     <span
-      className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-brand-dim bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand"
+      className="inline-flex shrink-0 items-center whitespace-nowrap rounded border border-brand-dim bg-brand/10 px-1 py-0.5 text-[10px] font-medium leading-none text-brand"
       title="You have joined this campaign as a promoter"
     >
-      <span aria-hidden>✓</span>
       Joined
     </span>
   );

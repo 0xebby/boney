@@ -4,6 +4,7 @@ import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {useEffect, useState, type ReactNode} from "react";
 import {useAccount, useConnect, useDisconnect, useWalletClient} from "wagmi";
+import {BoneField, BoneyB} from "@/components/ui/Bone";
 import {RankBadge} from "@/components/ui/RankBadge";
 import {NavDrawer} from "@/components/ui/NavDrawer";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
@@ -306,6 +307,9 @@ export function AppShell({children}: {children: ReactNode}) {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* The bone wallpaper, behind every page. Decoration only — nothing above it moves for it. */}
+      <BoneField />
+
       {/* Keyboard users should not have to tab the whole nav to reach content. */}
       <a
         href="#content"
@@ -323,8 +327,11 @@ export function AppShell({children}: {children: ReactNode}) {
         <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2.5 sm:gap-4 sm:px-6 lg:px-8">
           <NavDrawer items={nav} />
 
-          <Link href="/" className="shrink-0">
-            <span className="font-display text-xl lowercase leading-none text-brand sm:text-2xl">
+          {/* The mark leads the wordmark at the same colour and height, so the pair reads as one
+              lockup rather than an icon parked beside a word. */}
+          <Link href="/" className="flex shrink-0 items-center gap-1.5 text-brand">
+            <BoneyB className="h-5 w-auto shrink-0 sm:h-6" />
+            <span className="font-display text-xl lowercase leading-none sm:text-2xl">
               boneyard
             </span>
           </Link>

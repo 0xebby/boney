@@ -2,6 +2,7 @@
 
 import {useId, useState} from "react";
 import {usePublishGuide} from "@/hooks/usePublishGuide";
+import {Notice} from "@/components/ui/Notice";
 import {
   MAX_ACTION_LENGTH,
   MAX_SUMMARY_LENGTH,
@@ -88,7 +89,7 @@ export function CampaignGuideEditor({
     return (
       <div className="mt-3 border-t border-hairline pt-3">
         <button
-          className="text-xs text-brand hover:underline"
+          className="rounded-md border border-hairline-strong px-2.5 py-1.5 text-xs font-semibold text-brand hover:bg-surface-hover"
           onClick={() => {
             // Discard any half-finished edit and any stale outcome from a previous attempt, so the
             // editor opens on what is actually published rather than on the last thing typed.
@@ -100,8 +101,10 @@ export function CampaignGuideEditor({
         >
           {guide ? "Edit campaign info" : "Add campaign info"}
         </button>
-        <p className="mt-1 text-[11px] text-ink-muted">
-          Only you can see this. Publishing takes one signature and no gas.
+        <p className="mt-1.5 text-[11px] text-ink-muted">
+          {guide
+            ? "Only you can see this control. Publishing takes one signature and no gas."
+            : "No summary or project link is published yet. Only you can see this control; publishing takes one signature and no gas."}
         </p>
       </div>
     );
@@ -192,7 +195,7 @@ function PublishOutcome({
   state: ReturnType<typeof usePublishGuide>["state"];
 }) {
   if (state.status === "saved") {
-    return <p className="text-xs text-good">Published.</p>;
+    return <Notice tone="good" role="status" title="Published." />;
   }
 
   if (state.status === "cleared") {
@@ -201,19 +204,19 @@ function PublishOutcome({
 
   if (state.status === "error") {
     return (
-      <p className="text-xs text-warning">
-        Not published: {state.message}{" "}
+      <Notice tone="critical" title="Not published">
+        {state.message}{" "}
         <button className="underline hover:text-ink" onClick={onRetry} type="button">
           Dismiss
         </button>
-      </p>
+      </Notice>
     );
   }
 
   if (state.status === "unwritable") {
     return (
       <div className="space-y-1.5">
-        <p className="text-xs text-warning">{state.message}</p>
+        <Notice tone="warning" title={state.message} />
         {/* The entry itself, because the alternative is asking a project to retype prose it just wrote. */}
         <pre className="max-h-40 overflow-auto rounded border border-hairline bg-surface-1 p-2 text-[10px] leading-relaxed text-ink-secondary">
           {JSON.stringify(state.entry, null, 2)}

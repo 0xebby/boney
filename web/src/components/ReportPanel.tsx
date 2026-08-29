@@ -4,6 +4,7 @@ import {useMemo, useState} from "react";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
+import {Notice} from "@/components/ui/Notice";
 import {useReportUserAction, isPending, type TxState} from "@/hooks/useWriteCampaign";
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
 import {useCampaignTouches} from "@/hooks/useCampaignTouches";
@@ -119,7 +120,7 @@ export function ReportPanel({
     kpiIndex,
     params: kpi?.spec.params,
     referrals: liveReferrals,
-    firstSignedAt: touchScan.firstSignedAt,
+    windows: touchScan.windows,
     enabled: isProject,
   });
 
@@ -238,6 +239,15 @@ export function ReportPanel({
                 symbol={token.symbol}
               />
             ) : null
+          ) : activity.error ? (
+            // The scan's own failure, said in place of the plan's reason: a failed scan observes
+            // nothing, and "no actions observed" would report that as a fact about the referrals.
+            <p className="text-xs text-warning">
+              Cannot report: the KPI event scan failed, so nothing was observed.{" "}
+              <span className="font-mono text-[11px] text-ink-secondary">
+                {String(activity.error)}
+              </span>
+            </p>
           ) : (
             <p className="text-xs text-warning">Cannot report: {plan.reason}</p>
           )}
@@ -649,6 +659,19 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
 function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
   if (state.status === "idle") return null;
 
+  if (state.status === "confirmed") {
+    return <Notice tone="good" role="status" title="Confirmed." />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <Notice
+        tone="critical"
+        title={<TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />}
+      />
+    );
+  }
+
   return (
     <div role="status" aria-live="polite" className="text-xs">
       {state.status === "preparing" ? (
@@ -660,13 +683,7 @@ function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
             {state.hash.slice(0, 10)}…
           </span>
         </p>
-      ) : state.status === "confirmed" ? (
-        <p className="text-good">Confirmed.</p>
-      ) : (
-        <p>
-          <TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

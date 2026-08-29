@@ -69,7 +69,9 @@ export function CampaignGuidePanel({
         </p>
       ) : null}
 
-      <ul className="mt-3 space-y-2.5 border-t border-hairline pt-3">
+      {/* Three across on a wide viewport: the rows are short and independent, so stacking them
+          pushed the last KPI of a three-KPI campaign below the fold for no gain. */}
+      <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-hairline pt-3 sm:grid-cols-2 lg:grid-cols-3">
         {detail.kpis.map((kpi) => (
           <KpiRow
             campaign={detail.address}

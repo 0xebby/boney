@@ -2,8 +2,9 @@
  * Who is looking at a campaign, and which of its sections that entitles them to.
  *
  * The campaign page serves four different readers off one route, and until now it showed all of them
- * everything: a referred user got the escrow accounting, and the project owner got the promoter-facing
- * reward ladders. Neither is information those readers can act on, and both crowd out what they can.
+ * everything: a referred user got the escrow accounting, and a passing visitor got reward ladders with
+ * no progress in them. Neither is information those readers can act on, and both crowd out what they
+ * can.
  *
  * Roles are derived from chain state only — the campaign's `project` address, `promoterIdOf`, and
  * `AttributionRegistry.touchOf` — so nothing here is a permission. It cannot be: every one of those
@@ -66,7 +67,7 @@ export function isProjectWallet(wallet: string | undefined, project: string): bo
 }
 
 export type SectionVisibility = {
-  /** KPI panels and their reward-tier ladders. */
+  /** KPI panels and their reward-tier ladders — the roles with progress in them. */
   kpis: boolean;
   /**
    * The "how to take part" panel — what each KPI asks for, and where to do it.
@@ -82,7 +83,7 @@ export type SectionVisibility = {
   promoterTable: boolean;
   /** Share of escrow released, plus the campaign's window and gate. */
   poolUtilization: boolean;
-  /** When unspent escrow returns to the project. */
+  /** When unspent escrow returns to the project. The project owner's wallet only. */
   escrowReturn: boolean;
   /**
    * The header tiles that quote payouts and remaining escrow.
@@ -100,20 +101,22 @@ export type SectionVisibility = {
  *
  * Three decisions are load-bearing:
  *
- *  - **The ladders need a wallet.** A tier threshold is only meaningful against "what would *I* be
- *    paid", so the KPI section is where a viewer's own progress appears once they join. Rendering it
- *    to nobody in particular invites the reading that the numbers are a campaign-wide promise.
- *  - **A project owner sees the table instead, not as well.** The ladders are the same numbers the
- *    owner set at creation; what they cannot get anywhere else is who joined and what it has cost.
+ *  - **The ladders belong to the two roles with a position in them.** A promoter reads their own
+ *    progress against each tier, and the project reads the combined progress its escrow is paying
+ *    for. A visitor has no progress to show, so the section names the KPI count and stops there —
+ *    rendering the tiers to nobody in particular invites the reading that they are a campaign-wide
+ *    promise.
  *  - **A referral sees neither the ladders nor the escrow.** They are not paid from this pool. A
  *    reward ladder invites them to expect a payout they cannot earn, and the escrow figures describe
  *    an arrangement between the project and its promoters.
+ *  - **Only the project sees the escrow return.** Reclaiming unspent escrow is an action no other
+ *    role can take, and the section describes when that action unlocks.
  */
 export function visibleSections(role: ViewerRole): SectionVisibility {
   switch (role) {
     case "project":
       return {
-        kpis: false,
+        kpis: true,
         guide: true,
         promoterTable: true,
         poolUtilization: true,
@@ -121,13 +124,21 @@ export function visibleSections(role: ViewerRole): SectionVisibility {
         escrowTiles: true,
       };
     case "promoter":
-    case "visitor":
       return {
         kpis: true,
         guide: true,
         promoterTable: false,
         poolUtilization: true,
-        escrowReturn: true,
+        escrowReturn: false,
+        escrowTiles: true,
+      };
+    case "visitor":
+      return {
+        kpis: false,
+        guide: true,
+        promoterTable: false,
+        poolUtilization: true,
+        escrowReturn: false,
         escrowTiles: true,
       };
     case "referral":
@@ -145,7 +156,7 @@ export function visibleSections(role: ViewerRole): SectionVisibility {
         guide: true,
         promoterTable: false,
         poolUtilization: true,
-        escrowReturn: true,
+        escrowReturn: false,
         escrowTiles: true,
       };
   }

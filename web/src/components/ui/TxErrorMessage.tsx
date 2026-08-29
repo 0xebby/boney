@@ -10,8 +10,8 @@ import {useState} from "react";
  * sentence is what a promoter acts on, the raw name is what gets pasted into a bug report — and
  * showing them at equal weight is what made the old output unreadable.
  *
- * Rendered at `text-xs` to match the inline feedback in `ProjectActions` and `PromoterPanel`; the
- * `role="alert"` lives on the wrapper in those components, so it is deliberately not repeated here.
+ * Carries no box or role of its own: callers wrap it in `ui/Notice` with tone `critical`, which
+ * supplies the tint and the `role="alert"`.
  */
 export function TxErrorMessage({
   message,

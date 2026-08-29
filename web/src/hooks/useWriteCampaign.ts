@@ -568,7 +568,7 @@ export function useReportUserAction() {
       calls: readonly {
         referral: `0x${string}`;
         newTotal: bigint;
-        actions?: readonly {timestamp: bigint; amount: bigint}[];
+        actions?: readonly {blockNumber: bigint; timestamp: bigint; amount: bigint}[];
       }[],
     ) => {
       if (!publicClient || !walletClient) {
@@ -585,10 +585,10 @@ export function useReportUserAction() {
         try {
           setState({status: "preparing"});
 
-          // Evidence is the observed actions when the plan carries them, `"0x"` otherwise. A KPI
-          // with `verifier == address(0)` ignores the argument either way (`Campaign.sol:325`); a
-          // verifier-gated one decodes it as `TouchWindowVerifier.Action[]`, so sending the empty
-          // blob there would fail the decode rather than credit a discounted amount.
+          // Evidence is the observed actions when the plan carries them, `"0x"` otherwise. Sent for
+          // every KPI, verifier or not: `Campaign` decodes it as `Types.Action[]` to credit each
+          // action to whoever held the referral at that action's block. The `"0x"` fallback is the
+          // simulated path, which has no per-action timing and so resolves attribution at report time.
           const evidence = call.actions?.length ? encodeActions(call.actions) : "0x";
 
           const {request} = await publicClient.simulateContract({

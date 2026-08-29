@@ -73,7 +73,6 @@ export default function Page() {
         wallet={address}
         score={card.score}
         scoreLoading={card.scoreLoading}
-        onChainScore={card.onChainScore}
         onChainExpired={card.onChainExpired}
         scale={card.scale}
         qualification={card.qualification}

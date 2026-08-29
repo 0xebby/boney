@@ -1,9 +1,11 @@
 "use client";
 
 import {useState, useMemo} from "react";
+import Link from "next/link";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
+import {Notice} from "@/components/ui/Notice";
 import {
   useJoinCampaign,
   useSettleRewards,
@@ -268,6 +270,16 @@ export function PromoterPanel({
               >
                 {copied ? "Copied" : "Copy"}
               </button>
+              {/* The link itself, for anyone who would rather follow it than paste it somewhere. */}
+              {promoterId ? (
+                <Link
+                  href={`/r?c=${detail.address}&p=${promoterId}`}
+                  className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-plane transition-opacity hover:opacity-90"
+                  title="Open this tracking link and attribute the connected wallet"
+                >
+                  Attribute
+                </Link>
+              ) : null}
             </div>
             <p className="text-xs text-ink-muted">
                 <b>Traffic through your Boneylink is attributed to you for{" "}
@@ -366,19 +378,27 @@ export function PromoterPanel({
 function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
   if (state.status === "idle") return null;
 
+  if (state.status === "confirmed") {
+    return <Notice tone="good" role="status" title="Confirmed." className="mt-2" />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <Notice
+        tone="critical"
+        className="mt-2"
+        title={<TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />}
+      />
+    );
+  }
+
   return (
     <div role="status" aria-live="polite" className="mt-2 text-xs">
       {state.status === "preparing" ? (
         <p className="text-ink-muted">Confirm in your wallet…</p>
       ) : state.status === "submitted" ? (
         <p className="text-ink-muted">Submitted — waiting for confirmation.</p>
-      ) : state.status === "confirmed" ? (
-        <p className="text-good">Confirmed.</p>
-      ) : (
-        <p>
-          <TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }
