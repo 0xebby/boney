@@ -11,11 +11,11 @@ import {
   planReportBatches,
   resolveScanRange,
   uniqueBlocks,
-  uniqueUsers,
   validateParamIndexes,
   type KpiConfig,
   type RelayLog,
 } from "./relayCore";
+import {attributionLookup, buildAttributionWindows, type TouchLog} from "./attributionWindows";
 import {AMOUNT_MODE} from "./kpiSource";
 
 // Checksummed with `cast to-check-sum-address` rather than by hand — a mistyped checksum makes viem
@@ -237,15 +237,14 @@ describe("decodeUserEvents", () => {
   });
 });
 
-describe("uniqueUsers / uniqueBlocks", () => {
-  it("dedupes so one RPC read covers repeated users and shared blocks", () => {
+describe("uniqueBlocks", () => {
+  it("dedupes so one RPC read covers shared blocks", () => {
     const decoded = [
       {user: ALICE.toLowerCase(), value: BigInt(1), blockNumber: BigInt(5)},
       {user: ALICE.toLowerCase(), value: BigInt(2), blockNumber: BigInt(5)},
       {user: BOB.toLowerCase(), value: BigInt(3), blockNumber: BigInt(6)},
     ];
 
-    expect(uniqueUsers(decoded)).toEqual([ALICE.toLowerCase(), BOB.toLowerCase()]);
     expect(uniqueBlocks(decoded)).toEqual([BigInt(5), BigInt(6)]);
   });
 });
@@ -253,33 +252,67 @@ describe("uniqueUsers / uniqueBlocks", () => {
 describe("aggregateDeltas", () => {
   const alice = ALICE.toLowerCase();
   const bob = BOB.toLowerCase();
+  const ID_A = pad("0x0a", {size: 32});
+  const ID_B = pad("0x0b", {size: 32});
+  const FOREVER = BigInt(9_000);
 
-  it("sums the logs at or after each user's own attribution", () => {
+  /**
+   * A `TouchStored` log.
+   *
+   * @param user Wallet the touch attributes.
+   * @param blockNumber Block the touch landed in — the window's exclusive lower bound.
+   * @param expiresAt Second the attribution lapses, exclusive.
+   * @param promoterId Promoter the window credits.
+   * @returns The touch log.
+   */
+  function touchLog(
+    user: `0x${string}`,
+    blockNumber: bigint,
+    expiresAt: bigint,
+    promoterId: Hex = ID_A,
+  ): TouchLog {
+    return {user, promoterId, signedAt: expiresAt - BigInt(1), expiresAt, blockNumber};
+  }
+
+  /**
+   * The attribution lookup those touches produce.
+   *
+   * @param touches Touch logs, in any order.
+   * @param startTime Campaign start, below which nothing counts.
+   * @returns The lookup `aggregateDeltas` takes.
+   */
+  function lookup(touches: readonly TouchLog[], startTime = BigInt(0)) {
+    return attributionLookup(buildAttributionWindows(touches), startTime);
+  }
+
+  it("sums the logs falling inside a user's attribution window", () => {
     const result = aggregateDeltas({
       decoded: [
-        {user: alice, value: BigInt(10), blockNumber: BigInt(1)},
-        {user: alice, value: BigInt(5), blockNumber: BigInt(2)},
+        {user: alice, value: BigInt(10), blockNumber: BigInt(2)},
+        {user: alice, value: BigInt(5), blockNumber: BigInt(3)},
       ],
-      attributedAt: new Map([[alice, BigInt(1000)]]),
+      attribution: lookup([touchLog(ALICE, BigInt(1), FOREVER)]),
       blockTimestamps: new Map([
-        [BigInt(1), BigInt(1000)],
-        [BigInt(2), BigInt(2000)],
+        [BigInt(2), BigInt(1000)],
+        [BigInt(3), BigInt(2000)],
       ]),
     });
 
-    // The log exactly at `signedAt` counts: attribution is inclusive of its own instant.
     expect(result.deltas.get(alice)).toBe(BigInt(15));
     expect(result.excludedPreAttribution).toBe(0);
   });
 
-  /** A promoter did not cause activity that predates their touch. */
-  it("excludes activity from before the user was attributed", () => {
+  /**
+   * A promoter did not cause activity that predates their touch, and `AttributionRegistry.promoterAt`
+   * requires `storedAtBlock < atBlock` — so the touch's own block is excluded too.
+   */
+  it("excludes activity from the touch's block and earlier", () => {
     const result = aggregateDeltas({
       decoded: [
         {user: alice, value: BigInt(60), blockNumber: BigInt(1)},
         {user: alice, value: BigInt(40), blockNumber: BigInt(2)},
       ],
-      attributedAt: new Map([[alice, BigInt(1500)]]),
+      attribution: lookup([touchLog(ALICE, BigInt(1), FOREVER)]),
       blockTimestamps: new Map([
         [BigInt(1), BigInt(1000)],
         [BigInt(2), BigInt(2000)],
@@ -291,32 +324,74 @@ describe("aggregateDeltas", () => {
   });
 
   /**
-   * `Campaign` reverts `NoAttribution` for these users, so reporting them would raise a cap nothing
-   * could ever draw against.
+   * The ceiling has to cover work done under a superseded touch, or it starves the retroactive credit
+   * `Campaign` now pays: it splits the report per action, and `min(claim, observed)` is what caps it.
+   */
+  it("counts work done under a superseded touch", () => {
+    const result = aggregateDeltas({
+      decoded: [
+        {user: alice, value: BigInt(10), blockNumber: BigInt(2)},
+        {user: alice, value: BigInt(7), blockNumber: BigInt(11)},
+      ],
+      attribution: lookup([
+        touchLog(ALICE, BigInt(1), FOREVER, ID_A),
+        touchLog(ALICE, BigInt(10), FOREVER, ID_B),
+      ]),
+      blockTimestamps: new Map([
+        [BigInt(2), BigInt(1000)],
+        [BigInt(11), BigInt(2000)],
+      ]),
+    });
+
+    expect(result.deltas.get(alice)).toBe(BigInt(17));
+  });
+
+  it("excludes activity from after the attribution lapsed", () => {
+    const result = aggregateDeltas({
+      decoded: [{user: alice, value: BigInt(10), blockNumber: BigInt(2)}],
+      attribution: lookup([touchLog(ALICE, BigInt(1), BigInt(1500))]),
+      blockTimestamps: new Map([[BigInt(2), BigInt(2000)]]),
+    });
+
+    expect(result.deltas.size).toBe(0);
+    expect(result.excludedPreAttribution).toBe(1);
+  });
+
+  /**
+   * `Campaign` credits nobody for these users, so reporting them would raise a cap nothing could ever
+   * draw against.
    */
   it("skips users with no touch at all", () => {
     const result = aggregateDeltas({
       decoded: [
-        {user: alice, value: BigInt(10), blockNumber: BigInt(1)},
-        {user: bob, value: BigInt(99), blockNumber: BigInt(1)},
+        {user: alice, value: BigInt(10), blockNumber: BigInt(2)},
+        {user: bob, value: BigInt(99), blockNumber: BigInt(2)},
       ],
-      attributedAt: new Map([
-        [alice, BigInt(500)],
-        [bob, BigInt(0)],
-      ]),
-      blockTimestamps: new Map([[BigInt(1), BigInt(1000)]]),
+      attribution: lookup([touchLog(ALICE, BigInt(1), FOREVER)]),
+      blockTimestamps: new Map([[BigInt(2), BigInt(1000)]]),
     });
 
     expect(result.deltas.has(bob)).toBe(false);
     expect(result.unattributed).toEqual([bob]);
   });
 
-  /** Excluding beats assuming an unresolved block cleared the floor. */
+  /** Excluding beats assuming an unresolved block fell inside a window. */
   it("excludes a log whose block timestamp is unknown", () => {
     const result = aggregateDeltas({
       decoded: [{user: alice, value: BigInt(10), blockNumber: BigInt(9)}],
-      attributedAt: new Map([[alice, BigInt(500)]]),
+      attribution: lookup([touchLog(ALICE, BigInt(1), FOREVER)]),
       blockTimestamps: new Map(),
+    });
+
+    expect(result.deltas.size).toBe(0);
+    expect(result.excludedPreAttribution).toBe(1);
+  });
+
+  it("excludes activity from before the campaign started", () => {
+    const result = aggregateDeltas({
+      decoded: [{user: alice, value: BigInt(10), blockNumber: BigInt(2)}],
+      attribution: lookup([touchLog(ALICE, BigInt(1), FOREVER)], BigInt(1500)),
+      blockTimestamps: new Map([[BigInt(2), BigInt(1000)]]),
     });
 
     expect(result.deltas.size).toBe(0);

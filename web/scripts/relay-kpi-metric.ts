@@ -38,10 +38,17 @@ import {
   type PublicClient,
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
-import {CampaignAbi, AttributionRegistryAbi, EventMetricKpiVerifierAbi} from "../src/lib/abis";
+import {CampaignAbi, EventMetricKpiVerifierAbi, AttributionRegistryAbi} from "../src/lib/abis";
 import {getDeployment} from "../src/lib/chains";
 import {decodeEventSource} from "../src/lib/kpiSource";
 import {blockChunks} from "../src/lib/indexerCore";
+import {
+  attributionLookup,
+  buildAttributionWindows,
+  type TouchLog,
+} from "../src/lib/attributionWindows";
+import {blockAtTimestamp, earliestCoveringTouch} from "../src/lib/blockSearch";
+import {TOUCH_STORED} from "../src/lib/events";
 import {
   aggregateDeltas,
   decodeUserEvents,
@@ -51,11 +58,11 @@ import {
   planReportBatches,
   resolveScanRange,
   uniqueBlocks,
-  uniqueUsers,
   validateParamIndexes,
   type KpiConfig,
   type RelayLog,
 } from "../src/lib/relayCore";
+import {readStartBlock} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(here, "../..");
@@ -276,39 +283,65 @@ async function main(): Promise<void> {
   let unattributed: string[] = [];
 
   if (decoded.length > 0) {
-    const registry = await client.readContract({
-      address: campaign,
-      abi: CampaignAbi,
-      functionName: "attributionRegistry",
-    });
-
-    // One read per distinct user and per distinct block, not per log. A busy range shares blocks
-    // heavily, and a user usually appears more than once.
-    const users = uniqueUsers(decoded);
-    const blocks = uniqueBlocks(decoded);
-
-    const attributedAt = new Map<string, bigint>();
-    await Promise.all(
-      users.map(async (user) => {
-        const touch = await client.readContract({
-          address: registry,
-          abi: AttributionRegistryAbi,
-          functionName: "touchOf",
-          args: [campaign, getAddress(user)],
-        });
-        attributedAt.set(user, BigInt(touch.signedAt));
+    const [registry, startTime] = await Promise.all([
+      client.readContract({
+        address: campaign,
+        abi: CampaignAbi,
+        functionName: "attributionRegistry",
       }),
-    );
+      client.readContract({address: campaign, abi: CampaignAbi, functionName: "startTime"}),
+    ]);
 
+    const maxDuration = (await client.readContract({
+      address: registry,
+      abi: AttributionRegistryAbi,
+      functionName: "effectiveMaxDuration",
+      args: [campaign],
+    })) as bigint;
+
+    // Every touch that could still cover creditable work, scanned from before the activity range: a
+    // touch can predate the actions it covers, and a window this cannot see would drop activity the
+    // chain would credit. A touch older than `startTime - effectiveMaxDuration` has already lapsed by
+    // the campaign's own start, so it covers nothing. The floor comes from the broadcast receipt rather
+    // than `lib/deployments.ts`, which can lag a redeploy.
+    const touchFloor = await blockAtTimestamp(
+      async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
+      earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
+      BigInt(readStartBlock(chainId)),
+      range.toBlock,
+    );
+    const touches: TouchLog[] = [];
+    for (const chunk of blockChunks(touchFloor, range.toBlock, MAX_LOG_RANGE)) {
+      const touchLogs = await client.getLogs({
+        address: registry,
+        event: TOUCH_STORED,
+        args: {campaign},
+        fromBlock: chunk.from,
+        toBlock: chunk.to,
+      });
+      for (const log of touchLogs) {
+        if (!log.args.user || !log.args.promoterId) continue;
+        touches.push({
+          user: getAddress(log.args.user),
+          promoterId: log.args.promoterId,
+          signedAt: log.args.signedAt ?? BigInt(0),
+          expiresAt: log.args.expiresAt ?? BigInt(0),
+          blockNumber: log.blockNumber ?? BigInt(0),
+        });
+      }
+    }
+    const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
+
+    // One read per distinct block, not per log. A busy range shares blocks heavily.
     const blockTimestamps = new Map<bigint, bigint>();
     await Promise.all(
-      blocks.map(async (blockNumber) => {
+      uniqueBlocks(decoded).map(async (blockNumber) => {
         const block = await client.getBlock({blockNumber});
         blockTimestamps.set(blockNumber, block.timestamp);
       }),
     );
 
-    const result = aggregateDeltas({decoded, attributedAt, blockTimestamps});
+    const result = aggregateDeltas({decoded, attribution, blockTimestamps});
     for (const [user, delta] of result.deltas) deltas.set(user, delta);
     excludedPreAttribution = result.excludedPreAttribution;
     unattributed = result.unattributed;
@@ -321,7 +354,7 @@ async function main(): Promise<void> {
     );
   }
   if (excludedPreAttribution > 0) {
-    console.log(`  ${excludedPreAttribution} log(s) excluded as pre-attribution activity`);
+    console.log(`  ${excludedPreAttribution} log(s) excluded as unattributed activity`);
   }
   console.log(`  creditable activity for ${deltas.size} user(s)`);
 

@@ -90,17 +90,23 @@ waitfor "next dev" "http://localhost:3000/" 90 || exit 1
 if [ -n "$RELAYER_KEY" ]; then
   export REPORTER_PRIVATE_KEY="$RELAYER_KEY"
   echo "relay: first pass (blocking — the indexer must not report before this lands)…"
-  RPC="$RPC" ./scripts/relay-loop.sh --once
-  start "relay loop" "$LOGS/relay-loop.log" env RPC="$RPC" REPORTER_PRIVATE_KEY="$RELAYER_KEY" \
-    ./scripts/relay-loop.sh "$INTERVAL"
+  RPC="$RPC" ./scripts/relay-loop.sh --once | tee "$LOGS/relay-once.log"
+  # An all-ungated fixture has nothing to relay, and a loop started over an empty target list would
+  # leave a dead pid in `PIDS` for `cleanup` to signal.
+  if command grep -q 'no gated KPIs' "$LOGS/relay-once.log"; then
+    echo "  not starting the relay loop — nothing to relay."
+  else
+    start "relay loop" "$LOGS/relay-loop.log" env RPC="$RPC" REPORTER_PRIVATE_KEY="$RELAYER_KEY" \
+      ./scripts/relay-loop.sh "$INTERVAL"
+  fi
 
   echo "indexer: one pass…"
-  pnpm index --rpc "$RPC" 2>&1 | command grep -vE 'scanning [0-9]+/' || true
+  pnpm index --rpc "$RPC" 2>&1 | command grep -vE 'scanning [0-9]+/|reading [0-9]+/' || true
 else
   echo
   echo "No relayer key found — skipping relay + indexer."
   echo "  Looked at: \$REPORTER_PRIVATE_KEY, \$BONEY_RELAYER_KEY, $REPO_ROOT/.env"
-  echo "  The app is fully usable; gated KPIs on campaigns 6 and 7 will read 0."
+  echo "  The app is fully usable, but no campaign progress is reported."
   echo "  To enable, add to $REPO_ROOT/.env:   REPORTER_PRIVATE_KEY=0x..."
 fi
 
