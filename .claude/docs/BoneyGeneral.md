@@ -119,8 +119,10 @@ The verifier a campaign should point at is `GuardedKpiVerifier`, which composes:
 
 - `EventMetricKpiVerifier` — a ceiling fed by an **independent relayer** that scans the real event
   logs. This is what stops a project crediting itself more than an observer saw.
-- optionally `TouchWindowVerifier` — credits only actions performed while the current promoter held
-  attribution.
+- `TouchWindowVerifier` is deployed but must **not** be wired as the `Mode.CAP` project verifier. It
+  returns a window-scoped total, which would shrink the budget `Campaign` splits across promoters to the
+  current promoter's slice. Segmentation lives in `Campaign` now; the adapter is kept for off-chain
+  window reads. See `decisions.md` → *KPI verifiers — adapters may discount, never inflate*.
 
 So two off-chain processes are required, and **the order between them is silent if you get it
 wrong**:
@@ -141,6 +143,26 @@ Two more constraints worth not rediscovering:
 - **Aggregate KPIs (TVL, volume) are campaign-level and oracle-reported.** They advance display
   totals but credit no individual promoter, and `Campaign` now refuses an aggregate KPI that carries
   reward tiers. Per-promoter aggregate attribution is post-MVP.
+
+### What `pnpm index` sends, since segmentation
+
+Both processes resolve attribution through `web/src/lib/attributionWindows.ts` — the off-chain mirror of
+`AttributionRegistry.promoterAt` — rather than reading the live touch, so the ceiling and the claim
+measure the same activity the chain will segment.
+
+- **Evidence is sent for every KPI**, `verifier == address(0)` included. `Campaign` decodes
+  `Types.Action[]` itself to credit each action to whoever held the referral at that action's block.
+- **There is no cursor.** `.indexer-state.json` is gone — a cursor produces a window-scoped total that
+  `Campaign` compares against a lifetime watermark and silently ignores. Any doc still describing that
+  file is stale.
+- **The range is bounded by attribution instead.** The activity scan starts one block after the
+  campaign's *first* touch (nothing earlier is creditable to anybody, so a campaign with no touch is
+  skipped), and the `TouchStored` scan behind it starts at
+  `startTime - effectiveMaxDuration` converted to a block by `lib/blockSearch.ts`. `--from-block` still
+  overrides the activity floor. Both bounds only exclude blocks that could never have been credited;
+  credit itself is decided per action, inside the range.
+- **Activity nobody held is dropped**, including work done in a gap between an expired touch and the
+  next one. Counting it would leave a `newTotal` that can never settle.
 
 Design: `boneyMd/KPI_VERIFICATION.md`. Worked example: `boneyMd/KPI_VERIFICATION_WALKTHROUGH.md`.
 
@@ -225,10 +247,19 @@ Full detail with commands in `README.md`. The order that matters:
    schemas, so a fresh `ReputationRegistry` scores everyone 0 *and* reports `maxScore() == 0` — and
    `Campaign`'s constructor rejects any `minReputation` above that ceiling with
    `UnreachableReputation`. Gated campaigns literally cannot be created until the schemas exist.
-4. The campaign seed (`SeedDemo` whole-fixture, or `SeedFive` / `SeedHistory` / `SeedRealKpi` …).
+4. The campaign seed (`SeedDemo` whole-fixture, or `SeedTwo` / `SeedFive` / `SeedHistory` /
+   `SeedRealKpi` …).
 
-Current Base Sepolia fixture: five `SeedFive` campaigns on registry `0x6427217e…`, plus the
-`SeedHistory` append. Two rival mock bUSD tokens exist on Base Sepolia — the current fixture prices
-everything in `0x2755…dCc2`, so a seed that deploys a fresh token splits the pool totals.
+Current Base Sepolia fixture (2026-08-29, second seed of the day): two `SeedTwo` campaigns on registry
+`0x3e0a2fc4…` — `Venus` on canonical WETH, gated at BoneyScore **19,500**, and `Sdy Labs` on a freshly
+deployed `OpenMintNFT`, open. Both campaigns' **KPIs** are still ungated, so `relay-loop.sh` has an
+empty target list and `dev:up` skips the loop — the Venus gate is on *joining*, and the relayer neither
+sees nor cares. This is the first deployment carrying the `AmbiguousAttribution` guard as well as
+segmented crediting. Every earlier registry, `0x82fCc991…` and `0x6427217e…` included, is dead. Two
+rival mock bUSD tokens exist on Base Sepolia — the current fixture prices everything in `0x2755…dCc2`,
+so a seed that deploys a fresh token splits the pool totals.
 
 A `boney-indexer` subgraph is live on Studio for Base Sepolia; its query endpoint needs no API key.
+It is version-pinned — `NEXT_PUBLIC_SUBGRAPH_URL` names `v0.5.0`, which is the first version indexing
+`0x3e0a2fc4…`, so a redeploy means a new version label *and* an env bump. `pnpm deploy` in `subgraph/`
+runs pnpm's own builtin; the script is `pnpm run deploy --version-label vX.Y.Z`.
