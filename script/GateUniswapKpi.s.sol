@@ -31,10 +31,8 @@ contract GateUniswapKpi is Script {
         address campaign = vm.envAddress("CAMPAIGN");
         uint256 windowStartBlock = vm.envUint("WINDOW_START_BLOCK");
 
-        EventMetricKpiVerifier kpiVerifier =
-            EventMetricKpiVerifier(vm.envAddress("KPI_VERIFIER_ADDRESS"));
-        GuardedKpiVerifier guardedVerifier =
-            GuardedKpiVerifier(vm.envAddress("GUARDED_VERIFIER_ADDRESS"));
+        EventMetricKpiVerifier kpiVerifier = EventMetricKpiVerifier(vm.envAddress("KPI_VERIFIER_ADDRESS"));
+        GuardedKpiVerifier guardedVerifier = GuardedKpiVerifier(vm.envAddress("GUARDED_VERIFIER_ADDRESS"));
 
         Campaign c = Campaign(campaign);
         uint256 closesIn = uint256(c.endTime() - c.startTime()) + c.CLAIM_GRACE();

@@ -266,6 +266,51 @@ contract AttributionRegistryTest is Test {
         attribution.storeTouch(user, t, sig, relayer);
     }
 
+    /// @dev A promoter holding a live touch cannot have it refreshed: the window they were granted
+    ///      runs out on its own schedule.
+    function test_StoreTouch_revertsSamePromoterWhileLive() public {
+        IAttributionRegistry.Touch memory first =
+            _touch(campaign, promoterId, uint64(block.timestamp + 7 days));
+        _storeTouch(userPk, user, first);
+
+        skip(1 days);
+        IAttributionRegistry.Touch memory again =
+            _touch(campaign, promoterId, uint64(block.timestamp + 7 days));
+        bytes memory sig = _sign(userPk, again);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAttributionRegistry.TouchAlreadyActive.selector, promoterId, first.expiresAt
+            )
+        );
+        attribution.storeTouch(user, again, sig, relayer);
+
+        assertEq(attribution.touchOf(campaign, user).expiresAt, first.expiresAt, "window unchanged");
+        assertEq(attribution.touchHistoryLength(campaign, user), 1, "no history record appended");
+    }
+
+    /// @dev The block is only on the live window, so the same promoter can be re-attributed once it
+    ///      has lapsed.
+    function test_StoreTouch_allowsSamePromoterAfterExpiry() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp + 7 days)));
+
+        skip(7 days);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp + 7 days)));
+
+        assertEq(attribution.activePromoter(campaign, user), promoterId);
+        assertEq(attribution.touchHistoryLength(campaign, user), 2);
+    }
+
+    /// @dev Switching away from a live touch stays open — the block is per-promoter, not a lockout.
+    function test_StoreTouch_allowsDifferentPromoterWhileLive() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp + 7 days)));
+
+        skip(1 days);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp + 7 days)));
+
+        assertEq(attribution.activePromoter(campaign, user), rivalId);
+    }
+
     /// @dev Ordering must not cost the user the ability to change their mind back: a genuinely
     ///      fresh endorsement of an earlier promoter still wins.
     function test_LastTouch_userCanReturnToAnEarlierPromoter() public {
@@ -460,6 +505,209 @@ contract AttributionRegistryTest is Test {
         assertEq(attribution.effectiveMaxDuration(address(c)), MAX_DURATION, "zero falls back");
         _storeTouch(userPk, user, _touch(address(c), promoterId, uint64(block.timestamp) + 1 days));
         assertEq(attribution.activePromoter(address(c), user), promoterId, "touches still work");
+    }
+
+    // ── touch history ────────────────────────────────────────────
+
+    /// @dev Every touch that lands is appended, so a superseded promoter is still on record.
+    function test_History_appendsEveryTouch() public {
+        uint64 firstSignedAt = uint64(block.timestamp);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, firstSignedAt + 7 days));
+        uint64 firstBlock = uint64(block.number);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+        uint64 secondSignedAt = uint64(block.timestamp);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, secondSignedAt + 7 days));
+
+        assertEq(attribution.touchHistoryLength(campaign, user), 2);
+
+        IAttributionRegistry.TouchRecord memory first = attribution.touchHistoryAt(campaign, user, 0);
+        assertEq(first.promoterId, promoterId);
+        assertEq(first.signedAt, firstSignedAt);
+        assertEq(first.expiresAt, firstSignedAt + 7 days);
+        assertEq(first.storedAtBlock, firstBlock);
+
+        IAttributionRegistry.TouchRecord memory second = attribution.touchHistoryAt(campaign, user, 1);
+        assertEq(second.promoterId, rivalId);
+        assertEq(second.storedAtBlock, uint64(block.number));
+    }
+
+    /// @dev History is keyed the same way the live touch is.
+    function test_History_isScopedPerCampaignAndUser() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        assertEq(attribution.touchHistoryLength(campaign, user), 1);
+        assertEq(attribution.touchHistoryLength(otherCampaign, user), 0);
+        assertEq(attribution.touchHistoryLength(campaign, stranger), 0);
+    }
+
+    /// @dev The rule the split depends on: a touch captures an action only from the block *after* it
+    ///      landed, so a touch sharing the action's block belongs to the promoter before it.
+    function test_PromoterAt_strictlyEarlierBlockWins() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp) + 7 days));
+
+        uint64 rivalBlock = uint64(block.number);
+        uint64 nowTs = uint64(block.timestamp);
+
+        assertEq(attribution.promoterAt(campaign, user, rivalBlock, nowTs), promoterId, "tie goes older");
+        assertEq(attribution.promoterAt(campaign, user, rivalBlock + 1, nowTs), rivalId, "then the rival");
+    }
+
+    function test_PromoterAt_beforeTheFirstTouchIsZero() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        assertEq(
+            attribution.promoterAt(campaign, user, uint64(block.number), uint64(block.timestamp)), bytes32(0)
+        );
+    }
+
+    function test_PromoterAt_unknownUserIsZero() public view {
+        assertEq(
+            attribution.promoterAt(campaign, stranger, uint64(block.number), uint64(block.timestamp)),
+            bytes32(0)
+        );
+    }
+
+    /// @dev An action after the touch lapsed credits nobody.
+    function test_PromoterAt_expiredRecordCreditsNobody() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 1 days));
+        uint64 atBlock = uint64(block.number) + 1;
+
+        assertEq(
+            attribution.promoterAt(campaign, user, atBlock, uint64(block.timestamp) + 1 days - 1),
+            promoterId,
+            "still live one second before expiry"
+        );
+        assertEq(
+            attribution.promoterAt(campaign, user, atBlock, uint64(block.timestamp) + 1 days),
+            bytes32(0),
+            "expiry is exclusive"
+        );
+    }
+
+    /// @dev The walk stops at the newest record before the block rather than searching past it for
+    ///      one that happens to still be live, so a lapse is a gap and not a fallback.
+    function test_PromoterAt_doesNotFallBackPastAnExpiredRecord() public {
+        uint64 longExpiry = uint64(block.timestamp) + 7 days;
+        _storeTouch(userPk, user, _touch(campaign, promoterId, longExpiry));
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp) + 1 days));
+
+        uint64 atBlock = uint64(block.number) + 1;
+        uint64 atTs = uint64(block.timestamp) + 2 days;
+
+        assertLt(atTs, longExpiry, "the first touch would still be live");
+        assertEq(attribution.promoterAt(campaign, user, atBlock, atTs), bytes32(0));
+    }
+
+    function test_PromotersAt_batchesInOrder() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+        uint64 firstBlock = uint64(block.number);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp) + 7 days));
+        uint64 secondBlock = uint64(block.number);
+        uint64 nowTs = uint64(block.timestamp);
+
+        uint64[] memory blocks = new uint64[](3);
+        uint64[] memory timestamps = new uint64[](3);
+        blocks[0] = firstBlock;
+        blocks[1] = firstBlock + 1;
+        blocks[2] = secondBlock + 1;
+        timestamps[0] = nowTs;
+        timestamps[1] = nowTs;
+        timestamps[2] = nowTs;
+
+        bytes32[] memory ids = attribution.promotersAt(campaign, user, blocks, timestamps);
+        assertEq(ids.length, 3);
+        assertEq(ids[0], bytes32(0), "before the first touch");
+        assertEq(ids[1], promoterId);
+        assertEq(ids[2], rivalId);
+    }
+
+    function test_PromotersAt_revertsLengthMismatch() public {
+        uint64[] memory blocks = new uint64[](2);
+        uint64[] memory timestamps = new uint64[](1);
+
+        vm.expectRevert(abi.encodeWithSelector(IAttributionRegistry.LengthMismatch.selector, 2, 1));
+        attribution.promotersAt(campaign, user, blocks, timestamps);
+    }
+
+    // ── sole attribution over a span ─────────────────────────────
+
+    function test_SoleAttributionSince_unknownUserIsZero() public view {
+        assertEq(attribution.soleAttributionSince(campaign, stranger, 0), bytes32(0));
+    }
+
+    function test_SoleAttributionSince_oneTouchIsThatPromoter() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        assertEq(attribution.soleAttributionSince(campaign, user, 0), promoterId);
+    }
+
+    /// @dev A re-touch by the same promoter is not a switch, so the span is still unambiguous.
+    function test_SoleAttributionSince_ignoresARetouchByTheSamePromoter() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 1 days));
+
+        vm.warp(block.timestamp + 2 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        assertEq(attribution.soleAttributionSince(campaign, user, 0), promoterId);
+    }
+
+    function test_SoleAttributionSince_aSwitchInTheSpanIsZero() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp) + 7 days));
+
+        assertEq(attribution.soleAttributionSince(campaign, user, 0), bytes32(0));
+    }
+
+    /// @dev The span's first block bounds the walk, so a switch already behind it stops mattering.
+    function test_SoleAttributionSince_startsAtTheGivenBlock() public {
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp) + 7 days));
+        uint64 rivalBlock = uint64(block.number);
+
+        assertEq(
+            attribution.soleAttributionSince(campaign, user, rivalBlock - 1),
+            bytes32(0),
+            "the switch is inside the span"
+        );
+        assertEq(
+            attribution.soleAttributionSince(campaign, user, rivalBlock),
+            rivalId,
+            "and behind it once the span starts there"
+        );
+    }
+
+    /// @dev Three touches, the switch two back: the walk has to reach past the newest pair to find it.
+    function test_SoleAttributionSince_walksPastMoreThanOneRecord() public {
+        _storeTouch(userPk, user, _touch(campaign, rivalId, uint64(block.timestamp) + 7 days));
+
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 1 days));
+
+        vm.warp(block.timestamp + 2 days);
+        vm.roll(block.number + 1);
+        _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+
+        assertEq(attribution.soleAttributionSince(campaign, user, 0), bytes32(0));
     }
 
     // ── domain binding ───────────────────────────────────────────

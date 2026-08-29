@@ -537,8 +537,9 @@ contract ReportWithholdingTest is Test {
     }
 
     /// @dev The fallback reads the *stored* touch, which `storeTouch` only ever overwrites with a
-    ///      strictly newer `signedAt`. So a displaced promoter cannot reclaim a user post-end: the
-    ///      newer touch is what is stored, and it is the newer promoter who gets paid.
+    ///      strictly newer `signedAt`, so a displaced promoter cannot reclaim a user post-end. Nor can
+    ///      the newer one take the backlog: two promoters in the reported span refuses the whole
+    ///      evidence-free report.
     function test_FallbackCannotResurrectADisplacedPromoter() public {
         vm.prank(promoter);
         bytes32 id1 = campaign.join();
@@ -557,11 +558,18 @@ contract ReportWithholdingTest is Test {
         vm.warp(endTime + 1);
         campaign.end();
 
+        assertEq(
+            attribution.touchOf(address(campaign), user).promoterId,
+            id2,
+            "the stored touch is the newer promoter's"
+        );
+
         vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
         campaign.reportUserAction(0, user, DELIVERED, "");
 
         assertEq(token.balanceOf(promoter), 0, "the displaced promoter gets nothing");
-        assertEq(token.balanceOf(promoter2), TIER_REWARD, "the user's latest intent is paid");
+        assertEq(token.balanceOf(promoter2), 0, "and the backlog is not the newer one's either");
     }
 
     // ── helpers ──────────────────────────────────────────────────

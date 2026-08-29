@@ -82,4 +82,17 @@ library Types {
         uint64 attributionWindow;
         uint256 minReputation;
     }
+
+    /// @notice One end-user action inside a report's `evidence`, timed so it can be attributed to the
+    ///         promoter who held the user when it happened.
+    /// @dev The canonical evidence element: `Campaign` and `TouchWindowVerifier` both decode
+    ///      `Action[]`, and the off-chain `encodeActions` builds it.
+    /// @param blockNumber Block the action was observed in. Must not decrease across an `Action[]`.
+    /// @param timestamp Timestamp of that block.
+    /// @param amount How much the action contributes to the KPI.
+    struct Action {
+        uint64 blockNumber;
+        uint64 timestamp;
+        uint256 amount;
+    }
 }

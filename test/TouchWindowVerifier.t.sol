@@ -22,9 +22,13 @@ contract MockToken is ERC20 {
     }
 }
 
-/// @title TouchWindowVerifier
-/// @notice Exercised through a real campaign, because the behaviour that matters is which promoter
-///         ends up paid — not what the adapter returns in isolation.
+/// @title TouchWindowVerifierTest
+/// @notice Covers the adapter's window arithmetic directly, then what happens when it is wired as a
+///         campaign's KPI verifier.
+/// @dev `Campaign` segments a report itself now, crediting each action to whoever held the user at
+///      that action's block, so the adapter no longer decides who gets paid — it only shrinks the
+///      budget. The integration section pins how badly the two compose, which is the reason the
+///      contract documents that it must not be wired that way.
 contract TouchWindowVerifierTest is Test {
     uint256 internal constant POOL = 10_000 ether;
     uint64 internal constant MAX_TOUCH = 30 days;
@@ -132,14 +136,34 @@ contract TouchWindowVerifierTest is Test {
         attribution.storeTouch(user, t, abi.encodePacked(r, s, v), user);
     }
 
-    function _evidence(TouchWindowVerifier.Action[] memory actions) internal pure returns (bytes memory) {
+    /// @dev Foundry's `skip` only moves the clock. The block has to be rolled too: the registry
+    ///      attributes an action to the newest touch stored strictly *before* the action's block, so
+    ///      evidence sharing a block with its own touch resolves to nobody.
+    function _advance(uint256 seconds_) internal {
+        skip(seconds_);
+        vm.roll(block.number + 1);
+    }
+
+    function _act(uint64 ts, uint256 amount) internal view returns (Types.Action memory) {
+        return Types.Action({blockNumber: uint64(block.number), timestamp: ts, amount: amount});
+    }
+
+    function _evidence(Types.Action[] memory actions) internal pure returns (bytes memory) {
         return abi.encode(actions);
     }
 
-    function _one(uint64 ts, uint256 amount) internal pure returns (bytes memory) {
-        TouchWindowVerifier.Action[] memory a = new TouchWindowVerifier.Action[](1);
-        a[0] = TouchWindowVerifier.Action({timestamp: ts, amount: amount});
+    function _one(uint64 ts, uint256 amount) internal view returns (bytes memory) {
+        Types.Action[] memory a = new Types.Action[](1);
+        a[0] = _act(ts, amount);
         return _evidence(a);
+    }
+
+    function _verify(Campaign c, uint256 amount, bytes memory evidence, bytes memory params)
+        internal
+        view
+        returns (uint256)
+    {
+        return verifier.verify(address(c), 0, user, amount, evidence, params);
     }
 
     function _report(Campaign c, address u, uint256 total, bytes memory evidence) internal {
@@ -147,11 +171,10 @@ contract TouchWindowVerifierTest is Test {
         c.reportUserAction(0, u, total, evidence);
     }
 
-    // ── the gap this adapter exists to close ─────────────────────
+    // ── the window, read directly ────────────────────────────────
 
-    /// @dev Without the adapter, all 10 follow the later touch (see
-    ///      `CampaignTest.test_Report_unreportedProgressFollowsTheLaterTouch`). With it, actions
-    ///      that predate kol2's touch are not credited to kol2.
+    /// @dev The whole reason the adapter exists: an action performed before the live touch was signed
+    ///      falls outside the window and contributes nothing to the total it returns.
     function test_DeniesActionsPredatingTheLiveTouch() public {
         bytes32 id1 = _join(campaign, kol);
         bytes32 id2 = _join(campaign, kol2);
@@ -159,94 +182,14 @@ contract TouchWindowVerifierTest is Test {
         _touch(campaign, id1);
         uint64 actedAt = uint64(block.timestamp);
 
-        // The user acts under kol, then kol2 gets a touch signed before the report lands.
         skip(1 days);
         _touch(campaign, id2);
 
-        _report(campaign, user, 10, _one(actedAt, 10));
-
-        assertEq(campaign.progressOf(kol2, 0), 0, "kol2 cannot capture pre-touch activity");
-        assertEq(campaign.progressOf(kol, 0), 0, "and a verifier cannot redirect it to kol either");
-        assertEq(campaign.paidOut(), 0, "no tier crossed, nothing paid");
+        assertEq(_verify(campaign, 10, _one(actedAt, 10), abi.encode(LOOKBACK)), 0);
     }
 
-    /// @dev The denied progress is not burned: `_userCredited` never advanced, so once the right
-    ///      promoter is attributed again the same cumulative report lands and pays out.
-    function test_DeniedProgressIsRecoverableByTheRightPromoter() public {
-        bytes32 id1 = _join(campaign, kol);
-        bytes32 id2 = _join(campaign, kol2);
-
-        _touch(campaign, id1);
-        uint64 actedAt = uint64(block.timestamp);
-
-        skip(1 days);
-        _touch(campaign, id2);
-        _report(campaign, user, 10, _one(actedAt, 10));
-        assertEq(campaign.progressOf(kol2, 0), 0);
-
-        // The user re-signs for kol, whose window now covers the original action's lookback.
-        skip(1 days);
-        _touch(campaign, id1);
-        _report(campaign, user, 10, _one(uint64(block.timestamp), 10));
-
-        assertEq(campaign.progressOf(kol, 0), 10, "credited once the right promoter is live");
-        assertEq(token.balanceOf(kol), 1_000 ether, "tier paid");
-    }
-
-    /// @dev Actions inside the window are credited normally — the adapter must not tax the happy
-    ///      path.
-    function test_CreditsActionsInsideTheWindow() public {
-        bytes32 id = _join(campaign, kol);
-        _touch(campaign, id);
-
-        skip(1 hours);
-        _report(campaign, user, 10, _one(uint64(block.timestamp), 10));
-
-        assertEq(campaign.progressOf(kol, 0), 10);
-        assertEq(token.balanceOf(kol), 1_000 ether);
-    }
-
-    /// @dev Users routinely click a link, act, and only then sign. `lookback` is what keeps that
-    ///      ordering creditable.
-    function test_LookbackCreditsActionJustBeforeTheSignature() public {
-        bytes32 id = _join(campaign, kol);
-
-        uint64 actedAt = uint64(block.timestamp);
-        skip(LOOKBACK - 1);
-        _touch(campaign, id);
-
-        _report(campaign, user, 10, _one(actedAt, 10));
-
-        assertEq(campaign.progressOf(kol, 0), 10, "act-then-sign is still credited");
-    }
-
-    function test_LookbackBoundaryIsInclusive() public {
-        bytes32 id = _join(campaign, kol);
-
-        uint64 actedAt = uint64(block.timestamp);
-        skip(LOOKBACK);
-        _touch(campaign, id);
-
-        _report(campaign, user, 10, _one(actedAt, 10));
-
-        assertEq(campaign.progressOf(kol, 0), 10, "exactly at the floor counts");
-    }
-
-    function test_JustOutsideLookbackIsDenied() public {
-        bytes32 id = _join(campaign, kol);
-
-        uint64 actedAt = uint64(block.timestamp);
-        skip(LOOKBACK + 1);
-        _touch(campaign, id);
-
-        _report(campaign, user, 10, _one(actedAt, 10));
-
-        assertEq(campaign.progressOf(kol, 0), 0, "one second past the floor is out");
-    }
-
-    // ── partial credit ───────────────────────────────────────────
-
-    /// @dev A report spanning a re-attribution credits only the qualifying slice.
+    /// @dev Evidence spanning a re-attribution measures only the slice inside the live promoter's
+    ///      window.
     function test_CreditsOnlyTheQualifyingSubset() public {
         bytes32 id1 = _join(campaign, kol);
         bytes32 id2 = _join(campaign, kol2);
@@ -258,30 +201,74 @@ contract TouchWindowVerifierTest is Test {
         _touch(campaign, id2);
         uint64 late = uint64(block.timestamp);
 
-        TouchWindowVerifier.Action[] memory actions = new TouchWindowVerifier.Action[](2);
-        actions[0] = TouchWindowVerifier.Action({timestamp: early, amount: 6});
-        actions[1] = TouchWindowVerifier.Action({timestamp: late, amount: 4});
+        Types.Action[] memory actions = new Types.Action[](2);
+        actions[0] = _act(early, 6);
+        actions[1] = _act(late, 4);
 
-        _report(campaign, user, 10, _evidence(actions));
+        assertEq(_verify(campaign, 10, _evidence(actions), abi.encode(LOOKBACK)), 4);
+    }
 
-        assertEq(campaign.progressOf(kol2, 0), 4, "only post-touch activity");
-        assertEq(campaign.progressOf(kol, 0), 0);
+    /// @dev Actions inside the window are measured in full — the adapter must not tax the happy
+    ///      path.
+    function test_CreditsActionsInsideTheWindow() public {
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, id);
+
+        skip(1 hours);
+        assertEq(_verify(campaign, 10, _one(uint64(block.timestamp), 10), abi.encode(LOOKBACK)), 10);
+    }
+
+    /// @dev Users routinely click a link, act, and only then sign. `lookback` is what keeps that
+    ///      ordering creditable.
+    function test_LookbackCreditsActionJustBeforeTheSignature() public {
+        bytes32 id = _join(campaign, kol);
+
+        uint64 actedAt = uint64(block.timestamp);
+        skip(LOOKBACK - 1);
+        _touch(campaign, id);
+
+        assertEq(
+            _verify(campaign, 10, _one(actedAt, 10), abi.encode(LOOKBACK)),
+            10,
+            "act-then-sign is still measured"
+        );
+    }
+
+    function test_LookbackBoundaryIsInclusive() public {
+        bytes32 id = _join(campaign, kol);
+
+        uint64 actedAt = uint64(block.timestamp);
+        skip(LOOKBACK);
+        _touch(campaign, id);
+
+        assertEq(
+            _verify(campaign, 10, _one(actedAt, 10), abi.encode(LOOKBACK)), 10, "exactly at the floor counts"
+        );
+    }
+
+    function test_JustOutsideLookbackIsDenied() public {
+        bytes32 id = _join(campaign, kol);
+
+        uint64 actedAt = uint64(block.timestamp);
+        skip(LOOKBACK + 1);
+        _touch(campaign, id);
+
+        assertEq(
+            _verify(campaign, 10, _one(actedAt, 10), abi.encode(LOOKBACK)),
+            0,
+            "one second past the floor is out"
+        );
     }
 
     // ── fail-closed behaviour ────────────────────────────────────
 
-    /// @dev A KPI wired to this adapter requires evidence. Absent it, nothing is credited — and
-    ///      `Campaign` treats a zero credit as a no-op rather than a revert, so the report can be
-    ///      resubmitted with evidence.
+    /// @dev A KPI wired to this adapter requires evidence. Absent it the adapter measures nothing,
+    ///      which `Campaign` treats as a no-op report rather than a revert.
     function test_MissingEvidenceCreditsNothing() public {
         bytes32 id = _join(campaign, kol);
         _touch(campaign, id);
 
-        _report(campaign, user, 10, "");
-        assertEq(campaign.progressOf(kol, 0), 0, "no evidence, no credit");
-
-        _report(campaign, user, 10, _one(uint64(block.timestamp), 10));
-        assertEq(campaign.progressOf(kol, 0), 10, "resubmitting with evidence still works");
+        assertEq(_verify(campaign, 10, "", abi.encode(LOOKBACK)), 0);
     }
 
     /// @dev A future-dated action would clear any floor, so it is rejected outright rather than
@@ -312,14 +299,12 @@ contract TouchWindowVerifierTest is Test {
     }
 
     /// @dev Evidence covering less than the claim is a discount, not an error — the remainder is
-    ///      simply uncredited and can be substantiated later.
+    ///      simply unmeasured and can be substantiated later.
     function test_EvidenceBelowClaimIsADiscount() public {
         bytes32 id = _join(campaign, kol);
         _touch(campaign, id);
 
-        _report(campaign, user, 10, _one(uint64(block.timestamp), 6));
-
-        assertEq(campaign.progressOf(kol, 0), 6);
+        assertEq(_verify(campaign, 10, _one(uint64(block.timestamp), 6), abi.encode(LOOKBACK)), 6);
     }
 
     // ── params ───────────────────────────────────────────────────
@@ -334,9 +319,7 @@ contract TouchWindowVerifierTest is Test {
         skip(1);
         _touch(strict, id);
 
-        _report(strict, user, 10, _one(actedAt, 10));
-
-        assertEq(strict.progressOf(kol, 0), 0, "no lookback configured, nothing before the touch");
+        assertEq(_verify(strict, 10, _one(actedAt, 10), ""), 0, "no lookback, nothing before the touch");
     }
 
     function test_WindowFloorReflectsLookback() public {
@@ -364,6 +347,100 @@ contract TouchWindowVerifierTest is Test {
             verifier.verify(address(campaign), 0, address(0xDEAD), 10, _one(uint64(block.timestamp), 10), ""),
             0
         );
+    }
+
+    // ── wired as a campaign's KPI verifier ───────────────────────
+
+    /// @dev Inside one promoter's window the two layers agree, so the report credits and pays.
+    function test_AsKpiVerifierTheHappyPathStillPays() public {
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, id);
+        _advance(1 hours);
+
+        _report(campaign, user, 10, _one(uint64(block.timestamp), 10));
+
+        assertEq(campaign.progressOf(kol, 0), 10);
+        assertEq(token.balanceOf(kol), 1_000 ether, "tier paid");
+    }
+
+    /// @dev The composition hazard. `Campaign` would credit kol for kol's own action, but the adapter
+    ///      reports the live promoter's window as the budget, and after a switch that is zero — so
+    ///      nobody is paid for work that plainly happened.
+    function test_AsKpiVerifierItStarvesTheEarlierSegment() public {
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        _touch(campaign, id1);
+        _advance(1 hours);
+        bytes memory evidence = _one(uint64(block.timestamp), 10);
+
+        _advance(1 days);
+        _touch(campaign, id2);
+        _report(campaign, user, 10, evidence);
+
+        assertEq(campaign.progressOf(kol, 0), 0, "the promoter who drove it gets nothing");
+        assertEq(campaign.progressOf(kol2, 0), 0, "and it does not migrate to the new one either");
+        assertEq(campaign.paidOut(), 0);
+    }
+
+    /// @dev Worse than starving it: the adapter measures kol2's four units, and the budget-filling
+    ///      walk spends them on kol's earlier action. Neither figure describes what happened.
+    function test_AsKpiVerifierTheDiscountLandsOnTheWrongSegment() public {
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        Types.Action[] memory actions = new Types.Action[](2);
+
+        _touch(campaign, id1);
+        _advance(1 hours);
+        actions[0] = _act(uint64(block.timestamp), 6);
+
+        _advance(1 days);
+        _touch(campaign, id2);
+        _advance(1 hours);
+        actions[1] = _act(uint64(block.timestamp), 4);
+
+        _report(campaign, user, 10, _evidence(actions));
+
+        assertEq(campaign.progressOf(kol, 0), 4, "kol2's slice, credited to kol");
+        assertEq(campaign.progressOf(kol2, 0), 0);
+    }
+
+    /// @dev What the starved report does not do is burn the progress: `_userCredited` never advanced,
+    ///      so once the right promoter is attributed again the same cumulative report lands.
+    function test_AsKpiVerifierDeniedProgressIsRecoverable() public {
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        _touch(campaign, id1);
+        _advance(1 hours);
+        bytes memory evidence = _one(uint64(block.timestamp), 10);
+
+        _advance(1 days);
+        _touch(campaign, id2);
+        _report(campaign, user, 10, evidence);
+        assertEq(campaign.userCreditedOf(user, 0), 0, "nothing was written off");
+
+        _advance(1 days);
+        _touch(campaign, id1);
+        _advance(1 hours);
+        _report(campaign, user, 10, _one(uint64(block.timestamp), 10));
+
+        assertEq(campaign.progressOf(kol, 0), 10, "credited once the right promoter is live");
+        assertEq(token.balanceOf(kol), 1_000 ether, "tier paid");
+    }
+
+    /// @dev With no evidence `Campaign` falls back to resolving attribution now, but the adapter still
+    ///      measures nothing, so the report is a no-op rather than a revert.
+    function test_AsKpiVerifierEmptyEvidenceCreditsNothing() public {
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, id);
+        _advance(1 hours);
+
+        _report(campaign, user, 10, "");
+
+        assertEq(campaign.progressOf(kol, 0), 0);
+        assertEq(campaign.userCreditedOf(user, 0), 0, "so it stays reportable");
     }
 
     // ── fuzz ─────────────────────────────────────────────────────
