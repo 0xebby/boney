@@ -139,6 +139,19 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_EVIDENCE_ACTIONS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_KPIS",
     "inputs": [],
     "outputs": [
@@ -272,6 +285,35 @@ export const CampaignAbi = [
             "internalType": "uint256"
           }
         ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "creditedToOf",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "promoterId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -416,6 +458,30 @@ export const CampaignAbi = [
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "lastReportBlockOf",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -990,6 +1056,22 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "AmbiguousAttribution",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ClaimWindowOpen",
     "inputs": [
       {
@@ -1207,6 +1289,22 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "TooManyActions",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "TooManyKpis",
     "inputs": [
       {
@@ -1248,6 +1346,17 @@ export const CampaignAbi = [
     "inputs": [
       {
         "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnorderedEvidence",
+    "inputs": [
+      {
+        "name": "index",
         "type": "uint256",
         "internalType": "uint256"
       }

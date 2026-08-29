@@ -83,10 +83,10 @@ contract DeployBoney is Script {
         //
         //    `GuardedKpiVerifier` is what a campaign's `KpiSpec.verifier` should point at: it always
         //    consults Boney's `EventMetricKpiVerifier`, and optionally cross-checks a second
-        //    verifier per KPI. 
-        //    `TouchWindowVerifier` is deployed here so it is available as that
-        //    second verifier under `Mode.CAP`, which is how attribution-timing enforcement stays on
-        //    chain rather than resting on the relayer alone.
+        //    verifier per KPI.
+        //    `TouchWindowVerifier` is deployed for off-chain window reads only. `Campaign` credits
+        //    each evidence action to whoever held attribution at that action's block, so the adapter
+        //    must not be wired as a `KpiSpec.verifier` or as a `Mode.CAP` second verifier.
         EventMetricKpiVerifier kpiVerifier =
             new EventMetricKpiVerifier(deployer, vm.envOr("BONEY_KPI_REPORTER", deployer));
         GuardedKpiVerifier guardedVerifier = new GuardedKpiVerifier(deployer, address(kpiVerifier));
