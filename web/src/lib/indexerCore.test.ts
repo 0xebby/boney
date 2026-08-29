@@ -1,5 +1,5 @@
 import {describe, it, expect} from "vitest";
-import {decodeAbiParameters, pad, toHex} from "viem";
+import {decodeAbiParameters, pad, toHex, type Hex} from "viem";
 import {
   actorFromTopic,
   aggregateActions,
@@ -7,9 +7,11 @@ import {
   blockChunks,
   decideReport,
   encodeActions,
+  foldToLimit,
   rawAmount,
   type IndexedLog,
 } from "./indexerCore";
+import {attributionLookup, buildAttributionWindows, type TouchLog} from "./attributionWindows";
 import {AMOUNT_MODE, type EventSource} from "./kpiSource";
 
 const WETH_DEPOSIT_TOPIC =
@@ -46,6 +48,38 @@ function depositLog(
   };
 }
 
+const ID_A = pad("0x0a", {size: 32});
+const ID_B = pad("0x0b", {size: 32});
+
+/**
+ * A `TouchStored` log, as `buildAttributionWindows` consumes them.
+ *
+ * @param user Wallet the touch attributes.
+ * @param blockNumber Block the touch landed in — the window's exclusive lower bound.
+ * @param expiresAt Second the attribution lapses, exclusive.
+ * @param promoterId Promoter the window credits.
+ * @returns The touch log.
+ */
+function touchLog(
+  user: `0x${string}`,
+  blockNumber: bigint,
+  expiresAt: bigint,
+  promoterId: Hex = ID_A,
+): TouchLog {
+  return {user, promoterId, signedAt: expiresAt - BigInt(1), expiresAt, blockNumber};
+}
+
+/**
+ * The attribution lookup those touches produce.
+ *
+ * @param touches Touch logs, in any order.
+ * @param startTime Campaign start, below which nothing is creditable.
+ * @returns The lookup `aggregateByActor` and `aggregateActions` take.
+ */
+function lookup(touches: readonly TouchLog[], startTime = BigInt(0)) {
+  return attributionLookup(buildAttributionWindows(touches), startTime);
+}
+
 describe("actorFromTopic", () => {
   it("reads a checksummed address out of the low 20 bytes", () => {
     expect(actorFromTopic(depositLog(ALICE, BigInt(1e18), BigInt(1)), 1)).toBe(ALICE);
@@ -80,54 +114,102 @@ describe("rawAmount", () => {
   });
 });
 
-describe("aggregateByActor — the attribution floor", () => {
+describe("aggregateByActor — attribution windows", () => {
   const T = BigInt(1_700_000_000);
+  const LATER = T + BigInt(86_400);
 
-  it("drops activity from before the actor's floor", () => {
-    const logs = [
-      depositLog(ALICE, BigInt(1e15), BigInt(10), T - BigInt(60)), // before attribution
-      depositLog(ALICE, BigInt(1e15), BigInt(11), T),
-      depositLog(ALICE, BigInt(1e15), BigInt(12), T + BigInt(60)),
-    ];
-
-    const totals = aggregateByActor(logs, source(), new Map([[ALICE.toLowerCase(), T]]));
-    // 2 of the 3 deposits, not 3 — the pre-attribution one credits a promoter who did not cause it.
-    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
-  });
-
-  it("counts activity exactly at the floor", () => {
+  it("drops an action sharing the touch's own block, keeps the one after it", () => {
+    // `AttributionRegistry.promoterAt` requires `storedAtBlock < atBlock`, so a touch never captures
+    // the block it landed in.
     const totals = aggregateByActor(
-      [depositLog(ALICE, BigInt(1e15), BigInt(10), T)],
+      [
+        depositLog(ALICE, BigInt(1e15), BigInt(10), T),
+        depositLog(ALICE, BigInt(1e15), BigInt(11), T),
+      ],
       source(),
-      new Map([[ALICE.toLowerCase(), T]]),
+      lookup([touchLog(ALICE, BigInt(10), LATER)]),
     );
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
   });
 
-  it("drops an actor with no floor entry — never attributed", () => {
+  it("drops activity from before the first touch", () => {
     const totals = aggregateByActor(
-      [depositLog(BOB, BigInt(5e15), BigInt(10), T)],
+      [
+        depositLog(ALICE, BigInt(1e15), BigInt(5), T),
+        depositLog(ALICE, BigInt(1e15), BigInt(11), T),
+        depositLog(ALICE, BigInt(1e15), BigInt(12), T),
+      ],
       source(),
-      new Map([[ALICE.toLowerCase(), T]]),
+      lookup([touchLog(ALICE, BigInt(10), LATER)]),
     );
-    expect(totals.has(BOB.toLowerCase())).toBe(false);
+    // 2 of the 3, not 3 — the pre-attribution one credits a promoter who did not cause it.
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
   });
 
-  it("drops an actor whose floor is zero", () => {
+  it("keeps work done under a superseded touch", () => {
     const totals = aggregateByActor(
-      [depositLog(ALICE, BigInt(5e15), BigInt(10), T)],
+      [
+        depositLog(ALICE, BigInt(1e15), BigInt(11), T),
+        depositLog(ALICE, BigInt(1e15), BigInt(21), T + BigInt(60)),
+      ],
       source(),
-      new Map([[ALICE.toLowerCase(), BigInt(0)]]),
+      lookup([
+        touchLog(ALICE, BigInt(10), LATER, ID_A),
+        touchLog(ALICE, BigInt(20), LATER, ID_B),
+      ]),
+    );
+    // Both eras count toward the cumulative total; `Campaign` splits them between A and B.
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
+  });
+
+  it("drops an action at the second the touch expires", () => {
+    const expiry = T + BigInt(60);
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(5e15), BigInt(11), expiry)],
+      source(),
+      lookup([touchLog(ALICE, BigInt(10), expiry)]),
     );
     expect(totals.has(ALICE.toLowerCase())).toBe(false);
   });
 
-  /** Matches the relayer: unresolved is excluded rather than assumed to clear the floor. */
+  it("drops an action in a gap, rather than falling back to an older live touch", () => {
+    const expiry = T + BigInt(60);
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(5e15), BigInt(20), T + BigInt(120))],
+      source(),
+      lookup([
+        touchLog(ALICE, BigInt(10), expiry, ID_A),
+        touchLog(ALICE, BigInt(30), LATER, ID_B),
+      ]),
+    );
+    // `Campaign` skips it too, so counting it would leave a total that can never settle.
+    expect(totals.has(ALICE.toLowerCase())).toBe(false);
+  });
+
+  it("drops an actor with no window at all — never attributed", () => {
+    const totals = aggregateByActor(
+      [depositLog(BOB, BigInt(5e15), BigInt(11), T)],
+      source(),
+      lookup([touchLog(ALICE, BigInt(10), LATER)]),
+    );
+    expect(totals.has(BOB.toLowerCase())).toBe(false);
+  });
+
+  it("drops an action from before the campaign started", () => {
+    const totals = aggregateByActor(
+      [depositLog(ALICE, BigInt(5e15), BigInt(11), T)],
+      source(),
+      lookup([touchLog(ALICE, BigInt(10), LATER)], T + BigInt(1)),
+    );
+    expect(totals.has(ALICE.toLowerCase())).toBe(false);
+  });
+
+  /** Matches the relayer: unresolved is excluded rather than assumed to fall inside a window. */
   it("drops a log whose timestamp could not be resolved", () => {
     const totals = aggregateByActor(
-      [depositLog(ALICE, BigInt(5e15), BigInt(10), BigInt(0))],
+      [depositLog(ALICE, BigInt(5e15), BigInt(11), BigInt(0))],
       source(),
-      new Map([[ALICE.toLowerCase(), T]]),
+      lookup([touchLog(ALICE, BigInt(10), LATER)]),
     );
     expect(totals.has(ALICE.toLowerCase())).toBe(false);
   });
@@ -141,25 +223,25 @@ describe("aggregateByActor — the attribution floor", () => {
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(5));
   });
 
-  it("applies the same floor on the indexed path, so the two cannot disagree", () => {
+  it("applies the same windows on the indexed path, so the two cannot disagree", () => {
     const src = source();
-    const floors = new Map([[ALICE.toLowerCase(), T]]);
+    const attribution = lookup([touchLog(ALICE, BigInt(10), LATER)]);
 
     const fromLogs = aggregateByActor(
       [
-        depositLog(ALICE, BigInt(1e15), BigInt(10), T - BigInt(60)),
+        depositLog(ALICE, BigInt(1e15), BigInt(10), T),
         depositLog(ALICE, BigInt(1e15), BigInt(11), T),
       ],
       src,
-      floors,
+      attribution,
     );
     const fromIndexer = aggregateActions(
       [
-        {user: ALICE, value: BigInt(1e15), blockNumber: BigInt(10), timestamp: T - BigInt(60)},
+        {user: ALICE, value: BigInt(1e15), blockNumber: BigInt(10), timestamp: T},
         {user: ALICE, value: BigInt(1e15), blockNumber: BigInt(11), timestamp: T},
       ],
       src,
-      floors,
+      attribution,
     );
 
     expect(fromIndexer.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
@@ -355,6 +437,7 @@ describe("aggregateActions", () => {
         decoded(BigInt(1e15), BigInt(20), BigInt(2_000)),
       ],
       source({scale: BigInt(1e15)}),
+      null,
     );
 
     expect(totals.get(ALICE.toLowerCase())!.actions.map((a) => a.timestamp)).toEqual([
@@ -372,6 +455,7 @@ describe("aggregateActions", () => {
         decoded(BigInt(6e14), BigInt(11), BigInt(2)),
       ],
       source({scale: BigInt(1e15)}),
+      null,
     );
 
     expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(1));
@@ -395,42 +479,41 @@ describe("decideReport", () => {
   const total = {
     referral: ALICE,
     amount: BigInt(5),
-    actions: [{timestamp: BigInt(1_000), amount: BigInt(5)}],
+    actions: [{blockNumber: BigInt(10), timestamp: BigInt(1_000), amount: BigInt(5)}],
     lastBlock: BigInt(10),
   };
 
-  /**
-   * The constraint that makes "index every mint and credit them all" impossible: storeTouch needs
-   * the referral's own signature, so a stranger's activity can never be credited.
-   */
-  it("refuses an unattributed referral — Campaign would revert NoAttribution", () => {
-    const decision = decideReport(total, false, BigInt(0));
-    expect(decision.send).toBe(false);
-    expect(decision.send === false && decision.reason).toMatch(/NoAttribution/);
-  });
-
-  it("sends when attributed and the total has grown", () => {
-    const decision = decideReport(total, true, BigInt(2));
+  it("sends when the total has grown", () => {
+    const decision = decideReport(total, BigInt(2));
     expect(decision.send).toBe(true);
     // Cumulative, not a delta — Campaign computes the delta itself.
     expect(decision.send === true && decision.newTotal).toBe(BigInt(5));
   });
 
+  /**
+   * The live touch is deliberately not a condition: `Campaign` credits each evidence action to
+   * whoever held the referral at that action's block, so a report can pay a promoter whose touch has
+   * since been superseded.
+   */
+  it("sends for a referral whose attribution has moved on", () => {
+    expect(decideReport(total, BigInt(0)).send).toBe(true);
+  });
+
   it("is a no-op when re-indexing the same range", () => {
-    expect(decideReport(total, true, BigInt(5)).send).toBe(false);
+    expect(decideReport(total, BigInt(5)).send).toBe(false);
   });
 
   it("never reports a total below what the chain already credited", () => {
     // Would revert NonMonotonic. Can happen if a reorg drops logs the last run saw.
-    expect(decideReport(total, true, BigInt(9)).send).toBe(false);
+    expect(decideReport(total, BigInt(9)).send).toBe(false);
   });
 });
 
 describe("encodeActions", () => {
-  it("round trips through the TouchWindowVerifier.Action[] layout", () => {
+  it("round trips through the Types.Action[] layout", () => {
     const actions = [
-      {timestamp: BigInt(1_700_000_000), amount: BigInt(2)},
-      {timestamp: BigInt(1_700_000_500), amount: BigInt(3)},
+      {blockNumber: BigInt(100), timestamp: BigInt(1_700_000_000), amount: BigInt(2)},
+      {blockNumber: BigInt(120), timestamp: BigInt(1_700_000_500), amount: BigInt(3)},
     ];
 
     const [decoded] = decodeAbiParameters(
@@ -438,6 +521,7 @@ describe("encodeActions", () => {
         {
           type: "tuple[]",
           components: [
+            {type: "uint64", name: "blockNumber"},
             {type: "uint64", name: "timestamp"},
             {type: "uint256", name: "amount"},
           ],
@@ -447,7 +531,88 @@ describe("encodeActions", () => {
     );
 
     expect(decoded).toHaveLength(2);
-    expect((decoded as readonly {timestamp: bigint; amount: bigint}[])[0]!.amount).toBe(BigInt(2));
+    // The block number is what `Campaign` asks `promotersAt` about, so it has to survive the encode.
+    expect(decoded).toEqual(actions);
+  });
+});
+
+/**
+ * Evidence longer than `Campaign.MAX_EVIDENCE_ACTIONS` reverts `TooManyActions`, so a busy referral's
+ * actions have to be folded rather than truncated — truncating would drop amount from a total the
+ * report still claims.
+ */
+describe("foldToLimit", () => {
+  const action = (blockNumber: bigint, amount: bigint, timestamp = blockNumber * BigInt(2)) => ({
+    blockNumber,
+    timestamp,
+    amount,
+  });
+
+  it("leaves a list that already fits untouched", () => {
+    const actions = [action(BigInt(1), BigInt(1)), action(BigInt(2), BigInt(2))];
+    expect(foldToLimit(actions, 4)).toEqual(actions);
+  });
+
+  it("collapses same-block actions first, which loses nothing", () => {
+    const folded = foldToLimit(
+      [
+        action(BigInt(10), BigInt(1), BigInt(100)),
+        action(BigInt(10), BigInt(2), BigInt(100)),
+        action(BigInt(11), BigInt(3), BigInt(110)),
+      ],
+      2,
+    );
+
+    // The chain's walk cannot tell two actions in one block apart, so the merge is exact.
+    expect(folded).toEqual([
+      {blockNumber: BigInt(10), timestamp: BigInt(100), amount: BigInt(3)},
+      {blockNumber: BigInt(11), timestamp: BigInt(110), amount: BigInt(3)},
+    ]);
+  });
+
+  it("folds a run onto its newest member", () => {
+    const folded = foldToLimit(
+      [
+        action(BigInt(1), BigInt(1)),
+        action(BigInt(2), BigInt(1)),
+        action(BigInt(3), BigInt(1)),
+        action(BigInt(4), BigInt(1)),
+      ],
+      2,
+    );
+
+    // Newest, so the entry resolves to the promoter holding attribution at that point.
+    expect(folded).toEqual([
+      {blockNumber: BigInt(2), timestamp: BigInt(4), amount: BigInt(2)},
+      {blockNumber: BigInt(4), timestamp: BigInt(8), amount: BigInt(2)},
+    ]);
+  });
+
+  it("preserves the sum and the ordering at any limit", () => {
+    const actions = Array.from({length: 300}, (_, i) =>
+      action(BigInt(i + 1), BigInt(i + 1)),
+    );
+    const expected = actions.reduce((a, b) => a + b.amount, BigInt(0));
+
+    for (const limit of [1, 2, 7, 256, 299]) {
+      const folded = foldToLimit(actions, limit);
+      expect(folded.length).toBeLessThanOrEqual(limit);
+      expect(folded.reduce((a, b) => a + b.amount, BigInt(0))).toBe(expected);
+      for (let i = 1; i < folded.length; i++) {
+        // `Campaign` reverts UnorderedEvidence on a block number that goes backwards.
+        expect(folded[i]!.blockNumber > folded[i - 1]!.blockNumber).toBe(true);
+      }
+    }
+  });
+
+  it("keeps the newest action's block, so the last entry still resolves", () => {
+    const actions = Array.from({length: 10}, (_, i) => action(BigInt(i + 1), BigInt(1)));
+    const folded = foldToLimit(actions, 3);
+    expect(folded[folded.length - 1]!.blockNumber).toBe(BigInt(10));
+  });
+
+  it("rejects a non-positive limit rather than returning nothing", () => {
+    expect(() => foldToLimit([action(BigInt(1), BigInt(1))], 0)).toThrow(/positive/);
   });
 });
 

@@ -180,6 +180,10 @@ function no(reason: string): TouchEligibility {
  * Passing the global cap alone would under-report `TouchTooLong` on a campaign with a tighter
  * window and let the UI wave through a touch the chain rejects.
  *
+ * `storedPromoterId` and `storedExpiresAt` are the stored touch's other two fields, which decide
+ * `TouchAlreadyActive`: a touch naming the promoter who already holds a live attribution is refused,
+ * while switching to a different promoter, or re-touching after the window lapses, is allowed.
+ *
  * `campaignEndTime` and `campaignStatus` are the campaign-life bound. Both are needed and neither
  * implies the other: a campaign past its `endTime` that nobody has ended yet is still `Active`, and
  * a campaign ended early is terminal while its `endTime` is still in the future. See
@@ -191,6 +195,10 @@ export function canStoreTouch(ctx: {
   touch: Touch;
   promoterRegistered: boolean;
   storedSignedAt: bigint;
+  /** The stored touch's `promoterId`, or the zero word when the user has never been touched here. */
+  storedPromoterId: `0x${string}`;
+  /** The stored touch's `expiresAt`. Zero when there is no stored touch. */
+  storedExpiresAt: bigint;
   now: number;
   /** The effective cap for this campaign — see `fetchEffectiveMaxDuration`. */
   maxTouchDuration: bigint;
@@ -233,6 +241,11 @@ export function canStoreTouch(ctx: {
 
   if (ctx.touch.signedAt <= ctx.storedSignedAt) {
     return no(`TouchNotNewer: signed at ${ctx.touch.signedAt}, stored ${ctx.storedSignedAt}`);
+  }
+
+  if (ctx.storedExpiresAt > nowTs && ctx.storedPromoterId === ctx.touch.promoterId) {
+    const id = ctx.touch.promoterId.slice(0, 10);
+    return no(`TouchAlreadyActive: ${id}... credits until ${ctx.storedExpiresAt}`);
   }
 
   return {ok: true};

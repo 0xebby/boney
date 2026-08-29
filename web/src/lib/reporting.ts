@@ -1,5 +1,6 @@
 import {classifyTouch, type TouchStatus} from "./referrals";
 import {nextTier} from "./campaign";
+import type {EvidenceAction} from "./indexerCore";
 import type {RewardTier} from "./types";
 
 /**
@@ -12,10 +13,10 @@ import type {RewardTier} from "./types";
  * ## Why a KOL selection needs planning at all
  *
  * `Campaign.reportUserAction(kpiIndex, user, newTotal, evidence)` takes a **referral** wallet, not
- * a promoter. It resolves the payee itself: `_resolvePromoterId(user)` reads the stored touch, and
- * a wallet with no live touch reverts `NoAttribution(user)`. So "report for this KOL" is not a call
- * the contract offers — it has to be turned into one call per referral currently attributed to
- * that KOL, which is what `planKolReport` does.
+ * a promoter. It resolves the payee from the evidence — who held that wallet at each action's block —
+ * and falls back to the live touch when there is none, reverting `NoAttribution(user)` if nobody
+ * holds it. So "report for this KOL" is not a call the contract offers — it has to be turned into one
+ * call per referral currently attributed to that KOL, which is what `planKolReport` does.
  *
  * Vocabulary, per `indexerCore`'s note: the ABI calls the attributed wallet `user` and those
  * strings are load-bearing, so they stay at the boundary. Here it is a **referral**. The web app
@@ -52,41 +53,6 @@ export function latestTouches(entries: readonly TouchEntry[]): TouchEntry[] {
   }
 
   return [...byReferral.values()];
-}
-
-/**
- * Each referral's *earliest* touch time on this campaign, keyed lowercase.
- *
- * The counterpart to `latestTouches`, and the floor every observed total is measured from. The two
- * answer different questions: the latest touch says **who** gets credited, the earliest says **from
- * when** activity counts.
- *
- * It has to be the earliest, not the current `signedAt`, because `Campaign` credits
- * `newTotal - _userCredited[user][kpi]` (`Campaign.sol:331`) and that guard is keyed by user alone —
- * one cumulative ledger spanning every promoter the referral ever had. So a reported total must be
- * cumulative over the referral's whole attributed history, or the subtraction is measuring two
- * different windows against each other.
- *
- * Concretely, with a referral who moved from promoter A to B after A had been credited 3:
- *
- *   floor = current signedAt -> B recomputes 3, already is 3, B is credited nothing, ever
- *   floor = earliest signedAt -> B reports 6, is credited 6 - 3 = 3, which is B's own era
- *
- * Activity from before the referral was *ever* attributed still cannot count — that is what the
- * floor excludes, and it is the rule `boneyMd/KPI_VERIFICATION.md` §8 exists for. `signedAt` is
- * strictly increasing per referral (`AttributionRegistry.sol:122` reverts `TouchNotNewer`), so the
- * minimum here is the first touch that was ever stored, not merely the oldest log still readable.
- */
-export function earliestSignedAt(entries: readonly TouchEntry[]): Map<string, bigint> {
-  const out = new Map<string, bigint>();
-
-  for (const entry of entries) {
-    const key = entry.referral.toLowerCase();
-    const seen = out.get(key);
-    if (seen === undefined || entry.signedAt < seen) out.set(key, entry.signedAt);
-  }
-
-  return out;
 }
 
 /** A referral row with its live/expired classification resolved. */
@@ -225,11 +191,11 @@ export type PlannedReport = {
   /**
    * Per-action evidence backing `delta`, when the report is sourced from observed logs.
    *
-   * Only meaningful for a verifier-gated KPI, which decodes it as `TouchWindowVerifier.Action[]`;
-   * `verifier == address(0)` ignores the argument, so the caller sends `"0x"` rather than paying
-   * calldata for a blob nothing reads. Absent on a simulated report, which has no actions behind it.
+   * `Campaign` decodes it as `Types.Action[]` for every KPI, verifier or not, and credits each action
+   * to whoever held the referral at that action's block. Absent on a simulated report, which has no
+   * actions behind it — that path falls back to resolving attribution at report time.
    */
-  actions?: readonly {timestamp: bigint; amount: bigint}[];
+  actions?: readonly EvidenceAction[];
 };
 
 export type ReportPlan =
@@ -315,8 +281,8 @@ export type ObservedReferral = {
   referral: `0x${string}`;
   /** Post-scaling total across every matched log, as `aggregateByActor` folds it. */
   observed: bigint;
-  /** Per-log contributions, for verifier evidence. */
-  actions: readonly {timestamp: bigint; amount: bigint}[];
+  /** Per-log contributions, for evidence. Ordered by block. */
+  actions: readonly EvidenceAction[];
 };
 
 /**

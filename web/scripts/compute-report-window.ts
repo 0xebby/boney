@@ -24,6 +24,7 @@
 import {createPublicClient, http, getAddress, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
 import {getDeployment} from "../src/lib/chains";
+import {blockAtTimestamp} from "../src/lib/blockSearch";
 
 /** `Types.CampaignStatus`. Only `Ended` changes how the close is computed. */
 const STATUS_ENDED = 3;
@@ -34,35 +35,14 @@ function arg(flag: string): string | undefined {
 }
 
 /**
- * Last block at or before `target`.
+ * A block-timestamp reader for `blockAtTimestamp`.
  *
- * Bounded below by `lo` rather than starting at genesis. A binary search over an L2's full height is
- * ~25 sequential round trips against an endpoint that 502s often enough to matter, and every block
- * before the protocol was deployed is known to be too early anyway.
+ * The search is bounded below by the protocol's deployment block rather than genesis: a binary search
+ * over an L2's full height is ~25 sequential round trips against an endpoint that 502s often enough to
+ * matter, and every block before deployment is known to be too early anyway.
  */
-async function blockAtTimestamp(
-  client: PublicClient,
-  target: bigint,
-  lo: bigint,
-  hi: bigint,
-): Promise<bigint> {
-  let low = lo;
-  let high = hi;
-  let result = lo;
-
-  while (low <= high) {
-    const mid = (low + high) / BigInt(2);
-    const block = await client.getBlock({blockNumber: mid});
-    if (block.timestamp <= target) {
-      result = mid;
-      low = mid + BigInt(1);
-    } else {
-      if (mid === BigInt(0)) break;
-      high = mid - BigInt(1);
-    }
-  }
-
-  return result;
+function timestampReader(client: PublicClient) {
+  return async (blockNumber: bigint) => (await client.getBlock({blockNumber})).timestamp;
 }
 
 function iso(timestamp: bigint): string {
@@ -103,15 +83,23 @@ async function main(): Promise<void> {
   const head = await client.getBlock({blockTag: "latest"});
   // The protocol's own deployment block is the earliest block that could hold anything relevant.
   const floor = getDeployment(chainId)?.startBlock ?? BigInt(0);
+  const readTimestamp = timestampReader(client);
+  const probed = new Map<bigint, bigint>();
 
-  const windowStartBlock = await blockAtTimestamp(client, BigInt(startTime), floor, head.number);
+  const windowStartBlock = await blockAtTimestamp(
+    readTimestamp,
+    BigInt(startTime),
+    floor,
+    head.number,
+    probed,
+  );
 
   // A close in the future has no block yet. Falling back to the head keeps the relayer working — it
   // stops at the head each run anyway — and this script gets re-run as chain time catches up.
   const closeInFuture = closesAt > head.timestamp;
   const windowEndBlock = closeInFuture
     ? head.number
-    : await blockAtTimestamp(client, closesAt, windowStartBlock, head.number);
+    : await blockAtTimestamp(readTimestamp, closesAt, windowStartBlock, head.number, probed);
 
   console.log("");
   console.log(`  windowStartBlock: ${windowStartBlock}`);

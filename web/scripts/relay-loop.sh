@@ -23,8 +23,9 @@ INTERVAL="${1:-120}"
 # campaign:kpiIndex.
 #
 # Only the **gated** KPIs belong here. Relaying an ungated one is pointless: with `verifier == 0x0` the
-# campaign credits the reported figure as-is, so there is no ceiling to raise. Of the 2026-08-23
-# five-project fixture's eleven KPIs, these two are gated.
+# campaign credits the reported figure as-is, so there is no ceiling to raise. Every KPI of the
+# 2026-08-29 two-campaign fixture (Venus, Sdy Labs) is ungated, so the list is empty and each cycle is
+# a no-op. It stays here so a gated KPI has one home the moment one is seeded.
 #
 # Addresses change with every `DeployBoney` + reseed, and a stale one is silent: the relayer reports
 # against a dead campaign, credits nothing, and the gated KPI simply stays flat.
@@ -33,10 +34,12 @@ INTERVAL="${1:-120}"
 # that are not user actions — the referral's own self-transfers, tier payouts leaving the EscrowVault,
 # the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
 # observed ceiling, which unlocks the next tier, which pays out again.
-TARGETS=(
-  "0x938E0c2Ef6E3ED250D1D004050091f0A26076fEC:0"   # 0 Sygma Bridge — bridge count, real Sygma bridge
-  "0xaBC517769c86a2122bCe19422b7863296c8BCF90:0"   # 4 Uniswap      — swap count, real V3 pool
-)
+TARGETS=()
+
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+  printf '[%s] no gated KPIs to relay — every KPI in this fixture is ungated.\n' "$(date -u +%H:%M:%S)"
+  exit 0
+fi
 
 while true; do
   for t in "${TARGETS[@]}"; do

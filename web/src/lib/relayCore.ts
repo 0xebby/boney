@@ -1,5 +1,6 @@
 import {decodeEventLog, parseAbiItem, getAddress, toEventSelector, type AbiEvent, type Hex} from "viem";
 import {AMOUNT_MODE, type AmountMode} from "./kpiSource";
+import type {AttributionLookup} from "./attributionWindows";
 
 /**
  * Turning raw event logs into the `reportBatch` calls `EventMetricKpiVerifier` will accept.
@@ -20,10 +21,11 @@ import {AMOUNT_MODE, type AmountMode} from "./kpiSource";
  *    32-byte word out of `log.data`, breaks silently the moment a project's event layout differs from
  *    the one it was written against.
  *
- *  - **Activity before a user was attributed must not count.** A promoter did not cause activity that
- *    predates their touch, so each log is checked against its own user's `signedAt` before it is
- *    folded in. This is the same rule `TouchWindowVerifier` enforces on chain, applied here so the
- *    cap itself already excludes it.
+ *  - **Activity nobody was attributed for must not count.** A promoter did not cause activity that
+ *    predates their touch, so each log is resolved against the attribution windows in
+ *    `attributionWindows.ts` — the same walk `AttributionRegistry.promoterAt` performs, and the same
+ *    one `Campaign` uses to segment a report. Applying it here means the cap already excludes what a
+ *    claim could never draw against.
  */
 
 /** How matching events fold into a total. Mirrors `EventMetricKpiVerifier.Aggregation`. */
@@ -298,11 +300,6 @@ export function decodeUserEvents(
   return {decoded, undecodable};
 }
 
-/** Every distinct user touched this run — one attribution read each, not one per log. */
-export function uniqueUsers(decoded: readonly DecodedEvent[]): string[] {
-  return [...new Set(decoded.map((d) => d.user))];
-}
-
 /** Every distinct block touched this run — one timestamp read each; many logs share a block. */
 export function uniqueBlocks(decoded: readonly DecodedEvent[]): bigint[] {
   return [...new Set(decoded.map((d) => d.blockNumber))];
@@ -313,7 +310,7 @@ export function uniqueBlocks(decoded: readonly DecodedEvent[]): bigint[] {
 export type AggregateResult = {
   /** Lowercased user => creditable delta from this run's logs. */
   deltas: Map<string, bigint>;
-  /** Logs dropped because they predate their user's attribution. */
+  /** Logs dropped because nobody held attribution when they happened. */
   excludedPreAttribution: number;
   /** Users skipped entirely for having no touch at all. */
   unattributed: string[];
@@ -322,38 +319,44 @@ export type AggregateResult = {
 /**
  * Folds decoded logs into per-user deltas, keeping only what a promoter actually earned.
  *
- * Two exclusions, both of which would otherwise credit a promoter for activity they did not cause:
+ * Two exclusions, both of which would otherwise raise the ceiling above what any promoter can be
+ * credited:
  *
- *  - **No attribution at all** (`signedAt == 0`) — the activity belongs to no promoter. `Campaign`
- *    reverts `NoAttribution` for these users anyway, so reporting them would raise a cap nothing can
- *    ever draw against.
- *  - **Activity before the user's own `signedAt`** — the user acted before they were ever attributed
- *    to the promoter who now holds them.
+ *  - **No touch at all** — the activity belongs to no promoter and never will.
+ *  - **No promoter held the user at that action's block** — the action predates their first touch,
+ *    or falls in a gap after one lapsed. `Campaign` skips exactly these actions when it segments a
+ *    report, so a ceiling that included them could never be drawn against.
+ *
+ * Attribution is resolved per action rather than against the live touch, so work done under a
+ * superseded touch still counts — that work is retroactively creditable on chain, and flooring on
+ * the current `signedAt` would starve it.
  *
  * A block with no known timestamp is treated as unresolved and excluded, because the alternative is
- * assuming it cleared the floor.
+ * assuming it fell inside a window.
  */
 export function aggregateDeltas(input: {
   decoded: readonly DecodedEvent[];
-  /** Lowercased user => `touchOf(campaign, user).signedAt`, 0 when never attributed. */
-  attributedAt: Map<string, bigint>;
+  /** Attribution as the chain would resolve it, from `attributionLookup`. */
+  attribution: AttributionLookup;
   blockTimestamps: Map<bigint, bigint>;
 }): AggregateResult {
-  const {decoded, attributedAt, blockTimestamps} = input;
+  const {decoded, attribution, blockTimestamps} = input;
 
   const deltas = new Map<string, bigint>();
   const unattributed = new Set<string>();
   let excludedPreAttribution = 0;
 
   for (const {user, value, blockNumber} of decoded) {
-    const signedAt = attributedAt.get(user);
-    if (signedAt === undefined || signedAt === BigInt(0)) {
+    if (!attribution.known(getAddress(user))) {
       unattributed.add(user);
       continue;
     }
 
     const eventTimestamp = blockTimestamps.get(blockNumber);
-    if (eventTimestamp === undefined || eventTimestamp < signedAt) {
+    if (
+      eventTimestamp === undefined ||
+      !attribution.at(getAddress(user), blockNumber, eventTimestamp)
+    ) {
       excludedPreAttribution++;
       continue;
     }
