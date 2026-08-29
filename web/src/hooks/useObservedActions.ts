@@ -8,6 +8,7 @@ import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {planWindows} from "@/lib/promoters";
 import {decodeEventSource, type EventSource} from "@/lib/kpiSource";
 import {aggregateByActor, type IndexedLog} from "@/lib/indexerCore";
+import {attributionLookup, type AttributionWindows} from "@/lib/attributionWindows";
 import {CampaignAbi} from "@/lib/abis";
 import type {ObservedReferral} from "@/lib/reporting";
 
@@ -60,7 +61,7 @@ export function useObservedActions({
   kpiIndex,
   params,
   referrals,
-  firstSignedAt,
+  windows,
   enabled,
 }: {
   campaign: `0x${string}` | undefined;
@@ -69,25 +70,27 @@ export function useObservedActions({
   params: Hex | undefined;
   referrals: readonly `0x${string}`[];
   /**
-   * Each referral's earliest touch time, from `useCampaignTouches`. The floor activity is measured
-   * from; a referral absent from it has never been attributed and is dropped entirely.
+   * Who held each referral over which blocks, from `useCampaignTouches`. A referral with no window
+   * has never been attributed and is dropped entirely.
    */
-  firstSignedAt: ReadonlyMap<string, bigint>;
+  windows: AttributionWindows;
   enabled: boolean;
 }) {
   const client = usePublicClient({chainId: useBoneyChainId()});
   const chainId = client?.chain?.id;
   const deployment = getDeployment(chainId);
   const key = referrals.map((r) => r.toLowerCase()).join(",");
-  // The floors are part of the query's input, so they belong in its key. A referral re-signing moves
-  // nothing here — `signedAt` only ever increases — but a *first* touch landing for a referral that
-  // had none changes what is creditable, and without this the panel would serve the stale answer.
-  const floorKey = referrals
-    .map((r) => `${r.toLowerCase()}:${firstSignedAt.get(r.toLowerCase()) ?? 0n}`)
+  // The windows are part of the query's input, so they belong in its key. A new touch changes which
+  // actions are creditable and to whom, and without this the panel would serve the stale answer.
+  const windowKey = referrals
+    .map((r) => {
+      const list = windows.get(r.toLowerCase()) ?? [];
+      return `${r.toLowerCase()}:${list.map((w) => `${w.fromBlock}-${w.expiresAt}`).join("+")}`;
+    })
     .join(",");
 
   const query = useQuery({
-    queryKey: ["observedActions", chainId, campaign, kpiIndex, params, key, floorKey],
+    queryKey: ["observedActions", chainId, campaign, kpiIndex, params, key, windowKey],
     enabled:
       enabled && Boolean(client && campaign && deployment) && isDeployed(chainId) && key.length > 0,
     // Matches the touch scan: this backs a write panel, so an action a few seconds old should show
@@ -101,7 +104,7 @@ export function useObservedActions({
 
       const publicClient = client as PublicClient;
       const head = await publicClient.getBlockNumber({cacheTime: 0});
-      const {windows, skippedBefore} = planWindows(deployment.startBlock, head);
+      const {windows: scanWindows, skippedBefore} = planWindows(deployment.startBlock, head);
 
       // `topics[0]` is the signature and the actor sits at `source.actorTopic`; the positions
       // between are wildcards. An array at the actor position is an OR over the referrals, so one
@@ -114,12 +117,12 @@ export function useObservedActions({
       const logs: IndexedLog[] = [];
       let failedWindows = 0;
       // Always resolved now. These used to be fetched only for a verifier-gated KPI, on the grounds
-      // that nothing else read the evidence — but the attribution floor below is a timestamp
-      // comparison, and a log carrying 0 is dropped rather than assumed to clear it. Skipping the
-      // fetch would therefore blank every ungated KPI's panel. Still deduped per block.
+      // that nothing else read the evidence — but attribution is resolved per action against a
+      // timestamp, and a log carrying 0 is dropped rather than assumed to fall inside a window.
+      // Skipping the fetch would therefore blank every ungated KPI's panel. Still deduped per block.
       const timestamps = new Map<bigint, bigint>();
 
-      for (const window of windows) {
+      for (const window of scanWindows) {
         let raw: RawLog[];
         try {
           raw = (await publicClient.request({
@@ -153,7 +156,7 @@ export function useObservedActions({
               timestamp = block.timestamp;
               timestamps.set(blockNumber, timestamp);
             } catch {
-              // Carried through as zero, which the floor treats as unresolved and drops. Evidence
+              // Carried through as zero, which attribution treats as unresolved and drops. Evidence
               // with a zero timestamp likewise fails a window check rather than passing one.
               timestamp = BigInt(0);
             }
@@ -168,26 +171,16 @@ export function useObservedActions({
         }
       }
 
-      // The floor the relayer and `scripts/indexer.ts` both apply: activity counts once the referral
-      // has been attributed at all and the campaign has begun tracking. It is the referral's
-      // *earliest* touch, not its current one — `Campaign` credits `newTotal - _userCredited`, and
-      // that guard spans every promoter the referral ever had, so a total measured only from the
-      // latest touch would leave a switched referral permanently uncreditable. See
-      // `earliestSignedAt`.
+      // The rule the relayer and `scripts/indexer.ts` both apply, and the one `Campaign` itself
+      // applies when it segments a report: each action is credited to whoever held the referral at
+      // that action's own block, and actions nobody held are dropped.
       const startTime = (await publicClient.readContract({
         address: campaign,
         abi: CampaignAbi,
         functionName: "startTime",
       })) as bigint;
 
-      const floors = new Map<string, bigint>();
-      for (const referral of referrals) {
-        const first = firstSignedAt.get(referral.toLowerCase());
-        if (first === undefined || first === BigInt(0)) continue; // never attributed
-        floors.set(referral.toLowerCase(), first > startTime ? first : startTime);
-      }
-
-      const totals = aggregateByActor(logs, source, floors);
+      const totals = aggregateByActor(logs, source, attributionLookup(windows, startTime));
       const observed = new Map<string, ObservedReferral>();
       for (const [addr, total] of totals) {
         observed.set(addr, {
@@ -208,6 +201,8 @@ export function useObservedActions({
     observed: query.data?.observed ?? EMPTY_OBSERVED,
     scannedFrom: query.data?.scannedFrom,
     failedWindows: query.data?.failedWindows ?? 0,
+    /** The scan's own failure, so a caller can say the readout is missing rather than empty. */
+    error: query.error,
     isLoading: query.isLoading && query.fetchStatus !== "idle",
     refetch: query.refetch,
   };

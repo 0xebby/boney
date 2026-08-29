@@ -5,6 +5,7 @@ import {useRouter} from "next/navigation";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {ErrorState} from "@/components/ui/States";
+import {Notice} from "@/components/ui/Notice";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
 import {usePublishGuide} from "@/hooks/usePublishGuide";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
@@ -592,6 +593,13 @@ function CreatedCard({
   const nothingToPublish = isEmptyGuide(built);
   const {state} = publish;
   const busy = state.status === "signing" || state.status === "saving";
+  const published = state.status === "saved" || state.status === "cleared";
+  /*
+    Campaign info was typed into the form and is not on the store yet. Nothing carries it across the
+    navigation `onView` performs, so leaving now discards it — which is why publishing is the primary
+    action while this holds.
+  */
+  const unpublished = !nothingToPublish && campaignAddress !== undefined && !published;
 
   return (
     <Card>
@@ -621,8 +629,12 @@ function CreatedCard({
             ) : (
               <>
                 <button
-                  className="mt-2 rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-hover disabled:opacity-50"
-                  disabled={busy || state.status === "saved" || state.status === "cleared"}
+                  className={`mt-2 rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                    unpublished
+                      ? "bg-brand text-plane hover:opacity-90"
+                      : "border border-hairline text-ink hover:bg-surface-hover"
+                  }`}
+                  disabled={busy || published}
                   onClick={() => void publish.publish(campaignAddress, built)}
                   type="button"
                 >
@@ -641,14 +653,24 @@ function CreatedCard({
           </div>
         ) : null}
 
-        <div className="text-center">
+        <div className="space-y-2 text-center">
           <button
-            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90"
+            className={`rounded-md px-4 py-2 text-sm font-semibold ${
+              unpublished
+                ? "border border-hairline-strong text-ink hover:bg-surface-hover"
+                : "bg-brand text-plane hover:opacity-90"
+            }`}
             onClick={onView}
             type="button"
           >
             View Campaign
           </button>
+          {unpublished ? (
+            <p className="text-xs text-warning">
+              The summary and links you typed are not saved yet. Leaving this screen discards them —
+              you can still add them from the campaign page afterwards.
+            </p>
+          ) : null}
         </div>
       </div>
     </Card>
@@ -664,7 +686,11 @@ function PublishNote({
   onRetry: () => void;
 }) {
   if (state.status === "saved") {
-    return <p className="mt-2 text-xs text-good">Published. The campaign page shows it now.</p>;
+    return (
+      <Notice tone="good" role="status" title="Published." className="mt-2">
+        The campaign page shows it now.
+      </Notice>
+    );
   }
 
   if (state.status === "cleared") {
@@ -673,20 +699,20 @@ function PublishNote({
 
   if (state.status === "error") {
     return (
-      <p className="mt-2 text-xs text-warning">
-        Not published: {state.message}{" "}
+      <Notice tone="critical" title="Not published" className="mt-2">
+        {state.message}{" "}
         <button className="underline hover:text-ink" onClick={onRetry} type="button">
           Try again
         </button>
         . The campaign itself is unaffected.
-      </p>
+      </Notice>
     );
   }
 
   if (state.status === "unwritable") {
     return (
       <div className="mt-2 space-y-1.5">
-        <p className="text-xs text-warning">{state.message}</p>
+        <Notice tone="warning" title={state.message} />
         {/*
           The entry itself, not a link to documentation. The alternative is telling a project their
           guide is gone and leaving them to retype prose they have already written once.

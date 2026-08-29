@@ -51,19 +51,33 @@ describe("isProjectWallet", () => {
 });
 
 describe("visibleSections", () => {
-  it("gives a promoter the ladders and a project the promoter table, never both", () => {
+  it("gives the ladders to the two roles with progress in them", () => {
     const promoter = visibleSections("promoter");
     const project = visibleSections("project");
 
     expect(promoter.kpis).toBe(true);
     expect(promoter.promoterTable).toBe(false);
+    expect(project.kpis).toBe(true);
     expect(project.promoterTable).toBe(true);
-    expect(project.kpis).toBe(false);
+
+    // A visitor has no position in the campaign, so there is no progress to draw against a tier.
+    for (const role of ["disconnected", "referral", "visitor"] as const) {
+      expect(visibleSections(role).kpis, role).toBe(false);
+    }
   });
 
-  it("shows a prospective promoter the same sections as a joined one", () => {
-    // Otherwise nobody could read the reward ladder before deciding to join.
-    expect(visibleSections("visitor")).toEqual(visibleSections("promoter"));
+  it("shows the escrow return only to the project wallet", () => {
+    // Reclaiming is a project-only action; nobody else can act on when it unlocks.
+    expect(visibleSections("project").escrowReturn).toBe(true);
+    for (const role of ["disconnected", "promoter", "referral", "visitor"] as const) {
+      expect(visibleSections(role).escrowReturn, role).toBe(false);
+    }
+  });
+
+  it("differs from a joined promoter only in the ladders", () => {
+    // Everything a prospective promoter needs to evaluate the campaign stays visible; only the
+    // tiers, which measure progress they do not have yet, wait for the join.
+    expect(visibleSections("visitor")).toEqual({...visibleSections("promoter"), kpis: false});
   });
 
   it("keeps the escrow accounting away from referrals", () => {

@@ -4,6 +4,7 @@ import {useState} from "react";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
+import {Notice} from "@/components/ui/Notice";
 import {useFundCampaign, useCampaignLifecycle} from "@/hooks/useWriteCampaign";
 import {isPending, type TxState} from "@/hooks/useWriteCampaign";
 import {
@@ -254,11 +255,26 @@ function ActionButton({
 /**
  * Transaction status line.
  *
- * `role="status"` so a screen reader hears the transition without the focus moving; a mined
- * transaction is announced, not just recolored.
+ * A settled transaction — confirmed or failed — renders as a `ui/Notice`, the shape every status
+ * message on the site takes. The two in-flight states stay as a muted line, announced through
+ * `role="status"` so a screen reader hears the transition without the focus moving.
  */
 function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
   if (state.status === "idle") return null;
+
+  if (state.status === "confirmed") {
+    return <Notice tone="good" role="status" title="Confirmed." className="mt-2" />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <Notice
+        tone="critical"
+        className="mt-2"
+        title={<TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />}
+      />
+    );
+  }
 
   return (
     <div role="status" aria-live="polite" className="mt-2 text-xs">
@@ -271,13 +287,7 @@ function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
             {state.hash.slice(0, 10)}…
           </span>
         </p>
-      ) : state.status === "confirmed" ? (
-        <p className="text-good">Confirmed.</p>
-      ) : (
-        <p>
-          <TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

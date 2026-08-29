@@ -4,6 +4,7 @@ import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
 import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
+import {useCampaignGuides} from "@/hooks/useCampaignGuides";
 import {denominations, type TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
@@ -23,8 +24,9 @@ import {
 } from "@/lib/filters";
 import {utilization} from "@/lib/campaign";
 import {summarizeKinds} from "@/lib/kpiSummary";
-import { projectName, hasProjectName } from "@/lib/projects";
-import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
+import {projectName, hasProjectName} from "@/lib/projects";
+import type {ResolvedGuide} from "@/lib/campaignGuide";
+import {formatTokenAmount, formatPercent, formatTimeUntil} from "@/lib/format";
 import type {CampaignView, KpiSpec} from "@/lib/types";
 
 /**
@@ -58,6 +60,13 @@ export function CampaignsPage() {
     object, so `useCampaigns`' 30s poll does not drag this along with it.
   */
   const {specs: kpiSpecs, dropped: kpiSpecsDropped} = useCampaignKpiSpecs(campaigns);
+
+  /*
+    What each campaign is *for*, in the project's own words. The committed catalog is in the bundle,
+    so a row that has an entry reads immediately; a project-published guide arrives a moment later
+    and lands in the same cache the campaign page reads.
+  */
+  const guides = useCampaignGuides(useMemo(() => campaigns.map((c) => c.campaign), [campaigns]));
 
   /*
     Which of these the connected wallet has already joined.
@@ -101,8 +110,8 @@ export function CampaignsPage() {
   const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
   const columns = useMemo(
-    () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, chainId),
-    [tokens, now, joinedAddresses, kpiSpecs, chainId],
+    () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, guides, chainId),
+    [tokens, now, joinedAddresses, kpiSpecs, guides, chainId],
   );
 
   if (!deployed) {
@@ -207,8 +216,37 @@ export function CampaignsPage() {
       </StatRow>
 
       {/* One filter row above everything it scopes — never per-card filters. Search lives in the
-          hero above, so this row is status and eligibility only. */}
-      <div className="flex flex-wrap items-center gap-2">
+          hero above, so this row is status and eligibility only. The controls sit at the trailing
+          edge, above the table's own right-aligned columns; what the row *says* stays at the left. */}
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+        <div className="mr-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          {visible.length !== campaigns.length ? (
+            <span className="text-xs text-ink-muted">
+              {visible.length} of {campaigns.length}
+            </span>
+          ) : null}
+
+          {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
+              column that quietly stopped describing the tail of the list would read as "no KPIs
+              here". */}
+          {kpiSpecsDropped > 0 ? (
+            <span className="text-xs text-ink-muted">
+              KPI kinds not loaded for {kpiSpecsDropped} campaign
+              {kpiSpecsDropped === 1 ? "" : "s"}
+            </span>
+          ) : null}
+        </div>
+
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
+          <input
+            type="checkbox"
+            checked={filters.joinableOnly}
+            onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
+            className="size-3.5 accent-[var(--brand)]"
+          />
+          Joinable by me
+        </label>
+
         <div className="flex items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
           {STATUS_OPTIONS.map((option) => {
             const active = filters.status === option;
@@ -227,31 +265,6 @@ export function CampaignsPage() {
             );
           })}
         </div>
-
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
-          <input
-            type="checkbox"
-            checked={filters.joinableOnly}
-            onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
-            className="size-3.5 accent-[var(--brand)]"
-          />
-          Joinable by me
-        </label>
-
-        {visible.length !== campaigns.length ? (
-          <span className="text-xs text-ink-muted">
-            {visible.length} of {campaigns.length}
-          </span>
-        ) : null}
-
-        {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a column
-            that quietly stopped describing the tail of the list would read as "no KPIs here". */}
-        {kpiSpecsDropped > 0 ? (
-          <span className="text-xs text-ink-muted">
-            KPI kinds not loaded for {kpiSpecsDropped} campaign
-            {kpiSpecsDropped === 1 ? "" : "s"}
-          </span>
-        ) : null}
       </div>
 
       <Card padded={false}>
@@ -264,7 +277,7 @@ export function CampaignsPage() {
             rows={visible}
             columns={columns}
             rowKey={(c) => c.campaign}
-                initialSort={{ key: "id", dir: "asc" }}
+            initialSort={{key: "project", dir: "asc"}}
             isRefreshing={isRefreshing}
             emptyState={
               <EmptyState
@@ -298,6 +311,7 @@ function buildColumns(
   now: number,
   joinedAddresses: ReadonlySet<string>,
   kpiSpecs: Record<string, KpiSpec[]>,
+  guides: Map<string, ResolvedGuide | null>,
   chainId?: number,
 ): Column<CampaignView>[] {
   const meta = (c: CampaignView) => tokens[c.token.toLowerCase()] ?? {symbol: "", decimals: 18};
@@ -321,11 +335,17 @@ function buildColumns(
     });
   };
 
+  /** The project's own line about the campaign, from its guide. */
+  const summaryFor = (c: CampaignView) =>
+    guides.get(c.campaign.toLowerCase())?.summary?.trim() || undefined;
+
   return [
     {
-      key: "id",
-      header: "Campaign",
-      sortValue: (c) => c.campaignId,
+      key: "project",
+      header: "Project",
+      // The campaign's on-chain name, which is what a project puts its own name in. The project
+      // wallet stands in where a campaign was created without one.
+      sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
       render: (c) => (
         <span className="inline-flex items-center gap-2">
           <Link
@@ -333,28 +353,35 @@ function buildColumns(
             className="font-medium text-ink hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
-            #{c.campaignId.toString()}
-            <span className="ml-2 font-normal text-ink-muted">{shortAddress(c.campaign)}</span>
+            {projectName(c)}
           </Link>
           {hasJoined(c) ? <JoinedBadge /> : null}
         </span>
       ),
     },
     {
-      key: "project",
-      header: "Project",
+      key: "why",
+      header: "Campaign",
       hideOnMobile: true,
-      // Sorts on the displayed string, so the column orders the way it reads. Rows falling back
-      // to an address sort among themselves under "0x" rather than being scattered by name.
-      sortValue: (c) => projectName(c),
-      render: (c) =>
-        hasProjectName(c) ? (
-          <span className="text-ink-secondary">{projectName(c)}</span>
-        ) : (
-          // An address here means no name is on file — dimmed so it reads as absent metadata
-          // rather than as a project literally called "0xba95…".
-          <span className="font-normal text-ink-muted">{shortAddress(c.project)}</span>
-        ),
+      width: "320px",
+      // Sorts on the summary, so campaigns that say what they are for group ahead of the ones that
+      // do not. The numeric id is not here at all — it is on the campaign's own page.
+      sortValue: (c) => summaryFor(c) ?? "",
+      render: (c) => {
+        const summary = summaryFor(c);
+
+        // Nothing published yet. Said as an absence rather than filled with the KPI kinds, which
+        // are their own column and describe what is measured rather than what it is for.
+        if (!summary) {
+          return <span className="text-ink-muted">No campaign info yet</span>;
+        }
+
+        return (
+          <span className="line-clamp-2 text-ink-secondary" title={summary}>
+            {summary}
+          </span>
+        );
+      },
     },
     {
       key: "status",
