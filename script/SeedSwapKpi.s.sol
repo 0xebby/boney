@@ -155,7 +155,9 @@ contract SeedSwapKpi is Script {
         console.log("         actor topics[2] (to), SUM / 1e5, tiers at 0.1/0.3/0.5/1/2 USDC out");
         console.log("");
         console.log("  To test: join as a promoter, sign a touch for a referral wallet, then have that");
-        console.log("  wallet swap WETH for USDC through SwapRouter02 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4.");
+        console.log(
+            "  wallet swap WETH for USDC through SwapRouter02 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4."
+        );
         console.log("  Then `pnpm relay` (observe as Boney) before `pnpm index` (claim as the project).");
     }
 

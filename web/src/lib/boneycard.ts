@@ -582,7 +582,8 @@ export type CardHistory = {
  *
  * Calibrated against the real fixture rather than in the abstract, which is the only way to make
  * "level 2" land somewhere that feels earned: the dev wallet holds 8 delivered campaigns and 31 tiers
- * across the 9 live campaigns on registry `0x6427217e`, and reaches 5.
+ * across the 9 campaigns of the 2026-08-23 fixture (registry `0x6427217e`, since replaced), and
+ * reaches 5.
  *
  * **Distinct projects is deliberately not a requirement.** One project address is behind every live
  * campaign, so a rung that demanded two would pin every wallet on this deployment below it forever —

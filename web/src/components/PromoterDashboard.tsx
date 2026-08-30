@@ -6,29 +6,44 @@ import {useAccount} from "wagmi";
 import {useCampaigns} from "@/hooks/useCampaigns";
 import type {TokenMeta} from "@/lib/token";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
-import {useReferredCampaigns} from "@/hooks/useReferredCampaigns";
+import {useCampaignAttributions} from "@/hooks/useCampaignAttributions";
 import {useNow} from "@/hooks/useNow";
+import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {PromoterDirectory} from "@/components/PromoterDirectory";
+import {ReferredCampaigns} from "@/components/ReferredCampaigns";
 import {trackingLink} from "@/lib/promoter";
 import { projectName, hasProjectName } from "@/lib/projects";
+import {classifyTouch} from "@/lib/referrals";
 import {
-  classifyTouch,
-  sortReferrals,
-  countLive,
-  type ReferredCampaign,
-} from "@/lib/referrals";
-import {formatTokenAmount, formatTimeUntil, shortAddress} from "@/lib/format";
+  countLiveAttributions,
+  promoterKey,
+  type AttributionEntry,
+} from "@/lib/attributions";
+import {cardLink} from "@/lib/publicCard";
+import {formatDateTime, formatTokenAmount, formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
 type JoinedRow = {
   view: CampaignView;
   promoterId: `0x${string}`;
   link: string;
+};
+
+/** One wallet attributed to this promoter, alongside the campaign it was attributed on. */
+type ReferralRow = {
+  view: CampaignView;
+  entry: AttributionEntry;
+};
+
+/** One campaign this wallet promotes, with the wallets currently attributed to it there. */
+type ReferralGroup = {
+  view: CampaignView;
+  entries: AttributionEntry[];
 };
 
 /**
@@ -39,8 +54,9 @@ type JoinedRow = {
  *
  *  - **Campaigns you promote** — memberships from `join()`, each with a tracking link to share.
  *  - **Campaigns you were referred to** — campaigns where *this* wallet signed a Touch through
- *    somebody else's link. The attribution is what credits that promoter when this wallet acts,
- *    so it is worth being able to see, and until now nothing in the app read it back.
+ *    somebody else's link, rendered by `ReferredCampaigns`. The same card is on `/my`, which is the
+ *    tab a wallet with no membership actually has: this page's nav entry appears only once the
+ *    wallet holds one, so a pure referral could never reach it here.
  *
  * A wallet with no memberships still sees the referral table (and vice versa); each carries its own
  * empty state rather than the page hiding one behind the other.
@@ -54,8 +70,15 @@ export function PromoterDashboard() {
   const {isConnected} = useAccount();
   const {campaigns, tokens, isLoading, error, refetch, deployed} = useCampaigns();
   const joinedQuery = useJoinedCampaigns(campaigns);
-  const referredQuery = useReferredCampaigns(campaigns);
   const now = useNow();
+
+  // Scoped to the memberships rather than the whole marketplace: only a campaign this wallet
+  // promotes can carry a referral of its own.
+  const joinedViews = useMemo(
+    () => joinedQuery.joined.map(({view}) => view),
+    [joinedQuery.joined],
+  );
+  const attributions = useCampaignAttributions(joinedViews);
 
   const rows = useMemo((): JoinedRow[] => {
     if (typeof window === "undefined") return [];
@@ -67,23 +90,39 @@ export function PromoterDashboard() {
     }));
   }, [joinedQuery.joined]);
 
-  const referredRows = useMemo(
-    () => sortReferrals(referredQuery.referred, now),
-    [referredQuery.referred, now],
-  );
-
   const activeCount = useMemo(
     () => rows.filter((r) => r.view.status === "Active").length,
     [rows],
   );
 
-  const liveReferrals = useMemo(
-    () => countLive(referredQuery.referred, now),
-    [referredQuery.referred, now],
+  const referralRows = useMemo((): ReferralRow[] => {
+    return joinedQuery.joined.flatMap(({view, promoterId}) => {
+      const entries = attributions.byPromoter.get(promoterKey(view.campaign, promoterId)) ?? [];
+      return entries.map((entry) => ({view, entry}));
+    });
+  }, [joinedQuery.joined, attributions.byPromoter]);
+
+  // Grouped per campaign rather than one flat list: a promoter id is minted per campaign, so a
+  // wallet attributed on two campaigns is two separate attributions, and the campaign is what
+  // decides whether the attribution is worth anything.
+  const referralGroups = useMemo((): ReferralGroup[] => {
+    const groups = joinedQuery.joined.map(({view, promoterId}) => ({
+      view,
+      entries: attributions.byPromoter.get(promoterKey(view.campaign, promoterId)) ?? [],
+    }));
+    return groups.sort(
+      (a, b) =>
+        b.entries.length - a.entries.length || Number(a.view.campaignId - b.view.campaignId),
+    );
+  }, [joinedQuery.joined, attributions.byPromoter]);
+
+  const liveAttributed = useMemo(
+    () => countLiveAttributions(referralRows.map((r) => r.entry), now),
+    [referralRows, now],
   );
 
   const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
-  const referredColumns = useMemo(() => buildReferredColumns(now), [now]);
+  const walletColumns = useMemo(() => buildWalletColumns(now), [now]);
 
   if (!deployed) {
     return (
@@ -127,10 +166,9 @@ export function PromoterDashboard() {
           hint="(one per campaign)"
         />
         <StatTile
-          label="Referred to"
-          value={referredRows.length.toLocaleString("en-US")}
-          hint={`${liveReferrals} still crediting`}
-         // accent="var(--series-3)"
+          label="Wallets you referred"
+          value={attributions.isLoading ? "—" : referralRows.length.toLocaleString("en-US")}
+          hint={`${liveAttributed} still crediting`}
         />
       </StatRow>
 
@@ -154,7 +192,7 @@ export function PromoterDashboard() {
             rows={rows}
             columns={columns}
             rowKey={(r) => r.view.campaign}
-                  initialSort={{ key: "id", dir: "asc" }}
+                  initialSort={{key: "name", dir: "asc"}}
             isRefreshing={joinedQuery.isRefreshing}
             emptyState={
               <EmptyState
@@ -175,39 +213,49 @@ export function PromoterDashboard() {
       </Card>
 
       {/*
-        Referrals — campaigns somebody else's link brought this wallet to. Rendered even when
-        empty, because "nobody has referred you" is a fair answer to a question the page now
-        invites, and hiding the table would make the stat tile above point at nothing.
+        The wallets this promoter's own links brought in, grouped by the campaign they were
+        attributed on. `AttributionRegistry` holds one touch per (campaign, wallet), so a wallet
+        appears once per campaign under whichever promoter it most recently signed for.
       */}
       <Card padded={false}>
         <div className="px-4 pt-4">
-          <CardHeader
-            title="Campaigns you were referred to"
-            subtitle="Attributions you signed through a promoter's boneylink"
-          />
+          <CardHeader title="Wallets you referred" />
         </div>
-        {isLoading || referredQuery.isLoading ? (
-          <SkeletonRows rows={2} cols={5} />
-        ) : referredQuery.error ? (
-          <ErrorState
-            message={String(referredQuery.error)}
-            onRetry={() => referredQuery.refetch()}
-          />
+        {isLoading || joinedQuery.isLoading || attributions.isLoading ? (
+          <SkeletonRows rows={2} cols={4} />
+        ) : attributions.error ? (
+          <ErrorState message={String(attributions.error)} onRetry={() => attributions.refetch()} />
         ) : (
-          <DataTable
-            rows={referredRows}
-            columns={referredColumns}
-            rowKey={(r) => r.view.campaign}
-            isRefreshing={referredQuery.isRefreshing}
-            emptyState={
+          <>
+            {attributions.scannedFrom !== undefined || attributions.truncated ? (
+              <p className="px-4 pb-2 text-xs text-ink-muted">
+                {attributions.scannedFrom !== undefined
+                  ? `Attributions signed before block ${attributions.scannedFrom.toString()} are not listed.`
+                  : "More attributions exist than one read returns, so this is a floor."}
+              </p>
+            ) : null}
+            {referralGroups.length === 0 ? (
               <EmptyState
-                title="No referrals yet"
-                description="When you follow a promoter's boneylink and confirm the attribution, the campaign shows up here."
+                title="No wallets attributed to you yet"
+                description="When somebody follows one of your boneylinks and confirms the attribution, their wallet shows up here."
               />
-            }
-          />
+            ) : (
+              <div className={attributions.isRefreshing ? "opacity-60" : undefined}>
+                {referralGroups.map((group) => (
+                  <ReferralGroupRows
+                    key={group.view.campaign}
+                    columns={walletColumns}
+                    group={group}
+                    now={now}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </Card>
+
+      <ReferredCampaigns campaigns={campaigns} isLoading={isLoading} />
     </div>
   );
 }
@@ -253,30 +301,34 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
 
   return [
     {
-      key: "id",
+      key: "name",
       header: "Campaign",
-      sortValue: (r) => r.view.campaignId,
+      // Sorts on the displayed title. Unnamed rows sort together under "Campaign #".
+      sortValue: (r) =>
+        hasProjectName(r.view) ? projectName(r.view) : `Campaign #${r.view.campaignId}`,
       render: (r) => (
-        <Link
-          href={`/campaign/${r.view.campaignId}`}
-          className="font-medium text-ink hover:underline"
-        >
-          #{r.view.campaignId.toString()}
-          <span className="ml-2 font-normal text-ink-muted">{shortAddress(r.view.campaign)}</span>
-        </Link>
+        <span className="inline-flex items-center gap-2">
+          <Link
+            href={`/campaign/${r.view.campaignId}`}
+            className="font-medium text-ink hover:underline"
+          >
+            {hasProjectName(r.view)
+              ? projectName(r.view)
+              : `Campaign #${r.view.campaignId.toString()}`}
+          </Link>
+          {hasProjectName(r.view) ? (
+            <span className="tnum text-xs text-ink-muted">#{r.view.campaignId.toString()}</span>
+          ) : null}
+        </span>
       ),
     },
     {
       key: "project",
       header: "Project",
+      // The project wallet — the title beside it names the campaign, not the project.
       hideOnMobile: true,
-      sortValue: (r) => projectName(r.view),
-      render: (r) =>
-        hasProjectName(r.view) ? (
-          <span className="text-ink-secondary">{projectName(r.view)}</span>
-        ) : (
-          <span className="font-normal text-ink-muted">{shortAddress(r.view.project)}</span>
-        ),
+      sortValue: (r) => r.view.project.toLowerCase(),
+      render: (r) => <span className="text-ink-muted">{shortAddress(r.view.project)}</span>,
     },
     {
       key: "status",
@@ -304,7 +356,12 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       key: "link",
       header: "Boneylink link",
       sortValue: () => 0,
-      render: (r) => <CopyLinkButton link={r.link} />,
+      render: (r) => (
+        <div className="flex items-center gap-1.5">
+          <CopyLinkButton link={r.link} />
+          <OpenLinkButton campaign={r.view.campaign} promoterId={r.promoterId} />
+        </div>
+      ),
     },
     {
       key: "ends",
@@ -327,83 +384,149 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
 }
 
 /**
- * Columns for the referral table.
+ * Columns for one campaign's attributed wallets.
  *
- * Takes no `tokens`: a referral is not being paid from this escrow, so a reward pool would be
- * noise. What matters instead is who referred them and whether the attribution is still crediting
- * that person — the two facts nothing in the app surfaced before.
+ * Carries no campaign column: the campaign is the group heading above the table. The referral's
+ * wallet links to its BoneyCard where that card exists, which is the only place in the app a
+ * promoter can read back what a wallet they referred has done.
  *
- * Sorted by the hook (`sortReferrals`: live first, then most recent) rather than by `initialSort`,
- * because the ordering depends on the clock and `DataTable`'s sort state is per-column.
+ * @param now Unix seconds, or `0` before the clock is live.
+ * @returns The column set.
  */
-function buildReferredColumns(now: number): Column<ReferredCampaign>[] {
+function buildWalletColumns(now: number): Column<AttributionEntry>[] {
   return [
     {
-      key: "id",
-      header: "Campaign",
-      sortValue: (r) => r.view.campaignId,
-      render: (r) => (
-        <Link
-          href={`/campaign/${r.view.campaignId}`}
-          className="font-medium text-ink hover:underline"
-        >
-          #{r.view.campaignId.toString()}
-          <span className="ml-2 font-normal text-ink-muted">{shortAddress(r.view.campaign)}</span>
-        </Link>
-      ),
+      key: "referral",
+      header: "Wallet",
+      sortValue: (e) => e.referral,
+      render: (e) => <ReferralWallet wallet={e.referral} />,
     },
     {
-      key: "project",
-      header: "Project",
+      key: "signed",
+      header: "Signed",
       hideOnMobile: true,
-      sortValue: (r) => projectName(r.view),
-      render: (r) =>
-        hasProjectName(r.view) ? (
-          <span className="text-ink-secondary">{projectName(r.view)}</span>
-        ) : (
-          <span className="font-normal text-ink-muted">{shortAddress(r.view.project)}</span>
-        ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      hideOnMobile: true,
-      sortValue: (r) => r.view.status,
-      render: (r) => <StatusPill status={r.view.status} />,
-    },
-    {
-      key: "promoter",
-      header: "Referred by",
-      sortValue: (r) => r.promoter ?? r.promoterId,
-      render: (r) =>
-        // The wallet when `promoterOf` resolved, the opaque id when it did not — the attribution
-        // is real either way, so the row shows what it has rather than an em dash.
-        r.promoter ? (
-          <span className="text-ink-secondary">{shortAddress(r.promoter)}</span>
-        ) : (
-          <span className="font-mono text-[11px] text-ink-muted">
-            {shortAddress(r.promoterId, 8, 6)}
-          </span>
-        ),
+      sortValue: (e) => e.signedAt,
+      render: (e) => <span className="text-ink-secondary">{formatDateTime(e.signedAt)}</span>,
     },
     {
       key: "attribution",
       header: "Attribution",
       numeric: true,
-      sortValue: (r) => r.expiresAt,
-      render: (r) => {
-        // Same first-paint rule as every other clock-dependent cell: `useNow` reports 0 until
-        // hydration, and "expired" is the one thing that must not flash.
+      sortValue: (e) => e.expiresAt,
+      render: (e) => {
+        // Same first-paint rule as the referral table: `useNow` reports 0 until hydration, and
+        // "expired" is the one thing that must not flash.
         if (now === 0) return <span className="text-ink-muted">—</span>;
 
-        return classifyTouch(r, now) === "live" ? (
-          <span className="text-good">{formatTimeUntil(r.expiresAt, now)} left</span>
+        return classifyTouch(e, now) === "live" ? (
+          <span className="text-good">{formatTimeUntil(e.expiresAt, now)} left</span>
         ) : (
           <span className="text-ink-muted">Expired</span>
         );
       },
     },
   ];
+}
+
+/**
+ * One campaign's block inside "Wallets you referred" — its heading, then its attributed wallets.
+ *
+ * A campaign this wallet joined but nobody has followed a link on is still listed, with a line
+ * saying so: which of the links has produced nothing is as useful as which has.
+ *
+ * @param columns The wallet column set from `buildWalletColumns`.
+ * @param group The campaign and the wallets currently attributed to this promoter on it.
+ * @param now Unix seconds, or `0` before the clock is live.
+ * @returns The campaign's heading and table.
+ */
+function ReferralGroupRows({
+  columns,
+  group,
+  now,
+}: {
+  columns: Column<AttributionEntry>[];
+  group: ReferralGroup;
+  now: number;
+}) {
+  const live = countLiveAttributions(group.entries, now);
+
+  return (
+    <div className="border-t border-hairline">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-4 py-2">
+        <Link
+          href={`/campaign/${group.view.campaignId}`}
+          className="text-sm font-medium text-ink hover:underline"
+        >
+          {projectName(group.view)}
+          <span className="tnum ml-2 text-xs font-normal text-ink-muted">
+            #{group.view.campaignId.toString()}
+          </span>
+        </Link>
+        <span className="text-xs text-ink-muted">
+          {group.entries.length === 1 ? "1 wallet" : `${group.entries.length} wallets`}
+          {now === 0 ? null : ` · ${live} still crediting`}
+        </span>
+      </div>
+      {group.entries.length === 0 ? (
+        <p className="px-4 pb-2 text-xs text-ink-muted">No wallets attributed yet.</p>
+      ) : (
+        <DataTable
+          rows={group.entries}
+          columns={columns}
+          rowKey={(e) => e.referral}
+          initialSort={{key: "signed", dir: "desc"}}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * A referred wallet, linked to its BoneyCard where that card exists.
+ *
+ * The link is dropped off the chain the card serves rather than rendered as a link to nowhere.
+ */
+function ReferralWallet({wallet}: {wallet: `0x${string}`}) {
+  const href = cardLink(wallet, useBoneyChainId());
+  const label = shortAddress(wallet);
+
+  return href ? (
+    <Link className="font-mono text-xs text-ink-secondary hover:underline" href={href}>
+      {label}
+    </Link>
+  ) : (
+    <span className="font-mono text-xs text-ink-secondary">{label}</span>
+  );
+}
+
+/**
+ * Follows a tracking link into the attribution flow, as the alternative to copying it.
+ *
+ * Points at the relative `/r` route rather than the absolute link `CopyLinkButton` carries, so it
+ * needs no origin and works during the server render.
+ *
+ * @param campaign Address of the campaign the link credits against.
+ * @param promoterId Campaign-scoped promoter id the link attributes to.
+ * @returns The link control.
+ */
+function OpenLinkButton({
+  campaign,
+  promoterId,
+}: {
+  campaign: `0x${string}`;
+  promoterId: `0x${string}`;
+}) {
+  return (
+    <Link
+      href={`/r?c=${campaign}&p=${promoterId}`}
+      // The row is itself clickable; following the link must not also navigate to the campaign.
+      onClick={(e) => e.stopPropagation()}
+      className="rounded bg-brand px-2 py-1 text-xs font-semibold text-plane transition-opacity hover:opacity-90"
+      title="Open this tracking link and attribute the connected wallet"
+    >
+      Attribute
+    </Link>
+  );
 }
 
 /**

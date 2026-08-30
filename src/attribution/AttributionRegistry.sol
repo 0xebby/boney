@@ -28,6 +28,9 @@ interface ICampaignWindow {
 ///      Touches may only be created while the named campaign can still accrue creditable work, and
 ///      only for a `promoterId` that campaign registered itself. Registration is namespaced by
 ///      registrant.
+///
+///      Every touch is also appended to an append-only per-`(user, campaign)` history, which
+///      `promoterAt` reads to say who held a user at a past block.
 contract AttributionRegistry is IAttributionRegistry, EIP712 {
     using ECDSA for bytes32;
 
@@ -42,6 +45,9 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
 
     /// @dev user => campaign => live touch.
     mapping(address => mapping(address => Touch)) private _touches;
+
+    /// @dev user => campaign => every touch that ever landed, oldest first.
+    mapping(address => mapping(address => TouchRecord[])) private _history;
 
     /// @dev campaign => promoterId => registered. Namespaced by registrant: an id claimed by a
     ///      non-campaign sits in that sender's own namespace, which no campaign ever reads.
@@ -100,7 +106,22 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         Touch storage prev = _touches[user][touch.campaign];
         if (touch.signedAt <= prev.signedAt) revert TouchNotNewer(touch.signedAt, prev.signedAt);
 
+        // The promoter already holding a live touch cannot be re-attributed; only a switch or a
+        // lapsed window admits a new one.
+        if (prev.expiresAt > nowTs && touch.promoterId == prev.promoterId) {
+            revert TouchAlreadyActive(prev.promoterId, prev.expiresAt);
+        }
+
         _touches[user][touch.campaign] = touch;
+
+        _history[user][touch.campaign].push(
+            TouchRecord({
+                promoterId: touch.promoterId,
+                signedAt: touch.signedAt,
+                expiresAt: touch.expiresAt,
+                storedAtBlock: uint64(block.number)
+            })
+        );
 
         emit TouchStored(touch.campaign, user, touch.promoterId, touch.signedAt, touch.expiresAt, relayer);
     }
@@ -163,6 +184,87 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @inheritdoc IAttributionRegistry
     function touchOf(address campaign, address user) external view returns (Touch memory) {
         return _touches[user][campaign];
+    }
+
+    /// @inheritdoc IAttributionRegistry
+    function promoterAt(address campaign, address user, uint64 atBlock, uint64 atTimestamp)
+        external
+        view
+        returns (bytes32)
+    {
+        return _promoterAt(_history[user][campaign], atBlock, atTimestamp);
+    }
+
+    /// @inheritdoc IAttributionRegistry
+    function promotersAt(
+        address campaign,
+        address user,
+        uint64[] calldata atBlocks,
+        uint64[] calldata atTimestamps
+    ) external view returns (bytes32[] memory promoterIds) {
+        if (atBlocks.length != atTimestamps.length) {
+            revert LengthMismatch(atBlocks.length, atTimestamps.length);
+        }
+
+        TouchRecord[] storage history = _history[user][campaign];
+        promoterIds = new bytes32[](atBlocks.length);
+        for (uint256 i; i < atBlocks.length; ++i) {
+            promoterIds[i] = _promoterAt(history, atBlocks[i], atTimestamps[i]);
+        }
+    }
+
+    /// @inheritdoc IAttributionRegistry
+    function soleAttributionSince(address campaign, address user, uint64 sinceBlock)
+        external
+        view
+        returns (bytes32)
+    {
+        TouchRecord[] storage history = _history[user][campaign];
+        uint256 len = history.length;
+        if (len == 0) return bytes32(0);
+
+        bytes32 id = history[len - 1].promoterId;
+        for (uint256 i = len - 1; i > 0; --i) {
+            // An entry stored at or before the span's first block covers the rest of it.
+            if (history[i].storedAtBlock <= sinceBlock) break;
+            if (history[i - 1].promoterId != id) return bytes32(0);
+        }
+        return id;
+    }
+
+    /// @inheritdoc IAttributionRegistry
+    function touchHistoryLength(address campaign, address user) external view returns (uint256) {
+        return _history[user][campaign].length;
+    }
+
+    /// @inheritdoc IAttributionRegistry
+    function touchHistoryAt(address campaign, address user, uint256 index)
+        external
+        view
+        returns (TouchRecord memory)
+    {
+        return _history[user][campaign][index];
+    }
+
+    /// @dev Newest-first walk taking the first record already on chain before `atBlock`, which makes
+    ///      a touch landing in the action's own block belong to the previous promoter. The winning
+    ///      record still has to be unexpired at `atTimestamp`, so a gap credits nobody.
+    /// @param history The user's touch history for one campaign, oldest first.
+    /// @param atBlock Block the action being attributed was observed in.
+    /// @param atTimestamp Timestamp of that block.
+    /// @return The promoter attributed then, or `bytes32(0)` if nobody was.
+    function _promoterAt(TouchRecord[] storage history, uint64 atBlock, uint64 atTimestamp)
+        private
+        view
+        returns (bytes32)
+    {
+        for (uint256 i = history.length; i > 0; --i) {
+            TouchRecord storage record = history[i - 1];
+            if (record.storedAtBlock >= atBlock) continue;
+            if (atTimestamp >= record.expiresAt) return bytes32(0);
+            return record.promoterId;
+        }
+        return bytes32(0);
     }
 
     /// @inheritdoc IAttributionRegistry

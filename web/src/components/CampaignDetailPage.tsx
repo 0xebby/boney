@@ -12,6 +12,7 @@ import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {Meter} from "@/components/ui/Meter";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
+import {Notice} from "@/components/ui/Notice";
 import {KpiPanel} from "@/components/KpiPanel";
 import {CampaignGuidePanel, hasGuideContent} from "@/components/CampaignGuidePanel";
 import {ProjectActions} from "@/components/ProjectActions";
@@ -19,8 +20,9 @@ import {ProjectPromotersPanel} from "@/components/ProjectPromotersPanel";
 import {ReportPanel} from "@/components/ReportPanel";
 import {PromoterPanel} from "@/components/PromoterPanel";
 import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
-import {projectName} from "@/lib/projects";
+import {hasProjectName, projectName} from "@/lib/projects";
 import {viewerRole, visibleSections} from "@/lib/viewerRole";
+import {classifyTouch, type ReferredCampaign} from "@/lib/referrals";
 import {
   formatTokenAmount,
   formatPercent,
@@ -61,9 +63,15 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
   /*
     Which sections this reader gets. Not a permission — every fact behind it is public on chain (see
     `lib/viewerRole`) — but the page serves four different readers off one route, and showing all of
-    them everything meant a referral got the escrow accounting while the project owner got the
-    promoter-facing reward ladders. Neither can act on what they were shown.
+    them everything meant a referral got the escrow accounting while a passing visitor got reward
+    ladders with no progress in them. Neither can act on what they were shown.
   */
+  /*
+    The attribution this wallet holds here, if any. `referredQuery` is a single-campaign list, so
+    the first entry is the only one it can carry.
+  */
+  const referral = referredQuery.referred[0];
+
   const role = viewerRole({
     connected: isConnected,
     wallet: address,
@@ -157,28 +165,36 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
   const explorer =
     chainId !== undefined ? explorerAddressUrl(chainId, detail.address) : undefined;
 
+  /**
+   * What the page is called.
+   *
+   * The campaign's own name, with the registry index as the fallback for a campaign created directly
+   * against the contracts without one.
+   */
+  const title = hasProjectName(detail)
+    ? projectName({name: detail.name, project: detail.project})
+    : `Campaign #${campaignId.toString()}`;
+
   return (
     <div className="space-y-5">
       <header className="space-y-2">
         <div className="flex items-center gap-2 text-xs text-ink-muted">
           <BackLink />
           <span aria-hidden>/</span>
-          <span>Campaign #{detail.address ? campaignId.toString() : "—"}</span>
+          <span>{title}</span>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="font-display text-2xl text-ink">
-              Campaign #{campaignId.toString()}
-            </h1>
+            <h1 className="font-display text-2xl text-ink">{title}</h1>
             <StatusPill status={detail.status} />
           </div>
 
           <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
             <div className="flex gap-1.5">
-              <dt>Project</dt>
-              <dd className="font-medium text-ink-secondary">
-                {projectName({name: detail.name, project: detail.project})}
+              <dt>Campaign</dt>
+              <dd className="tnum font-medium text-ink-secondary">
+                #{detail.address ? campaignId.toString() : "—"}
               </dd>
             </div>
             <div className="flex gap-1.5">
@@ -237,6 +253,13 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
       </StatRow>
 
       {/*
+        The wallet's own attribution on this campaign — who it credits and for how long. A referral
+        signs the touch on `/r` and is redirected straight here, so this is where the fact belongs;
+        nothing else on the page reads it back.
+      */}
+      {referral ? <ReferralAttribution referral={referral} now={now} /> : null}
+
+      {/*
         What to actually do about this campaign. Mounted here, directly after the tiles, because it is
         the section a referral needs and every other block below is hidden from them — so this lands
         immediately under the header on their page and below the accounting on everyone else's.
@@ -255,13 +278,14 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
         5.1 — escrow, utilization, window.
 
         Hidden from a referral: they are not paid from this pool, and how much of it has been
-        released is an arrangement between the project and its promoters. Both cards move together,
-        so the grid goes with them rather than leaving a one-card row.
+        released is an arrangement between the project and its promoters. The escrow-return card is
+        narrower still — only the project wallet, which is the only one that can reclaim — so the
+        utilization card takes the whole row when it is absent rather than leaving a gap beside it.
       */}
       {sections.poolUtilization || sections.escrowReturn ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {sections.poolUtilization ? (
-            <Card className="lg:col-span-2">
+            <Card className={sections.escrowReturn ? "lg:col-span-2" : "lg:col-span-3"}>
               <CardHeader
                 title="Pool utilization"
                 subtitle="Share of escrow already released to promoters"
@@ -295,10 +319,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
 
           {sections.escrowReturn ? (
             <Card>
-              <CardHeader
-                title="Escrow return"
-                subtitle="Unspent funds after the settlement window"
-              />
+              <CardHeader title="Escrow return" />
               {detail.status === "Ended" || detail.status === "Cancelled" ? (
                 <div className="space-y-2 text-xs">
                   {reclaimOpen ? (
@@ -429,20 +450,67 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
             </div>
           )}
         </section>
-      ) : role === "disconnected" ? (
+      ) : role === "disconnected" || role === "visitor" ? (
         /*
           A tier threshold only means something against "what would *I* be paid", so the ladders wait
-          for a wallet. Said out loud rather than left as a gap — an absent section reads as a
-          campaign with no KPIs, which is a different and much worse claim.
+          for a position in the campaign. Said out loud rather than left as a gap — an absent section
+          reads as a campaign with no KPIs, which is a different and much worse claim.
         */
         <Card>
           <EmptyState
             title={`${detail.kpis.length} KPI${detail.kpis.length === 1 ? "" : "s"} on this campaign`}
-            description="Connect a wallet to see what each KPI measures and the reward tiers behind it."
+            description={
+              role === "disconnected"
+                ? "Connect a wallet to see what each KPI measures and the reward tiers behind it."
+                : "Join as a promoter to see what each KPI measures and the reward tiers behind it."
+            }
           />
         </Card>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The connected wallet's attribution on this campaign.
+ *
+ * @param referral The stored touch, with the promoter it names resolved where possible.
+ * @param now Unix seconds, or `0` before the clock is live.
+ * @returns The attribution notice.
+ */
+function ReferralAttribution({referral, now}: {referral: ReferredCampaign; now: number}) {
+  const promoter = referral.promoter
+    ? shortAddress(referral.promoter)
+    : shortAddress(referral.promoterId, 8, 6);
+  const expired = classifyTouch(referral, now) === "expired";
+
+  if (expired) {
+    return (
+      <Notice
+        tone="warning"
+        title="Your attribution on this campaign has expired"
+        action={
+          <Link
+            href={`/r?c=${referral.view.campaign}&p=${referral.promoterId}`}
+            className="rounded bg-brand px-2.5 py-1.5 text-xs font-semibold text-plane transition-opacity hover:opacity-90"
+          >
+            Attribute again
+          </Link>
+        }
+      >
+        Promoter <span className="font-mono text-ink">{promoter}</span> stopped being credited for
+        your actions here on {formatDate(referral.expiresAt)}. Signing again restarts the window.
+      </Notice>
+    );
+  }
+
+  return (
+    <Notice tone="info" title="You were referred to this campaign">
+      Promoter <span className="font-mono text-ink">{promoter}</span> is credited for what you do
+      here{now > 0 ? ` for another ${formatTimeUntil(referral.expiresAt, now)}` : ""} — until{" "}
+      {formatDate(referral.expiresAt)}. Another promoter&rsquo;s boneylink would switch that; this
+      one cannot be extended by signing it again.
+    </Notice>
   );
 }
 

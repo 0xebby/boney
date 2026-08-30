@@ -6,7 +6,7 @@ import {DataTable, type Column} from "@/components/ui/DataTable";
 import {nextTier, tierProgressRatio, crossedTierCount} from "@/lib/campaign";
 import {formatTokenAmount, compactNumber, formatRatio, shortAddress} from "@/lib/format";
 import {shortTopic} from "@/lib/eventNames";
-import {decodeEventSource} from "@/lib/kpiSource";
+import {decodeEventSource, describeTopicFilter} from "@/lib/kpiSource";
 import {describeThreshold, describeUnit, type UnitInput} from "@/lib/kpiUnits";
 import {useTrackedEvent} from "@/hooks/useTrackedEvent";
 import {explorerAddressUrl} from "@/lib/chains";
@@ -157,7 +157,7 @@ export function KpiPanel({
             valueText={formatRatio(tierProgressRatio(progressBasis, kpi.tiers))}
           />
         ) : (
-          <p className="text-xs text-good">
+          <p className="text-xs font-bold text-brand">
             All {kpi.tiers.length} tier{kpi.tiers.length === 1 ? "" : "s"} crossed
             {crossed > 0 ? " — ladder complete" : ""}
           </p>
@@ -219,6 +219,11 @@ function EventSourceLine({
   const href = chainId === undefined ? undefined : explorerAddressUrl(chainId, tracked.contract);
   const address = shortAddress(tracked.contract);
 
+  // A fixed-topic filter narrows which of that contract's logs count, so a filtered KPI must not
+  // read identically to an unfiltered one on the same event and address.
+  const source = decodeEventSource(kpi.spec.params);
+  const filter = source ? describeTopicFilter(source) : null;
+
   return (
     <div
       className={`mb-4 rounded border border-hairline bg-surface-2 px-3 py-2 transition-opacity ${
@@ -227,12 +232,14 @@ function EventSourceLine({
     >
       <p className="text-[10px] uppercase tracking-wide text-ink-muted">Tracking</p>
 
-      <p
-        className={`mt-0.5 break-all text-xs text-ink ${
-          tracked.eventFrom === "kind" ? "" : "font-mono"
-        }`}
-      >
-        {tracked.event}
+      {/*
+        Event, contract and unit on one wrapping line rather than three stacked ones. The three are a
+        single sentence — *this event, on this contract, priced this way* — and the box was taller than
+        the ladder it introduces when each clause held its own line.
+      */}
+      <p className="mt-0.5 break-words text-xs text-ink">
+        <span className={tracked.eventFrom === "kind" ? "" : "font-mono"}>{tracked.event}</span>
+
         {/*
           Nothing on chain publishes a name for this topic, so the label above is the KPI's category
           rather than its event. Showing the topic keeps the line checkable instead of asking a
@@ -246,47 +253,48 @@ function EventSourceLine({
             {shortTopic(tracked.topic0)}
           </span>
         ) : null}
-      </p>
 
-      <p className="mt-0.5 text-xs text-ink-muted">
-        on{" "}
-        {/* When the protocol name *is* the short address, printing it twice says nothing twice. */}
-        {tracked.protocolFrom !== "address" ? <span className="text-ink-secondary">{tracked.protocol}</span> : null}
-        {tracked.protocolFrom !== "address" ? " · " : null}
-        {href ? (
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono underline hover:text-ink"
-          >
-            {address}
-          </a>
-        ) : (
-          <span className="font-mono">{address}</span>
-        )}
-      </p>
+        <span className="text-ink-muted">
+          {" "}
+          on{" "}
+          {/* When the protocol name *is* the short address, printing it twice says nothing twice. */}
+          {tracked.protocolFrom !== "address" ? (
+            <span className="text-ink-secondary">{tracked.protocol}</span>
+          ) : null}
+          {tracked.protocolFrom !== "address" ? " · " : null}
+          {href ? (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono underline hover:text-ink"
+            >
+              {address}
+            </a>
+          ) : (
+            <span className="font-mono">{address}</span>
+          )}
+          {filter ? `, ${filter}` : null}
+          {" · "}
+        </span>
 
-      {/*
-        What a unit of progress actually costs, spelled out.
-
-        This line used to be a five-word fragment on the end of the address above — `· 10 per unit` —
-        which never said ten of *what*, and sat on the least-read line of the card. Every threshold in
-        the ladder below is denominated in the unit this sentence defines, so it belongs on its own
-        line and above them. See `lib/kpiUnits`.
-      */}
-      <p className="mt-1 text-xs text-ink-secondary">
-        {describeUnit({
-          amountMode: tracked.amountMode,
-          kind: kpi.spec.kind,
-          scale: tracked.scale,
-          signature: tracked.eventFrom === "kind" ? undefined : tracked.event,
-          token: tracked.token,
-        })}
+        {/*
+          What a unit of progress actually costs. Every threshold in the ladder below is denominated in
+          the unit this clause defines, so it stays above them — see `lib/kpiUnits`.
+        */}
+        <span className="text-ink-secondary">
+          {describeUnit({
+            amountMode: tracked.amountMode,
+            kind: kpi.spec.kind,
+            scale: tracked.scale,
+            signature: tracked.eventFrom === "kind" ? undefined : tracked.event,
+            token: tracked.token,
+          })}
+        </span>
       </p>
 
       {/* The verifier and the params blob name different events — see `TrackedEvent.drift`. */}
-      {tracked.drift ? <p className="mt-1.5 text-xs text-warning">{tracked.drift}</p> : null}
+      {tracked.drift ? <p className="mt-1.5 text-xs text-brand">{tracked.drift}</p> : null}
     </div>
   );
 }
@@ -310,7 +318,7 @@ function LadderState({row, hasPromoter}: {row: LadderRow; hasPromoter: boolean})
   if (row.settled) {
     return <span className="text-xs text-ink-secondary">Paid</span>;
   }
-  return <span className="text-xs font-medium text-warning">Unsettled</span>;
+  return <span className="text-xs font-medium text-brand">Unsettled</span>;
 }
 
 /**

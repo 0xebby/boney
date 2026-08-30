@@ -11,6 +11,7 @@ import {IEventMetricKpiVerifier} from "../src/interfaces/IEventMetricKpiVerifier
 import {GuardedKpiVerifier} from "../src/verifiers/GuardedKpiVerifier.sol";
 import {IGuardedKpiVerifier} from "../src/interfaces/IGuardedKpiVerifier.sol";
 import {TouchWindowVerifier} from "../src/verifiers/TouchWindowVerifier.sol";
+import {Types} from "../src/libraries/Types.sol";
 
 /// @dev A project verifier whose answer the test controls, for exercising the agreement arithmetic
 ///      without dragging a second real measurement pipeline into it.
@@ -273,19 +274,25 @@ contract GuardedKpiVerifierTest is Test {
 
         uint64 firstSignedAt = uint64(block.timestamp);
         _storeTouch(attribution, mock, alicePk, first, firstSignedAt);
+        uint64 firstBlock = uint64(block.number);
 
         // The switch. `signedAt` must be strictly newer, and it becomes the floor below which
         // `TouchWindowVerifier` credits nothing.
         vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 1);
         uint64 secondSignedAt = uint64(block.timestamp);
         _storeTouch(attribution, mock, alicePk, second, secondSignedAt);
+        uint64 secondBlock = uint64(block.number);
 
-        TouchWindowVerifier.Action[] memory actions = new TouchWindowVerifier.Action[](2);
-        actions[0] = TouchWindowVerifier.Action({timestamp: firstSignedAt + 1 hours, amount: 60});
-        actions[1] = TouchWindowVerifier.Action({timestamp: secondSignedAt + 1 hours, amount: 40});
+        Types.Action[] memory actions = new Types.Action[](2);
+        actions[0] =
+            Types.Action({blockNumber: firstBlock + 1, timestamp: firstSignedAt + 1 hours, amount: 60});
+        actions[1] =
+            Types.Action({blockNumber: secondBlock + 1, timestamp: secondSignedAt + 1 hours, amount: 40});
 
         // Actions must not be future-dated or the adapter rejects the evidence outright.
         vm.warp(block.timestamp + 2 hours);
+        vm.roll(block.number + 1);
 
         evidence = abi.encode(actions);
     }

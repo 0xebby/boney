@@ -2,14 +2,11 @@
 
 import Link from "next/link";
 import {Card, CardHeader} from "@/components/ui/Card";
-import {StatTile} from "@/components/ui/StatTile";
 import {Meter} from "@/components/ui/Meter";
 import {RankBadge} from "@/components/ui/RankBadge";
-import {TrustReachBar} from "@/components/ui/TrustReachBar";
 import {BoneLevel, BoneWatermark} from "@/components/ui/Bone";
 import {ErrorState, SkeletonRows} from "@/components/ui/States";
 import {BoneyCardHistory} from "@/components/BoneyCardHistory";
-import {ETHOS_WEIGHT, REACH_WEIGHT} from "@/lib/boneyscore";
 import {
   type CardHistory,
   type CardScore,
@@ -41,7 +38,7 @@ import {compactNumber, shortAddress} from "@/lib/format";
  *
  * ## Design-system notes
  *
- * Reuses `ui/StatTile`, `ui/Meter`, `ui/TrustReachBar` and `ui/RankBadge` rather than restyling: the
+ * Reuses `ui/Meter` and `ui/RankBadge` rather than restyling: the
  * form decisions are already made there (a lone current value is a stat tile, a ratio against a limit
  * is a meter, an ordinal rank takes the sequential ramp rather than a categorical hue). The bone
  * outline is decorative framing and encodes nothing — every value inside it is text, so the shape can
@@ -54,7 +51,6 @@ export function BoneyCard({
   wallet,
   score,
   scoreLoading,
-  onChainScore,
   onChainExpired,
   scale,
   qualification,
@@ -63,8 +59,6 @@ export function BoneyCard({
   history,
   historyUnavailable,
   historyLoading,
-  indexedBlock,
-  lag,
   earnedToken,
   onVerify,
   onRetryScore,
@@ -73,7 +67,6 @@ export function BoneyCard({
   wallet: `0x${string}` | undefined;
   score: CardScore | undefined;
   scoreLoading: boolean;
-  onChainScore: bigint | undefined;
   onChainExpired: boolean;
   scale: ScoreScale;
   qualification: Qualification;
@@ -82,8 +75,6 @@ export function BoneyCard({
   history: CardHistory | undefined;
   historyUnavailable: GraphUnavailable | undefined;
   historyLoading: boolean;
-  indexedBlock: bigint | undefined;
-  lag: bigint | undefined;
   earnedToken: TokenMeta | null;
   onVerify?: () => void;
   onRetryScore?: () => void;
@@ -109,8 +100,6 @@ export function BoneyCard({
       card={history}
       unavailable={historyUnavailable}
       isLoading={historyLoading}
-      indexedBlock={indexedBlock}
-      lag={lag}
       earnedToken={earnedToken}
       onRetry={onRetryHistory}
     />
@@ -127,13 +116,14 @@ export function BoneyCard({
         onRetryScore={onRetryScore}
       />
 
-      {score?.kind === "scored" ? (
-        <ScoreBreakdown
-          score={score}
-          onChainScore={onChainScore}
-          onChainExpired={onChainExpired}
-          scale={scale}
-        />
+      {/*
+        The one state notice the breakdown carried that is not an explanation: expired attestations
+        drop the score campaigns read back to zero.
+      */}
+      {onChainExpired ? (
+        <p className="text-xs text-brand">
+          Your on-chain attestations have expired. Re-verify to restore the score campaigns read.
+        </p>
       ) : null}
 
       {historyFirst ? historySection : null}
@@ -231,12 +221,6 @@ function ScoredHead({
           <p className="font-display text-4xl leading-tight text-ink">
             {total.toLocaleString()}
           </p>
-          {/*
-            Labelled, not left to imply delivery. This number is credibility and audience only —
-            nothing a promoter has done on Boneyard moves it, which is the whole reason stage 2
-            exists.
-          */}
-          <p className="mt-0.5 text-xs text-ink-muted">credibility &amp; reach — not delivery</p>
         </div>
         {/* `muted` tone: this is the viewer's own standing, not a row they are vetting. */}
         <RankBadge rank={score.rank} tone="muted" />
@@ -252,7 +236,7 @@ function ScoredHead({
         <Meter
           value={total}
           max={scale.max}
-          label="of the maximum attainable score"
+          ariaLabel="Score against the network maximum"
           valueText={`${total.toLocaleString()} / ${scale.max.toLocaleString()}`}
         />
       ) : null}
@@ -263,7 +247,7 @@ function ScoredHead({
         {reachUnconfirmed ? (
           // Words, not colour. `fetchFollowers` returns 0 for an outage and for an empty account
           // alike, so this is a suspicion and has to read as one.
-          <span className="text-warning">reach unconfirmed — follower count unavailable</span>
+          <span className="text-brand">reach unconfirmed — follower count unavailable</span>
         ) : (
           <span>{compactNumber(followers)} followers</span>
         )}
@@ -330,81 +314,6 @@ function UnavailableHead({message, onRetry}: {message?: string; onRetry?: () => 
       detail={message ?? "Could not reach the score service."}
       onRetry={onRetry}
     />
-  );
-}
-
-/** How the score was reached, and whether the chain agrees with it yet. */
-function ScoreBreakdown({
-  score,
-  onChainScore,
-  onChainExpired,
-  scale,
-}: {
-  score: Extract<CardScore, {kind: "scored"}>;
-  onChainScore: bigint | undefined;
-  onChainExpired: boolean;
-  scale: ScoreScale;
-}) {
-  const {ethos, reach, total, level} = score.score;
-  const ethosPoints = ETHOS_WEIGHT * ethos;
-  const reachPoints = REACH_WEIGHT * reach;
-  const trustPct = total > 0 ? Math.round((ethosPoints / total) * 100) : 0;
-
-  const attested = onChainScore ?? BigInt(0);
-  const matchesChain = attested >= BigInt(total);
-
-  return (
-    <Card>
-      <CardHeader
-        title="How that score is made"
-        subtitle={`${ETHOS_WEIGHT}× Ethos + ${REACH_WEIGHT}× reach — trust weighted higher because followers are purchasable and Ethos vouches are not.`}
-        action={<TrustReachBar trustPct={trustPct} reachPct={100 - trustPct} />}
-      />
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        <StatTile
-          label="ETHOS"
-          value={ethos.toLocaleString()}
-          qualifier={`→ ${ethosPoints.toLocaleString()} pts`}
-          hint={level}
-        />
-        <StatTile
-          label="REACH"
-          value={reach.toLocaleString()}
-          qualifier={`→ ${reachPoints.toLocaleString()} pts`}
-          hint="log-normalised follower count"
-        />
-        <StatTile
-          label="ON CHAIN"
-          value={attested.toLocaleString()}
-          hint={
-            !scale.verifiable
-              ? "this network records no scores"
-              : matchesChain
-                ? "verified — campaigns can read this"
-                : "not verified yet — join gates read 0"
-          }
-        />
-      </div>
-
-      {/*
-        The gap between the two scores, stated plainly. `join()` reads the on-chain figure, so a
-        promoter who reads the headline number as their gate-clearing score pays gas for a
-        transaction that reverts InsufficientReputation.
-      */}
-      {!matchesChain && scale.verifiable ? (
-        <p className="mt-3 text-xs text-ink-secondary">
-          The score above is computed from your Ethos profile. Campaigns read the on-chain figure,
-          which stays at {attested.toLocaleString()} until you verify.
-        </p>
-      ) : null}
-
-      {onChainExpired ? (
-        <p className="mt-2 text-xs text-warning">
-          Your on-chain attestations have expired. Re-verify to restore the score campaigns read.
-        </p>
-      ) : null}
-    </Card>
   );
 }
 

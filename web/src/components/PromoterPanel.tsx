@@ -1,9 +1,11 @@
 "use client";
 
 import {useState, useMemo} from "react";
+import Link from "next/link";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
+import {Notice} from "@/components/ui/Notice";
 import {
   useJoinCampaign,
   useSettleRewards,
@@ -74,6 +76,12 @@ export function PromoterPanel({
     minReputation: detail.minReputation,
     connected: isConnected,
   });
+
+  // A scored wallet under the gate is told both numbers by the requirement line above the button, so
+  // the refusal beneath it would be the same sentence twice. An unscored wallet is not: its refusal
+  // carries the "verify your Ethos profile" instruction that line has no room for.
+  const scoreShortfall =
+    joinEligibility.actionable === "attest" && (reputation ?? BigInt(0)) > BigInt(0);
 
   // Only inside the notice window; undefined the rest of the time so the panel stays quiet.
   const expiryNoticeDays = useMemo(
@@ -153,11 +161,9 @@ export function PromoterPanel({
 
       {!joined ? (
         <div className="space-y-3">
-          <p className="text-xs text-ink-secondary">
-            {detail.minReputation === BigInt(0)
-              ? "This campaign is open to all promoters."
-              : `Requires a BoneyScore of ${detail.minReputation.toString()}. Yours is ${(reputation ?? BigInt(0)).toString()}.`}
-          </p>
+          {detail.minReputation === BigInt(0) ? (
+            <p className="text-xs text-ink-secondary">This campaign is open to all promoters.</p>
+          ) : null}
 
           {/*
             Warn before the score drops, not after. A promoter who qualifies today but expires in a
@@ -174,7 +180,7 @@ export function PromoterPanel({
           <button
             type="button"
             onClick={async () => {
-              await join.join(detail.address);
+              await join.join(detail.address, {campaignName: detail.name});
               onDone();
             }}
             disabled={!joinEligibility.ok || isPending(join.state)}
@@ -184,8 +190,8 @@ export function PromoterPanel({
             {isPending(join.state) ? "Joining…" : "Join as promoter"}
           </button>
 
-          {!joinEligibility.ok ? (
-            <p className="text-xs text-warning">{joinEligibility.reason}</p>
+          {!joinEligibility.ok && !scoreShortfall ? (
+            <p className="text-xs text-brand">{joinEligibility.reason}</p>
           ) : null}
 
           {/*
@@ -203,7 +209,7 @@ export function PromoterPanel({
               <p className="text-xs text-ink-secondary">
                 {hasExpired
                   ? "Your verification has expired. BoneyScore reflects credibility now, not when you first verified, so scores age out and need refreshing. Re-verifying reads your current Ethos and reach."
-                  : "BoneyScore combines your Ethos credibility with your X reach. Verifying reads both and records them on chain — it needs a claimed Ethos profile."}
+                  : "BoneyScore combines your Ethos credibility with your X reach. Verifying reads both and records them on chain. Requires a claimed ethos profile."}
               </p>
               <button
                 type="button"
@@ -230,7 +236,7 @@ export function PromoterPanel({
               </button>
 
               {attestation.state.status === "error" ? (
-                <p className="text-xs text-warning">{attestation.state.message}</p>
+                <p className="text-xs text-brand">{attestation.state.message}</p>
               ) : null}
               {attestation.state.status === "success" ? (
                 <p className="text-xs text-ink-muted">
@@ -268,10 +274,20 @@ export function PromoterPanel({
               >
                 {copied ? "Copied" : "Copy"}
               </button>
+              {/* The link itself, for anyone who would rather follow it than paste it somewhere. */}
+              {promoterId ? (
+                <Link
+                  href={`/r?c=${detail.address}&p=${promoterId}`}
+                  className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-plane transition-opacity hover:opacity-90"
+                  title="Open this tracking link and attribute the connected wallet"
+                >
+                  Attribute
+                </Link>
+              ) : null}
             </div>
-            <p className="text-xs text-ink-muted">
-                <b>Traffic through your Boneylink is attributed to you for{" "}
-                  {formatDuration(Number(detail.attributionWindow))} after each visit.</b>
+            <p className="text-xs font-semibold text-ink-secondary">
+              Traffic through your Boneylink is attributed to you for{" "}
+              {formatDuration(Number(detail.attributionWindow))} after each visit.
             </p>
           </div>
 
@@ -279,22 +295,21 @@ export function PromoterPanel({
           <div className="border-t border-hairline pt-3">
             <div>
               <p className="text-xs text-ink-muted">Paid to your wallet</p>
-              <p className="text-xl font-semibold text-ink">
+              {/* Brand yellow across both halves: this is the one figure on the panel that is money
+                  already in the promoter's wallet, and the symbol belongs to the number rather than to
+                  the muted label above it. */}
+              <p className="text-xl font-bold text-brand">
                 {formatTokenAmount(totalEarned, token.decimals)}{" "}
-                <span className="text-sm font-normal text-ink-muted">{token.symbol}</span>
+                <span className="text-sm font-semibold">{token.symbol}</span>
               </p>
               {totalOwed > BigInt(0) ? (
-                <p className="mt-1 text-xs text-warning">
+                <p className="mt-1 text-xs text-brand">
                   {formatTokenAmount(totalOwed, token.decimals)} {token.symbol} was earned but
                   never paid out. Settling releases it to your wallet.
                 </p>
-              ) : (
-                <p className="mt-1 text-xs text-ink-muted">
-                  Rewards are sent to your wallet the moment a tier is crossed.
-                </p>
-              )}
+              ) : null}
               {poolDrained ? (
-                <p className="mt-1 text-xs text-warning">
+                <p className="mt-1 text-xs text-brand">
                   This campaign&rsquo;s escrow is empty. Any tier crossed after it ran dry paid
                   less than its full reward.
                 </p>
@@ -333,7 +348,12 @@ export function PromoterPanel({
                           type="button"
                           onClick={async () => {
                             if (!address) return;
-                            await settle.settle(detail.address, address, kpi.index);
+                            await settle.settle(detail.address, address, kpi.index, {
+                              campaignName: detail.name,
+                              kpiLabel: KPI_KIND_LABEL[kpi.spec.kind],
+                              symbol: token.symbol,
+                              decimals: token.decimals,
+                            });
                             onDone();
                           }}
                           disabled={!eligibility.ok || isPending(settle.state)}
@@ -345,7 +365,7 @@ export function PromoterPanel({
                             : `Claim ${formatTokenAmount(owed, token.decimals)} ${token.symbol}`}
                         </button>
                         {!eligibility.ok ? (
-                          <p className="text-xs text-warning">{eligibility.reason}</p>
+                          <p className="text-xs text-brand">{eligibility.reason}</p>
                         ) : null}
                       </div>
                     ) : null}
@@ -366,19 +386,27 @@ export function PromoterPanel({
 function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
   if (state.status === "idle") return null;
 
+  if (state.status === "confirmed") {
+    return <Notice tone="good" role="status" title="Confirmed." className="mt-2" />;
+  }
+
+  if (state.status === "error") {
+    return (
+      <Notice
+        tone="critical"
+        className="mt-2"
+        title={<TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />}
+      />
+    );
+  }
+
   return (
     <div role="status" aria-live="polite" className="mt-2 text-xs">
       {state.status === "preparing" ? (
         <p className="text-ink-muted">Confirm in your wallet…</p>
       ) : state.status === "submitted" ? (
         <p className="text-ink-muted">Submitted — waiting for confirmation.</p>
-      ) : state.status === "confirmed" ? (
-        <p className="text-good">Confirmed.</p>
-      ) : (
-        <p>
-          <TxErrorMessage message={state.message} detail={state.detail} onDismiss={onReset} />
-        </p>
-      )}
+      ) : null}
     </div>
   );
 }

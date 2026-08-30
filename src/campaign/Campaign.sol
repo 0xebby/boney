@@ -25,6 +25,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @notice Maximum number of reward tiers per KPI.
     uint256 public constant MAX_TIERS_PER_KPI = 32;
 
+    /// @notice Maximum number of evidence actions a single report may carry.
+    /// @dev Bounds the segment walk in `reportUserAction`. The off-chain reporter folds same-block
+    ///      actions, and then whole attribution segments, to stay under it.
+    uint256 public constant MAX_EVIDENCE_ACTIONS = 256;
+
     // ── dependencies ─────────────────────────────────────────────
 
     /// @notice Vault holding this campaign's escrowed rewards.
@@ -80,6 +85,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
     mapping(address => mapping(uint256 => uint256)) private _settledTiers;
     /// @dev user => kpiIndex => cumulative amount already credited (replay guard).
     mapping(address => mapping(uint256 => uint256)) private _userCredited;
+    /// @dev user => kpiIndex => block of the last report that credited anything for the pair.
+    mapping(address => mapping(uint256 => uint64)) private _lastReportBlock;
+    /// @dev user => kpiIndex => promoter id => cumulative amount credited to that promoter. Sums to
+    ///      `_userCredited` for the same pair.
+    mapping(address => mapping(uint256 => mapping(bytes32 => uint256))) private _creditedTo;
     /// @dev kpiIndex => campaign-level total.
     mapping(uint256 => uint256) private _totalProgress;
 
@@ -264,6 +274,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
     /// @dev Accepted while Active and inside the campaign window, and for `CLAIM_GRACE` after `end()`.
+    ///      Per-action `evidence` splits the credit across the promoters who held the user when each
+    ///      action happened; empty `evidence` credits whoever holds attribution now, and is refused
+    ///      with `AmbiguousAttribution` when more than one promoter held them since the last report.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external
         nonReentrant
@@ -281,11 +294,22 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (newTotal < already) revert NonMonotonic(already, newTotal);
         if (newTotal == already) return; // idempotent replay
 
-        // Resolve attribution before crediting.
-        bytes32 promoterId = _resolvePromoterId(user);
-        if (promoterId == bytes32(0)) revert NoAttribution(user);
-        address promoter = _promoterOf[promoterId];
-        if (promoter == address(0)) revert NoAttribution(user);
+        // With no evidence there is nothing to segment, so attribution is resolved at report time.
+        bytes32 currentId;
+        address current;
+        if (evidence.length == 0) {
+            currentId = _resolvePromoterId(user);
+            if (currentId == bytes32(0)) revert NoAttribution(user);
+            current = _promoterOf[currentId];
+            if (current == address(0)) revert NoAttribution(user);
+
+            // A switch inside the unreported span would hand one promoter's work to another, and with
+            // no per-action timing there is nothing to place the work by. Refused rather than guessed.
+            bytes32 sole = attributionRegistry.soleAttributionSince(
+                address(this), user, _lastReportBlock[user][kpiIndex]
+            );
+            if (sole != currentId) revert AmbiguousAttribution(user, kpiIndex);
+        }
 
         uint256 verifiedTotal = newTotal;
         if (spec.verifier != address(0)) {
@@ -299,15 +323,170 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         // Credit only the newly verified portion.
         if (verifiedTotal <= already) return;
-        uint256 credited = verifiedTotal - already;
 
-        _userCredited[user][kpiIndex] = verifiedTotal;
-        _progress[promoter][kpiIndex] += credited;
-        _totalProgress[kpiIndex] += credited;
+        if (evidence.length == 0) {
+            uint256 credited = verifiedTotal - already;
+            _userCredited[user][kpiIndex] = verifiedTotal;
+            _applyCredit(user, kpiIndex, currentId, current, credited);
+            _settle(current, currentId, kpiIndex);
+        } else {
+            _creditSegments(user, kpiIndex, already, verifiedTotal, evidence);
+        }
 
-        emit ProgressCredited(kpiIndex, promoterId, user, credited);
+        // Closes the span a later evidence-free report is checked over.
+        _lastReportBlock[user][kpiIndex] = uint64(block.number);
+    }
 
-        _settle(promoter, promoterId, kpiIndex);
+    /// @dev Splits a report across the promoters who held the user when each action happened. Evidence
+    ///      is cumulative, so the per-promoter tally is recomputed in full and only the part above
+    ///      `_creditedTo` is applied — a replay credits nothing, and a report the verifier's ceiling
+    ///      cut short finishes on the next one without moving credit off its promoter.
+    /// @param user The end user being reported.
+    /// @param kpiIndex Index of the KPI being credited.
+    /// @param already Amount already credited for this pair, across every promoter.
+    /// @param verifiedTotal Cumulative ceiling this report may credit up to.
+    /// @param evidence Abi-encoded `Types.Action[]`, non-decreasing by `blockNumber`.
+    function _creditSegments(
+        address user,
+        uint256 kpiIndex,
+        uint256 already,
+        uint256 verifiedTotal,
+        bytes calldata evidence
+    ) private {
+        Types.Action[] memory actions = abi.decode(evidence, (Types.Action[]));
+        if (actions.length > MAX_EVIDENCE_ACTIONS) {
+            revert TooManyActions(actions.length, MAX_EVIDENCE_ACTIONS);
+        }
+
+        (bytes32[] memory ids, uint256[] memory owed, uint256 distinct) = _tally(user, verifiedTotal, actions);
+
+        uint256 credited = _credit(user, kpiIndex, ids, owed, distinct);
+        if (credited == 0) return;
+
+        // Advances by what was credited, not to `verifiedTotal`, so skipped actions stay reportable.
+        _userCredited[user][kpiIndex] = already + credited;
+
+        for (uint256 i; i < distinct; ++i) {
+            if (owed[i] == 0) continue;
+            _settle(_promoterOf[ids[i]], ids[i], kpiIndex);
+        }
+    }
+
+    /// @dev Tallies each action's amount onto the promoter who held the user at that action's block,
+    ///      oldest first so the prefix a ceiling covers is the oldest work.
+    /// @param user The end user being reported.
+    /// @param verifiedTotal Cumulative ceiling the tally may reach.
+    /// @param actions Evidence actions, non-decreasing by `blockNumber`.
+    /// @return ids Distinct promoter ids the evidence touched, in first-seen order.
+    /// @return owed Amount attributed to each id, parallel to `ids`.
+    /// @return distinct How many leading entries of `ids` and `owed` are populated.
+    function _tally(address user, uint256 verifiedTotal, Types.Action[] memory actions)
+        private
+        view
+        returns (bytes32[] memory ids, uint256[] memory owed, uint256 distinct)
+    {
+        bytes32[] memory owners = _ownersOf(user, actions);
+        ids = new bytes32[](actions.length);
+        owed = new uint256[](actions.length);
+        uint256 taken;
+
+        for (uint256 i; i < actions.length && taken < verifiedTotal; ++i) {
+            // Nobody held attribution then; the amount stays uncredited and reportable later.
+            if (owners[i] == bytes32(0)) continue;
+
+            uint256 share = verifiedTotal - taken;
+            if (actions[i].amount < share) share = actions[i].amount;
+            if (share == 0) continue;
+            taken += share;
+
+            uint256 slot = distinct;
+            for (uint256 j; j < distinct; ++j) {
+                if (ids[j] == owners[i]) {
+                    slot = j;
+                    break;
+                }
+            }
+            if (slot == distinct) {
+                ids[distinct] = owners[i];
+                ++distinct;
+            }
+            owed[slot] += share;
+        }
+    }
+
+    /// @dev Applies each promoter's tally less what it has already been credited, and zeroes the
+    ///      entries that credit nothing so the caller's settle pass can skip them.
+    /// @param user The end user being reported.
+    /// @param kpiIndex Index of the KPI being credited.
+    /// @param ids Distinct promoter ids from the tally.
+    /// @param owed Per-id tallies, overwritten with the amount actually credited.
+    /// @param distinct How many leading entries of `ids` and `owed` are populated.
+    /// @return credited Total progress written across every promoter.
+    function _credit(
+        address user,
+        uint256 kpiIndex,
+        bytes32[] memory ids,
+        uint256[] memory owed,
+        uint256 distinct
+    ) private returns (uint256 credited) {
+        for (uint256 i; i < distinct; ++i) {
+            address promoter = _promoterOf[ids[i]];
+            uint256 paid = _creditedTo[user][kpiIndex][ids[i]];
+            // A verifier that revised a total downward can leave a promoter ahead of its tally.
+            if (promoter == address(0) || owed[i] <= paid) {
+                owed[i] = 0;
+                continue;
+            }
+
+            owed[i] -= paid;
+            credited += owed[i];
+            _applyCredit(user, kpiIndex, ids[i], promoter, owed[i]);
+        }
+    }
+
+    /// @dev Records one promoter's share of a report. Settlement is a separate step so every balance
+    ///      is final before escrow moves.
+    /// @param user The end user whose actions produced the progress.
+    /// @param kpiIndex Index of the KPI being credited.
+    /// @param promoterId The promoter's campaign-bound id.
+    /// @param promoter The promoter's wallet.
+    /// @param amount Progress credited, always non-zero.
+    function _applyCredit(
+        address user,
+        uint256 kpiIndex,
+        bytes32 promoterId,
+        address promoter,
+        uint256 amount
+    ) private {
+        _creditedTo[user][kpiIndex][promoterId] += amount;
+        _progress[promoter][kpiIndex] += amount;
+        _totalProgress[kpiIndex] += amount;
+
+        emit ProgressCredited(kpiIndex, promoterId, user, amount);
+    }
+
+    /// @dev Who held the user at each action's block, in one registry call. Also enforces the
+    ///      non-decreasing block order the oldest-first walk relies on.
+    /// @param user The end user being reported.
+    /// @param actions Evidence actions.
+    /// @return promoterIds Attributed promoter per action, `bytes32(0)` where nobody was.
+    function _ownersOf(address user, Types.Action[] memory actions)
+        private
+        view
+        returns (bytes32[] memory promoterIds)
+    {
+        uint64[] memory blocks = new uint64[](actions.length);
+        uint64[] memory timestamps = new uint64[](actions.length);
+
+        for (uint256 i; i < actions.length; ++i) {
+            if (i != 0 && actions[i].blockNumber < actions[i - 1].blockNumber) {
+                revert UnorderedEvidence(i);
+            }
+            blocks[i] = actions[i].blockNumber;
+            timestamps[i] = actions[i].timestamp;
+        }
+
+        promoterIds = attributionRegistry.promotersAt(address(this), user, blocks, timestamps);
     }
 
     /// @inheritdoc ICampaign
@@ -400,8 +579,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
         }
     }
 
-    /// @dev While live, resolves to the active touch only; once Ended, the stored touch is honoured
-    ///      even if expired.
+    /// @dev The fallback for a report carrying no per-action evidence. While live, resolves to the
+    ///      active touch only; once Ended, the stored touch is honoured even if expired.
     /// @param user The end user whose action is being reported.
     /// @return The attributed promoter id, or `bytes32(0)` when there is none.
     function _resolvePromoterId(address user) private view returns (bytes32) {
@@ -485,6 +664,28 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @return Amount credited so far; the replay guard for reports.
     function userCreditedOf(address user, uint256 kpiIndex) external view returns (uint256) {
         return _userCredited[user][kpiIndex];
+    }
+
+    /// @notice Block of the last report that credited anything for a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Block number, or 0 if the pair has never been credited; the start of the span an
+    ///         evidence-free report is checked over.
+    function lastReportBlockOf(address user, uint256 kpiIndex) external view returns (uint64) {
+        return _lastReportBlock[user][kpiIndex];
+    }
+
+    /// @notice Cumulative amount credited to one promoter for a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @param promoterId The promoter's campaign-bound id.
+    /// @return Amount credited to that promoter so far; these sum to `userCreditedOf`.
+    function creditedToOf(address user, uint256 kpiIndex, bytes32 promoterId)
+        external
+        view
+        returns (uint256)
+    {
+        return _creditedTo[user][kpiIndex][promoterId];
     }
 
     /// @notice Number of tiers already settled for a `(promoter, kpi)` pair.

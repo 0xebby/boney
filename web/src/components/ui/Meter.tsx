@@ -12,6 +12,8 @@ export function Meter({
   value,
   max,
   label,
+  /** Accessible name when the ratio is drawn without a visible `label`. */
+  ariaLabel,
   valueText,
   /** When true, a fuller bar is worse (e.g. pool drained). Drives the severity ramp. */
   fullIsBad = false,
@@ -19,6 +21,7 @@ export function Meter({
   value: number;
   max: number;
   label?: string;
+  ariaLabel?: string;
   valueText?: string;
   fullIsBad?: boolean;
 }) {
@@ -48,7 +51,7 @@ export function Meter({
         aria-valuenow={Math.round(pct)}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={label ?? "Utilization"}
+        aria-label={label ?? ariaLabel ?? "Utilization"}
         className="h-1.5 w-full overflow-hidden rounded-full bg-track"
       >
         <div

@@ -536,13 +536,13 @@ contract CampaignTest is Test {
     }
 
     /// @dev An expired touch reverts the whole report rather than skipping the user, so the
-    ///      activity is not burned — it is merely unbanked. A fresh touch makes the same cumulative
-    ///      report land, and because `_userCredited` never advanced, the full total is still owed.
-    ///      Which means a lapse hands everything to whoever the user signs for next.
+    ///      activity is not burned — it is merely unbanked. A fresh touch from the same promoter makes
+    ///      the same cumulative report land, and because `_userCredited` never advanced, the full total
+    ///      is still owed.
     function test_Report_recoverableAfterAttributionExpires() public {
         _activate(campaign);
         bytes32 id1 = _join(campaign, kol);
-        bytes32 id2 = _join(campaign, kol2);
+        _join(campaign, kol2);
 
         _touch(campaign, userPk, user, id1, 1 days);
         skip(1 days + 1);
@@ -551,12 +551,30 @@ contract CampaignTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
 
-        // The user re-engages through a different KOL and the same report now succeeds.
-        _touch(campaign, userPk, user, id2, 7 days);
+        // The same KOL re-engages the user and the same report now succeeds.
+        _touch(campaign, userPk, user, id1, 7 days);
         _report(campaign, project, user, 5);
 
-        assertEq(campaign.progressOf(kol, 0), 0, "the lapse cost kol everything unreported");
-        assertEq(campaign.progressOf(kol2, 0), 5, "credited in full to the promoter live at report time");
+        assertEq(campaign.progressOf(kol, 0), 5, "the lapse only deferred it");
+        assertEq(campaign.progressOf(kol2, 0), 0);
+    }
+
+    /// @dev A lapse no longer hands everything to whoever the user signs for next: the span the report
+    ///      covers held two promoters, so it is refused until evidence says which actions were whose.
+    function test_Report_lapseDoesNotHandTheBacklogToTheNextPromoter() public {
+        _activate(campaign);
+        bytes32 id1 = _join(campaign, kol);
+        bytes32 id2 = _join(campaign, kol2);
+
+        _touch(campaign, userPk, user, id1, 1 days);
+        skip(1 days + 1);
+        _touch(campaign, userPk, user, id2, 7 days);
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        campaign.reportUserAction(0, user, 5, "");
+
+        assertEq(campaign.progressOf(kol2, 0), 0, "kol's backlog is not kol2's to take");
     }
 
     function test_Report_onlyReporters() public {
@@ -668,19 +686,11 @@ contract CampaignTest is Test {
         assertEq(campaign.progressOf(kol2, 0), 7, "only the delta moves");
     }
 
-    /// @dev Attribution is resolved when a report lands, not when the user acted — the contract
-    ///      only ever sees a cumulative `newTotal` and has no idea *when* the underlying actions
-    ///      happened. So the effective granularity of attribution is the project's reporting
-    ///      interval: everything accrued since the last report follows whoever holds the touch at
-    ///      report time, including activity that predates that touch entirely.
-    ///
-    ///      This is a known limitation, pinned here so it stays a deliberate choice rather than an
-    ///      accident. A promoter who knows the reporting cadence can farm it by getting the user
-    ///      to sign just before a batch. Closing it needs per-action timestamps in `evidence` and
-    ///      a verifier adapter that discounts actions predating the live touch's `signedAt`; note
-    ///      a verifier can only reduce `credited`, never redirect the payee, so it can deny the
-    ///      late-arriving promoter the delta but cannot award it to the earlier one.
-    function test_Report_unreportedProgressFollowsTheLaterTouch() public {
+    /// @dev A report carrying no `evidence` has no per-action timing, so a switch inside the span it
+    ///      covers leaves the payee unknowable. Refused with `AmbiguousAttribution` rather than handed
+    ///      to whoever holds the touch — which is what closes the farm-the-cadence gap, since signing
+    ///      just before a batch now blocks the batch instead of capturing it.
+    function test_Report_unreportedProgressCannotFollowTheLaterTouch() public {
         _activate(campaign);
         bytes32 id1 = _join(campaign, kol);
         bytes32 id2 = _join(campaign, kol2);
@@ -692,10 +702,12 @@ contract CampaignTest is Test {
         skip(1 hours);
         _touch(campaign, userPk, user, id2, 7 days);
 
-        _report(campaign, project, user, 10);
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        campaign.reportUserAction(0, user, 10, "");
 
-        assertEq(campaign.progressOf(kol, 0), 0, "kol earned nothing despite being live throughout");
-        assertEq(campaign.progressOf(kol2, 0), 10, "the whole unreported delta follows the later touch");
+        assertEq(campaign.progressOf(kol, 0), 0, "nothing is credited either way");
+        assertEq(campaign.progressOf(kol2, 0), 0, "and the later touch takes nothing");
     }
 
     /// @dev The corollary: reporting more often shrinks the window. Same activity, same touches,

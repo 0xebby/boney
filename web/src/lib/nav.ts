@@ -8,7 +8,7 @@
  * is provable by fixture while the components stay thin enough not to need a DOM to check.
  */
 
-export type NavItem = {href: string; label: string; icon: string};
+export type NavItem = {href: string; label: string};
 
 /**
  * The nav in display order.
@@ -21,14 +21,14 @@ export type NavItem = {href: string; label: string; icon: string};
  * in the bar's right-hand cluster as a filled button rather than reading as one more peer link.
  */
 const PUBLIC_NAV = [
-  {href: "/", label: "Campaigns", icon: "▦"},
-  {href: "/discover", label: "Discover", icon: "◍"},
-  {href: "/docs", label: "Docs", icon: "◌"},
+  {href: "/", label: "Campaigns"},
+  {href: "/discover", label: "Discover"},
+  {href: "/docs", label: "Docs"},
 ] as const;
 
-const MY_CAMPAIGNS = {href: "/my", label: "My Campaigns", icon: "◈"} as const;
-const BONEYCARD = {href: "/card", label: "BoneyCard", icon: "⬡"} as const;
-const PROMOTERS = {href: "/promoters", label: "Promoters", icon: "◎"} as const;
+const MY_CAMPAIGNS = {href: "/my", label: "My Campaigns"} as const;
+const BONEYCARD = {href: "/card", label: "BoneyCard"} as const;
+const PROMOTERS = {href: "/promoters", label: "Promoters"} as const;
 
 /**
  * The nav in display order, with the personal entries spliced into the positions they occupy when

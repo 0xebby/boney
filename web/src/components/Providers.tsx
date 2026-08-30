@@ -4,12 +4,16 @@ import {useState, type ReactNode} from "react";
 import {WagmiProvider} from "wagmi";
 import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
 import {wagmiConfig} from "@/lib/wagmi";
+import {SignatureGate} from "@/components/SignatureGate";
 
 /**
  * Client providers.
  *
  * The QueryClient is created inside `useState` so each browser session gets one instance and
  * it is never shared across requests during SSR.
+ *
+ * `SignatureGate` sits inside the wagmi provider because it is the confirmation step every wallet
+ * prompt passes through, and the hooks that request it are wagmi consumers.
  */
 export function Providers({children}: {children: ReactNode}) {
   const [queryClient] = useState(
@@ -32,7 +36,9 @@ export function Providers({children}: {children: ReactNode}) {
 
   return (
     <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <SignatureGate>{children}</SignatureGate>
+      </QueryClientProvider>
     </WagmiProvider>
   );
 }

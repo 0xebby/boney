@@ -73,7 +73,6 @@ export default function Page() {
         wallet={address}
         score={card.score}
         scoreLoading={card.scoreLoading}
-        onChainScore={card.onChainScore}
         onChainExpired={card.onChainExpired}
         scale={card.scale}
         qualification={card.qualification}
@@ -82,8 +81,6 @@ export default function Page() {
         history={card.history}
         historyUnavailable={card.historyUnavailable}
         historyLoading={card.historyLoading}
-        indexedBlock={card.indexedBlock}
-        lag={card.lag}
         earnedToken={card.earnedToken}
         onVerify={onVerify}
         onRetryScore={() => void card.refetchScore()}

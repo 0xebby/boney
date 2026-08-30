@@ -2,7 +2,9 @@ import {
   decodeAbiParameters,
   encodeAbiParameters,
   getAddress,
+  isHex,
   keccak256,
+  pad,
   toHex,
   type Hex,
   type PublicClient,
@@ -74,6 +76,20 @@ export type EventSource = {
    * beats a division-by-zero at report time.
    */
   scale: bigint;
+  /**
+   * Which indexed topic must equal `filterValue` for a log to count.
+   *
+   * 1-based over `topics` like `actorTopic`, and never equal to it. Absent means the KPI counts
+   * every log of this event on this contract.
+   */
+  filterTopic?: 1 | 2 | 3;
+  /**
+   * The raw 32-byte topic word `filterTopic` must equal.
+   *
+   * A raw word rather than an address, so the same field constrains an indexed `uint`, `bytes32` or
+   * enum. Set whenever `filterTopic` is.
+   */
+  filterValue?: `0x${string}`;
 };
 
 /**
@@ -91,8 +107,31 @@ const PARAMS_ABI = [
   {type: "uint256", name: "scale"},
 ] as const;
 
-/** Byte length of a well-formed blob: five 32-byte words, hex-encoded, plus `0x`. */
+/**
+ * ABI layout of the blob when the KPI narrows on a topic.
+ *
+ * A strict extension of `PARAMS_ABI`: the two fields are appended, so the first five words decode
+ * identically either way. The short form is still what `encodeEventSource` emits when there is no
+ * filter, which keeps every campaign created before this field byte-identical.
+ */
+const FILTERED_PARAMS_ABI = [
+  {type: "address", name: "source"},
+  {type: "bytes32", name: "topic0"},
+  {type: "uint8", name: "actorTopic"},
+  {type: "uint8", name: "amountMode"},
+  {type: "uint256", name: "scale"},
+  {type: "uint8", name: "filterTopic"},
+  {type: "bytes32", name: "filterValue"},
+] as const;
+
+/** Byte length of a well-formed unfiltered blob: five 32-byte words, hex-encoded, plus `0x`. */
 const ENCODED_HEX_LENGTH = 2 + 5 * 64;
+
+/** Byte length of a well-formed filtered blob: the same five words plus the two filter fields. */
+const FILTERED_HEX_LENGTH = 2 + 7 * 64;
+
+/** A 32-byte word of zeroes — an indexed `address(0)`, which is what a mint's `from` carries. */
+export const ZERO_TOPIC = `0x${"0".repeat(64)}` as const;
 
 /**
  * Length at which `TouchWindowVerifier` reads `params` as a bare `uint64` lookback.
@@ -113,16 +152,48 @@ export function encodeEventSource(src: EventSource): Hex {
     throw new Error(`scale must not be negative, got ${src.scale}`);
   }
 
-  return encodeAbiParameters(PARAMS_ABI, [
-    // Lowercased for the same reason `derivePromoterId` does it: viem rejects a mixed-case address
-    // whose EIP-55 checksum does not validate, so a hand-typed one would throw here rather than
-    // encode to the same 20 bytes it obviously means.
+  // Lowercased for the same reason `derivePromoterId` does it: viem rejects a mixed-case address
+  // whose EIP-55 checksum does not validate, so a hand-typed one would throw here rather than
+  // encode to the same 20 bytes it obviously means.
+  const head = [
     src.source.toLowerCase() as `0x${string}`,
     src.topic0.toLowerCase() as `0x${string}`,
     src.actorTopic,
     src.amountMode,
     src.scale,
-  ]);
+  ] as const;
+
+  if (!src.filterTopic) return encodeAbiParameters(PARAMS_ABI, [...head]);
+
+  if (src.filterTopic < 1 || src.filterTopic > 3) {
+    throw new Error(`filterTopic must be 1..3, got ${src.filterTopic}`);
+  }
+  if (src.filterTopic === src.actorTopic) {
+    throw new Error(`filterTopic must differ from actorTopic, got ${src.filterTopic}`);
+  }
+
+  const filterValue = normalizeTopicValue(src.filterValue);
+  if (!filterValue) {
+    throw new Error(`filterValue must be an address or a 32-byte word, got ${src.filterValue}`);
+  }
+
+  return encodeAbiParameters(FILTERED_PARAMS_ABI, [...head, src.filterTopic, filterValue]);
+}
+
+/**
+ * A topic filter value as the raw 32-byte word the log carries.
+ *
+ * @param raw A 32-byte word, or a 20-byte address to left-pad as an indexed address does.
+ * @returns The lowercased word, or `null` when the input is neither shape.
+ */
+export function normalizeTopicValue(
+  raw: string | undefined | null,
+): `0x${string}` | null {
+  const trimmed = raw?.trim().toLowerCase();
+  if (!trimmed || !isHex(trimmed)) return null;
+  if (trimmed.length === 66) return trimmed as `0x${string}`;
+  if (trimmed.length === 42) return pad(trimmed as Hex, {size: 32}).toLowerCase() as `0x${string}`;
+  return null;
 }
 
 /**
@@ -135,28 +206,80 @@ export function encodeEventSource(src: EventSource): Hex {
  */
 export function decodeEventSource(params: Hex | undefined | null): EventSource | null {
   if (!params || params === "0x") return null;
-  if (params.length !== ENCODED_HEX_LENGTH) return null;
 
   try {
-    const [source, topic0, actorTopic, amountMode, scale] = decodeAbiParameters(
-      PARAMS_ABI,
-      params,
-    );
+    if (params.length === ENCODED_HEX_LENGTH) {
+      const [source, topic0, actorTopic, amountMode, scale] = decodeAbiParameters(
+        PARAMS_ABI,
+        params,
+      );
+      return buildEventSource(source, topic0, actorTopic, amountMode, scale, 0, ZERO_TOPIC);
+    }
 
-    if (actorTopic < 1 || actorTopic > 3) return null;
-    if (amountMode !== AMOUNT_MODE.count && amountMode !== AMOUNT_MODE.dataWord0) return null;
+    if (params.length === FILTERED_HEX_LENGTH) {
+      const [source, topic0, actorTopic, amountMode, scale, filterTopic, filterValue] =
+        decodeAbiParameters(FILTERED_PARAMS_ABI, params);
+      return buildEventSource(
+        source,
+        topic0,
+        actorTopic,
+        amountMode,
+        scale,
+        filterTopic,
+        filterValue,
+      );
+    }
 
-    return {
-      source: getAddress(source),
-      topic0: topic0.toLowerCase() as `0x${string}`,
-      actorTopic: actorTopic as 1 | 2 | 3,
-      amountMode: amountMode as AmountMode,
-      scale,
-    };
+    return null;
   } catch {
     // A blob of the right length that is not this struct — a different adapter's config, say.
     return null;
   }
+}
+
+/**
+ * Validates decoded fields and normalizes them into an `EventSource`.
+ *
+ * @param source Watched contract.
+ * @param topic0 Event signature hash.
+ * @param actorTopic Topic index carrying the credited wallet.
+ * @param amountMode How the amount is read.
+ * @param scale Divisor applied to the amount.
+ * @param filterTopic Constrained topic index, 0 for none.
+ * @param filterValue Word the constrained topic must equal.
+ * @returns The source, or `null` when a field is out of range.
+ */
+function buildEventSource(
+  source: `0x${string}`,
+  topic0: `0x${string}`,
+  actorTopic: number,
+  amountMode: number,
+  scale: bigint,
+  filterTopic: number,
+  filterValue: `0x${string}`,
+): EventSource | null {
+  if (actorTopic < 1 || actorTopic > 3) return null;
+  if (amountMode !== AMOUNT_MODE.count && amountMode !== AMOUNT_MODE.dataWord0) return null;
+  if (filterTopic < 0 || filterTopic > 3) return null;
+  if (filterTopic !== 0 && filterTopic === actorTopic) return null;
+
+  const decoded: EventSource = {
+    source: getAddress(source),
+    topic0: topic0.toLowerCase() as `0x${string}`,
+    actorTopic: actorTopic as 1 | 2 | 3,
+    amountMode: amountMode as AmountMode,
+    scale,
+  };
+
+  // The unfiltered form is the canonical shape for "no filter", so a long blob carrying a zero
+  // filter topic decodes to exactly what the short one does.
+  if (filterTopic === 0) return decoded;
+
+  return {
+    ...decoded,
+    filterTopic: filterTopic as 1 | 2 | 3,
+    filterValue: filterValue.toLowerCase() as `0x${string}`,
+  };
 }
 
 /** Whether a KPI's params would be misread by `TouchWindowVerifier`. See the constant above. */
@@ -172,6 +295,59 @@ export function eventSourceConflictsWithVerifier(
 /** The effective divisor — see the note on `EventSource.scale` for why 0 means 1. */
 export function effectiveScale(src: EventSource): bigint {
   return src.scale === BigInt(0) ? BigInt(1) : src.scale;
+}
+
+/**
+ * Whether a log satisfies the source's topic filter.
+ *
+ * A log that does not carry the filtered topic at all fails: a filter on a topic this event never
+ * indexes must drop the log rather than pass it.
+ *
+ * @param log Log whose topics are tested.
+ * @param src Decoded event source.
+ * @returns True when the source carries no filter, or the filtered topic equals `filterValue`.
+ */
+export function matchesTopicFilter(
+  log: {topics: readonly (string | undefined)[]},
+  src: EventSource,
+): boolean {
+  if (!src.filterTopic || !src.filterValue) return true;
+
+  const topic = log.topics[src.filterTopic];
+  if (!topic) return false;
+
+  return topic.toLowerCase() === src.filterValue.toLowerCase();
+}
+
+/**
+ * The `eth_getLogs` topic slots above `topics[0]`, so every caller narrows node-side identically.
+ *
+ * Built by index rather than by appending, because the actor slot and the filter slot may fall in
+ * either order.
+ *
+ * @param src Decoded event source.
+ * @param actorFilter Left-padded referral addresses to match at `actorTopic`, when narrowing on them.
+ * @returns One entry per constrained index, `null` where nothing is constrained; empty when neither
+ *          a filter nor an actor list applies.
+ */
+export function topicFilterArray(
+  src: EventSource,
+  actorFilter?: readonly Hex[],
+): (Hex | Hex[] | null)[] {
+  const filter =
+    src.filterTopic && src.filterValue
+      ? {index: src.filterTopic, value: src.filterValue.toLowerCase() as Hex}
+      : null;
+  const highest = Math.max(filter?.index ?? 0, actorFilter ? src.actorTopic : 0);
+
+  const slots: (Hex | Hex[] | null)[] = [];
+  for (let i = 1; i <= highest; i++) {
+    if (actorFilter && i === src.actorTopic) slots.push([...actorFilter]);
+    else if (filter && i === filter.index) slots.push(filter.value);
+    else slots.push(null);
+  }
+
+  return slots;
 }
 
 // ── well-known events ────────────────────────────────────────────
@@ -195,11 +371,15 @@ export function eventTopic(signature: string): `0x${string}` {
  */
 export const WETH_BASE = "0x4200000000000000000000000000000000000006" as const;
 
+/** `keccak256("Transfer(address,address,uint256)")`, which the mints-only reading is specific to. */
+const TRANSFER_TOPIC0 = eventTopic("Transfer(address,address,uint256)").toLowerCase();
+
 export const EVENT_PRESETS = [
   {
     id: "weth-deposit",
     label: "WETH deposits (Base)",
     signature: "Deposit(address,uint256)",
+    filterValueIsPlaceholder: false,
     /** 0.001 WETH per unit of progress, so tier thresholds stay small integers. */
     source: {
       source: WETH_BASE,
@@ -213,6 +393,7 @@ export const EVENT_PRESETS = [
     id: "erc721-mint",
     label: "ERC-721 transfers",
     signature: "Transfer(address,address,uint256)",
+    filterValueIsPlaceholder: false,
     /**
      * `topics[2]` is `to` — the recipient is the actor for a mint, not `from`. Counting mode,
      * since the third topic is a token id and summing ids would be meaningless.
@@ -225,6 +406,44 @@ export const EVENT_PRESETS = [
       scale: BigInt(1),
     } satisfies EventSource,
   },
+  {
+    id: "erc721-mint-only",
+    label: "ERC-721 mints only",
+    signature: "Transfer(address,address,uint256)",
+    /** The zero word is the filter itself here, not a gap the project fills. */
+    filterValueIsPlaceholder: false,
+    /** `topics[1]` is `from`, and a mint's `from` is `address(0)` — which is what the filter pins. */
+    source: {
+      source: "0x0000000000000000000000000000000000000000",
+      topic0: eventTopic("Transfer(address,address,uint256)"),
+      actorTopic: 2,
+      amountMode: AMOUNT_MODE.count,
+      scale: BigInt(1),
+      filterTopic: 1,
+      filterValue: ZERO_TOPIC,
+    } satisfies EventSource,
+  },
+  {
+    id: "router-transfer",
+    label: "Token received from one sender (router / bridge)",
+    signature: "Transfer(address,address,uint256)",
+    /** Which router is always project-specific, so the form leaves the value for them to paste. */
+    filterValueIsPlaceholder: true,
+    /**
+     * The reachable shape for a router whose own event leaves the user in `data`: credit the
+     * `Transfer` the router makes to them, constrained to that router as the sender. Both the token
+     * and the sender are the campaign's to set.
+     */
+    source: {
+      source: WETH_BASE,
+      topic0: eventTopic("Transfer(address,address,uint256)"),
+      actorTopic: 2,
+      amountMode: AMOUNT_MODE.dataWord0,
+      scale: BigInt(1e15),
+      filterTopic: 1,
+      filterValue: ZERO_TOPIC,
+    } satisfies EventSource,
+  },
 ] as const;
 
 /** One-line description for the UI, e.g. `Deposit(address,uint256) on 0x4200…0006`. */
@@ -235,6 +454,28 @@ export function eventSourceSummary(src: EventSource, signature?: string): string
 
 function shortHex(value: string): string {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+/**
+ * The fixed-topic filter as a clause to append to a KPI description, or null when there is none.
+ *
+ * @param src Decoded event source.
+ * @returns A phrase such as `from 0x816F…1770`, or null.
+ */
+export function describeTopicFilter(src: EventSource): string | null {
+  if (!src.filterTopic || !src.filterValue) return null;
+
+  const value = src.filterValue.toLowerCase();
+  const isTransfer = src.topic0.toLowerCase() === TRANSFER_TOPIC0;
+  if (value === ZERO_TOPIC) {
+    return isTransfer && src.filterTopic === 1 ? "mints only" : `topic ${src.filterTopic} zero`;
+  }
+
+  // A left-padded address is by far the common case — a router, a bridge, a pool — and reads as one,
+  // checksummed the way every other address in the UI is.
+  const isAddress = value.startsWith(`0x${"0".repeat(24)}`);
+  const shown = isAddress ? shortHex(getAddress(`0x${value.slice(26)}`)) : shortHex(value);
+  return src.filterTopic === 1 && isTransfer ? `from ${shown}` : `topic ${src.filterTopic} ${shown}`;
 }
 
 // ── source liveness ──────────────────────────────────────────────
@@ -269,6 +510,17 @@ export type ProbeInput = {
   amountMode?: AmountMode;
   /** The raw scale as typed. A string, because a half-typed number is a normal state of a form. */
   scale?: string;
+  /**
+   * Which topic the form has chosen as the actor.
+   *
+   * Optional because callers that predate it omit it, but a probe given it can say that the chosen
+   * topic is empty or is not an address — the two ways a KPI credits nothing with nothing to show.
+   */
+  actorTopic?: number;
+  /** Which topic the form constrains to a literal, when it constrains one. 0 or absent means none. */
+  filterTopic?: number;
+  /** The filter value as typed, an address or a 32-byte word. */
+  filterValue?: string;
 };
 
 /**
@@ -306,7 +558,10 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
   */
   const scaleFinding = classifyCountScale(input);
 
-  if (!source) return scaleFinding ? [scaleFinding] : findings;
+  // Independent of the address, so it is collected before the guards that return early on one.
+  findings.push(...filterValueFindings(input));
+
+  if (!source) return withScale(findings, scaleFinding);
 
   if (!isViemAddress(source, {strict: false})) {
     findings.push({severity: "error", message: "Not a valid address."});
@@ -329,6 +584,57 @@ export function classifyEventSource(input: ProbeInput): ProbeFinding[] {
   }
 
   return withScale(findings, scaleFinding);
+}
+
+/**
+ * Flags a filter topic whose value is missing or malformed.
+ *
+ * A zero value is legal and means `address(0)` — a mint's `from` — so only an unset or unparseable
+ * one is reported here.
+ *
+ * @param input The form's event-source fields.
+ * @returns One error, or nothing.
+ */
+function filterValueFindings(input: ProbeInput): ProbeFinding[] {
+  if (!input.filterTopic) return [];
+
+  if (input.filterTopic > 3) {
+    return [
+      {
+        severity: "error",
+        message: `A log carries at most 3 indexed arguments, so filter topic ${input.filterTopic} cannot exist.`,
+      },
+    ];
+  }
+
+  if (input.actorTopic !== undefined && input.filterTopic === input.actorTopic) {
+    return [
+      {
+        severity: "error",
+        message: `Topic ${input.filterTopic} cannot be both the credited actor and a fixed value.`,
+      },
+    ];
+  }
+
+  if (!input.filterValue?.trim()) {
+    return [
+      {
+        severity: "error",
+        message: `Filter topic ${input.filterTopic} has no value to match. Enter the address or word it must equal.`,
+      },
+    ];
+  }
+
+  if (!normalizeTopicValue(input.filterValue)) {
+    return [
+      {
+        severity: "error",
+        message: "The filter value must be a 20-byte address or a 32-byte hex word.",
+      },
+    ];
+  }
+
+  return [];
 }
 
 /** Appends the advisory scale finding, keeping the list's worst-first order. */
@@ -520,7 +826,20 @@ async function probeChain(
     // An actor topic the event does not carry can never resolve to a referral, so the indexer would
     // skip every log (`indexerCore.ts:actorFromTopic` returns null). Worth naming here because the
     // sample log is the only place the real topic count is visible before launch.
-    findings.push(...actorTopicFindings(sample.topics.length));
+    findings.push(...actorTopicFindings(sample.topics.length, input.actorTopic));
+
+    // And the only place a topic's *contents* are, which is what makes an actor topic resolvable.
+    findings.push(...actorShapeFindings(sample.topics, input.actorTopic));
+
+    findings.push(
+      ...topicFilterFindings({
+        logs: matched,
+        topicCount: sample.topics.length,
+        filterTopic: input.filterTopic,
+        filterValue: input.filterValue,
+        signature,
+      }),
+    );
 
     // And the only place the real *data* layout is, which is what `Value` mode depends on.
     findings.push(
@@ -628,6 +947,92 @@ export function actorTopicFindings(topicCount: number, actorTopic?: number): Pro
   }
 
   return [];
+}
+
+/**
+ * Flags an actor topic that holds something other than an address.
+ *
+ * `indexerCore.actorFromTopic` takes the low 20 bytes of whatever word it finds, so a `bytes32` or a
+ * `uint256` at that index reads as a wallet no referral will ever match.
+ *
+ * @param topics Topics of a sampled log, signature included.
+ * @param actorTopic The chosen actor topic, when the form has one.
+ * @returns One error, or nothing.
+ */
+export function actorShapeFindings(
+  topics: readonly (string | undefined)[],
+  actorTopic: number | undefined,
+): ProbeFinding[] {
+  if (actorTopic === undefined) return [];
+
+  const topic = topics[actorTopic];
+  if (!topic || topic.length !== 66) return [];
+
+  const high = topic.slice(2, 26);
+  if (/^0+$/.test(high)) return [];
+
+  return [
+    {
+      severity: "error",
+      message:
+        `Topic ${actorTopic} of that log is ${topic.slice(0, 10)}…${topic.slice(-6)}, which is not an ` +
+        `address — it is a wider value, so crediting it would read its last 20 bytes as a wallet. ` +
+        `Pick the topic that carries the user.`,
+    },
+  ];
+}
+
+/**
+ * Flags a topic filter the sampled logs contradict.
+ *
+ * A filter no log matches is a `warn`, never an error: a deliberately narrow filter and a wrong one
+ * look identical over one window.
+ *
+ * @param input Sampled logs, the sample's topic count, the filter fields, and the event signature.
+ * @returns At most one finding.
+ */
+export function topicFilterFindings(input: {
+  logs: readonly {topics: readonly (string | undefined)[]}[];
+  topicCount: number;
+  filterTopic: number | undefined;
+  filterValue: string | undefined;
+  signature: string;
+}): ProbeFinding[] {
+  if (!input.filterTopic) return [];
+
+  const indexed = Math.max(0, input.topicCount - 1);
+  if (input.filterTopic > indexed) {
+    return [
+      {
+        severity: "error",
+        message: `This event has ${indexed} indexed argument${indexed === 1 ? "" : "s"}, so filter topic ${input.filterTopic} is empty and nothing can match it.`,
+      },
+    ];
+  }
+
+  const value = normalizeTopicValue(input.filterValue);
+  if (!value) return [];
+
+  const matched = input.logs.filter(
+    (log) => log.topics[input.filterTopic as number]?.toLowerCase() === value,
+  );
+  if (matched.length > 0) {
+    return [
+      {
+        severity: "ok",
+        message: `${matched.length} of the last ${input.logs.length} ${input.signature} events match the filter.`,
+      },
+    ];
+  }
+
+  return [
+    {
+      severity: "warn",
+      message:
+        `None of the ${input.logs.length} recent ${input.signature} events had topic ${input.filterTopic} ` +
+        `equal to ${shortHex(value)} — either that sender is idle, or it is not the one this event carries there.`,
+    },
+  ];
 }
 
 /**

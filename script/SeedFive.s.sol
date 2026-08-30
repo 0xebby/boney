@@ -97,8 +97,7 @@ contract SeedFive is Script {
     bytes32 public constant TRANSFER_TOPIC =
         0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
     /// @dev `OpenMintNFT.Minted(address indexed minter, uint256 paid, uint256 quantity)`.
-    bytes32 public constant MINTED_TOPIC =
-        0x25b428dfde728ccfaddad7e29e4ac23c24ed7fd1a6e3e3f91894a9a073f5dfff;
+    bytes32 public constant MINTED_TOPIC = 0x25b428dfde728ccfaddad7e29e4ac23c24ed7fd1a6e3e3f91894a9a073f5dfff;
 
     // ── amount modes, mirroring `lib/kpiSource.ts` ───────────────────────────────────────────────
 
@@ -216,8 +215,7 @@ contract SeedFive is Script {
     function _nft(uint256 pool) internal returns (address campaign) {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](2);
         kpis[0] = _kpi(Types.KpiKind.Mint, address(nft), TRANSFER_TOPIC, 2, COUNT, 1, false);
-        kpis[1] =
-            _kpi(Types.KpiKind.TokenPurchase, address(nft), MINTED_TOPIC, 1, DATA_WORD0, MILLI, false);
+        kpis[1] = _kpi(Types.KpiKind.TokenPurchase, address(nft), MINTED_TOPIC, 1, DATA_WORD0, MILLI, false);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](2);
         tiers[0] = _tiers(pool, 1, 3, 10);
@@ -232,8 +230,7 @@ contract SeedFive is Script {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](3);
         kpis[0] = _kpi(Types.KpiKind.Deposit, WETH, WETH_DEPOSIT_TOPIC, 1, DATA_WORD0, MILLI, false);
         kpis[1] = _kpi(Types.KpiKind.Deposit, WETH, WETH_DEPOSIT_TOPIC, 1, COUNT, 1, false);
-        kpis[2] =
-            _kpi(Types.KpiKind.withdraw, WETH, WETH_WITHDRAWAL_TOPIC, 1, DATA_WORD0, MILLI, false);
+        kpis[2] = _kpi(Types.KpiKind.withdraw, WETH, WETH_WITHDRAWAL_TOPIC, 1, DATA_WORD0, MILLI, false);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](3);
         tiers[0] = _tiers(pool, 1, 5, 20);

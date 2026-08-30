@@ -1,5 +1,6 @@
 import {classifyTouch, type TouchStatus} from "./referrals";
 import {nextTier} from "./campaign";
+import type {EvidenceAction} from "./indexerCore";
 import type {RewardTier} from "./types";
 
 /**
@@ -12,10 +13,10 @@ import type {RewardTier} from "./types";
  * ## Why a KOL selection needs planning at all
  *
  * `Campaign.reportUserAction(kpiIndex, user, newTotal, evidence)` takes a **referral** wallet, not
- * a promoter. It resolves the payee itself: `_resolvePromoterId(user)` reads the stored touch, and
- * a wallet with no live touch reverts `NoAttribution(user)`. So "report for this KOL" is not a call
- * the contract offers — it has to be turned into one call per referral currently attributed to
- * that KOL, which is what `planKolReport` does.
+ * a promoter. It resolves the payee from the evidence — who held that wallet at each action's block —
+ * and falls back to the live touch when there is none, reverting `NoAttribution(user)` if nobody
+ * holds it. So "report for this KOL" is not a call the contract offers — it has to be turned into one
+ * call per referral currently attributed to that KOL, which is what `planKolReport` does.
  *
  * Vocabulary, per `indexerCore`'s note: the ABI calls the attributed wallet `user` and those
  * strings are load-bearing, so they stay at the boundary. Here it is a **referral**. The web app
@@ -52,41 +53,6 @@ export function latestTouches(entries: readonly TouchEntry[]): TouchEntry[] {
   }
 
   return [...byReferral.values()];
-}
-
-/**
- * Each referral's *earliest* touch time on this campaign, keyed lowercase.
- *
- * The counterpart to `latestTouches`, and the floor every observed total is measured from. The two
- * answer different questions: the latest touch says **who** gets credited, the earliest says **from
- * when** activity counts.
- *
- * It has to be the earliest, not the current `signedAt`, because `Campaign` credits
- * `newTotal - _userCredited[user][kpi]` (`Campaign.sol:331`) and that guard is keyed by user alone —
- * one cumulative ledger spanning every promoter the referral ever had. So a reported total must be
- * cumulative over the referral's whole attributed history, or the subtraction is measuring two
- * different windows against each other.
- *
- * Concretely, with a referral who moved from promoter A to B after A had been credited 3:
- *
- *   floor = current signedAt -> B recomputes 3, already is 3, B is credited nothing, ever
- *   floor = earliest signedAt -> B reports 6, is credited 6 - 3 = 3, which is B's own era
- *
- * Activity from before the referral was *ever* attributed still cannot count — that is what the
- * floor excludes, and it is the rule `boneyMd/KPI_VERIFICATION.md` §8 exists for. `signedAt` is
- * strictly increasing per referral (`AttributionRegistry.sol:122` reverts `TouchNotNewer`), so the
- * minimum here is the first touch that was ever stored, not merely the oldest log still readable.
- */
-export function earliestSignedAt(entries: readonly TouchEntry[]): Map<string, bigint> {
-  const out = new Map<string, bigint>();
-
-  for (const entry of entries) {
-    const key = entry.referral.toLowerCase();
-    const seen = out.get(key);
-    if (seen === undefined || entry.signedAt < seen) out.set(key, entry.signedAt);
-  }
-
-  return out;
 }
 
 /** A referral row with its live/expired classification resolved. */
@@ -220,16 +186,24 @@ export type PlannedReport = {
   referral: `0x${string}`;
   /** Cumulative, as the ABI requires — this referral's credited total plus its share. */
   newTotal: bigint;
-  /** The share itself, for display. */
+  /** What this call credits the promoter being reported for, which is what the panel shows. */
   delta: bigint;
+  /**
+   * The rest of the call's credit, landing on promoters who held this referral earlier.
+   *
+   * Present because the two are not interchangeable: `newTotal` is per referral and the chain splits
+   * it per promoter, so a report can move progress a panel selected by promoter would not otherwise
+   * account for. Zero on the simulated path, which has no evidence to split.
+   */
+  elsewhere: bigint;
   /**
    * Per-action evidence backing `delta`, when the report is sourced from observed logs.
    *
-   * Only meaningful for a verifier-gated KPI, which decodes it as `TouchWindowVerifier.Action[]`;
-   * `verifier == address(0)` ignores the argument, so the caller sends `"0x"` rather than paying
-   * calldata for a blob nothing reads. Absent on a simulated report, which has no actions behind it.
+   * `Campaign` decodes it as `Types.Action[]` for every KPI, verifier or not, and credits each action
+   * to whoever held the referral at that action's block. Absent on a simulated report, which has no
+   * actions behind it — that path falls back to resolving attribution at report time.
    */
-  actions?: readonly {timestamp: bigint; amount: bigint}[];
+  actions?: readonly EvidenceAction[];
 };
 
 export type ReportPlan =
@@ -299,7 +273,7 @@ export function planKolReport({
 
     const referral = kol.live[i]!.referral;
     const already = credited.get(referral.toLowerCase()) ?? BigInt(0);
-    calls.push({referral, newTotal: already + delta, delta});
+    calls.push({referral, newTotal: already + delta, delta, elsewhere: BigInt(0)});
     totalDelta += delta;
   }
 
@@ -315,8 +289,16 @@ export type ObservedReferral = {
   referral: `0x${string}`;
   /** Post-scaling total across every matched log, as `aggregateByActor` folds it. */
   observed: bigint;
-  /** Per-log contributions, for verifier evidence. */
-  actions: readonly {timestamp: bigint; amount: bigint}[];
+  /** Per-log contributions, for evidence. Ordered by block. */
+  actions: readonly EvidenceAction[];
+  /**
+   * `observed` split across the promoters who held this referral, keyed by lowercased promoter id.
+   *
+   * The referral's own total is the number `reportUserAction` takes, but it is not the number any one
+   * promoter earns: a referral who re-signed under someone else carries both spells at once. Only this
+   * split says which part belongs to the promoter being looked at — see `tallyByPromoter`.
+   */
+  byPromoter: ReadonlyMap<string, bigint>;
 };
 
 /**
@@ -401,6 +383,19 @@ export function describeCeiling(input: {
  *    is an early return on chain and a pointless wallet confirmation here. This is also what makes
  *    the button idempotent: click it twice and the second click has nothing to do.
  *
+ * ## The cumulative total is not this promoter's figure
+ *
+ * `newTotal` covers the referral's whole attributed history, including spells under a *different*
+ * promoter — the chain splits it back out per promoter and credits each only the part it earned
+ * (`Campaign._tally`). So the figure this KOL gains is its own segment less what it has already been
+ * credited, and `delta` carries that rather than the referral's remainder. Reporting the remainder as
+ * this KOL's gain is what made a re-touched referral read as the previous spell's total plus the
+ * current one, even though the credit itself landed correctly.
+ *
+ * A call whose whole remainder belongs to an earlier promoter is still sent, with `delta` zero and
+ * `elsewhere` carrying it. Dropping it would strand that work: once the referral re-signs, no KOL the
+ * panel can select holds it any more, and only the unattended indexer would ever credit it.
+ *
  * Refusals mirror `planKolReport`'s so the panel renders one warning either way, plus the two this
  * path adds: a KPI with no event source has nothing to observe, and an observed total of zero means
  * the referrals genuinely have not acted yet.
@@ -409,6 +404,7 @@ export function planObservedReport({
   kol,
   observed,
   credited,
+  creditedTo,
   aggregate,
   hasSource,
   progress,
@@ -418,6 +414,14 @@ export function planObservedReport({
   observed: ReadonlyMap<string, ObservedReferral>;
   /** Each live referral's `userCreditedOf(referral, kpiIndex)`, keyed lowercase. */
   credited: ReadonlyMap<string, bigint>;
+  /**
+   * Each live referral's `creditedToOf(referral, kpiIndex, kol.promoterId)`, keyed lowercase.
+   *
+   * Separate from `credited` because they answer different questions: that one is the referral's total
+   * across every promoter and bounds `newTotal`, this one is what *this* KOL already has for that
+   * referral and bounds what the report can add to it.
+   */
+  creditedTo: ReadonlyMap<string, bigint>;
   aggregate: boolean;
   /** Whether the KPI's `params` decoded to an event source at all. */
   hasSource: boolean;
@@ -440,6 +444,7 @@ export function planObservedReport({
   const calls: PlannedReport[] = [];
   let totalDelta = BigInt(0);
   let sawActivity = false;
+  const promoterKey = kol.promoterId.toLowerCase();
 
   for (const target of kol.live) {
     const key = target.referral.toLowerCase();
@@ -450,13 +455,22 @@ export function planObservedReport({
     const already = credited.get(key) ?? BigInt(0);
     if (seen.observed <= already) continue;
 
+    // What the chain will add to *this* KOL: its own segment of the evidence, less what it already
+    // holds for this referral. The rest of the remainder credits whoever held the referral earlier.
+    const segment = seen.byPromoter.get(promoterKey) ?? BigInt(0);
+    const held = creditedTo.get(key) ?? BigInt(0);
+    const delta = segment > held ? segment - held : BigInt(0);
+    const remainder = seen.observed - already;
+    const elsewhere = remainder > delta ? remainder - delta : BigInt(0);
+
     calls.push({
       referral: target.referral,
       newTotal: seen.observed,
-      delta: seen.observed - already,
+      delta,
+      elsewhere,
       actions: seen.actions,
     });
-    totalDelta += seen.observed - already;
+    totalDelta += delta;
   }
 
   if (calls.length === 0) {

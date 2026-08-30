@@ -72,8 +72,6 @@ const SELF: HistoryVoice = {kind: "self"};
 type HistoryCopy = {
   title: string;
   subtitle: string;
-  tiersHint: string;
-  earnedEmptyHint: string;
   emptyTitle: string;
   emptyBody: string;
   notIndexedNote: string;
@@ -94,8 +92,6 @@ function copyFor(voice: HistoryVoice): HistoryCopy {
     return {
       title: "Your history",
       subtitle: "Everything you have done on Boneyard, counted. These only ever go up.",
-      tiersHint: "reward tiers settled in your name",
-      earnedEmptyHint: "no reward tier has paid out to you yet",
       emptyTitle: "Your history starts with one campaign",
       emptyBody:
         "Join a campaign from the list above, share your tracking link, and the actions it earns " +
@@ -112,8 +108,6 @@ function copyFor(voice: HistoryVoice): HistoryCopy {
   return {
     title: "History",
     subtitle: `Everything ${voice.subject} has done on Boneyard, counted. These only ever go up.`,
-    tiersHint: "reward tiers settled",
-    earnedEmptyHint: "no reward tier has paid out yet",
     emptyTitle: "No campaigns yet",
     emptyBody: `${voice.subject} has not joined a campaign on Boneyard yet. The campaigns, referrals and reward tiers they earn will fill in here.`,
     notIndexedNote: "The score above needs no indexer — only the history half does.",
@@ -128,8 +122,6 @@ export function BoneyCardHistory({
   card,
   unavailable,
   isLoading,
-  indexedBlock,
-  lag,
   earnedToken,
   voice = SELF,
   onRetry,
@@ -139,9 +131,6 @@ export function BoneyCardHistory({
   /** Present only on a failed one. Mutually exclusive with `card` by construction. */
   unavailable: GraphUnavailable | undefined;
   isLoading: boolean;
-  indexedBlock: bigint | undefined;
-  /** Blocks behind the chain head. Undefined until both numbers are in. */
-  lag: bigint | undefined;
   /** Metadata for the dominant earned token. Null when the read has not landed or failed. */
   earnedToken: TokenMeta | null;
   /** Defaults to the connected wallet reading its own card. */
@@ -169,7 +158,7 @@ export function BoneyCardHistory({
         <Filled card={card} earnedToken={earnedToken} copy={copy} />
       )}
 
-      {card ? <Footer card={card} indexedBlock={indexedBlock} lag={lag} copy={copy} /> : null}
+      {card ? <Footer card={card} copy={copy} /> : null}
     </Card>
   );
 }
@@ -250,7 +239,7 @@ function Filled({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <Counts card={card} earnedToken={earnedToken} copy={copy} />
+      <Counts card={card} earnedToken={earnedToken} />
       <Specializations card={card} />
       <Milestones milestones={card.milestones} copy={copy} />
       <CampaignRows rows={card.rows} />
@@ -259,66 +248,29 @@ function Filled({
 }
 
 /**
- * The four headline counts, plus the two that read better as a sentence.
+ * The four headline counts.
  *
- * Four tiles rather than seven: `ui/StatTile`'s row is a 4-up grid, and a second row of it would give
- * "19 projects" the same visual weight as "25 tiers crossed" while saying much less — one project
- * address is behind every campaign on this deployment, so that number reads 1 for everybody today.
- * Actions ride as the referral tile's hint because they are the same fact family (a referral is a
- * distinct user across those actions), and projects and the start date go in the line underneath.
+ * Numbers only — each tile is a label and a figure, with no descriptive line under it. Four tiles
+ * rather than seven: "19 projects" would take the same visual weight as "25 tiers crossed" while
+ * saying much less, since one project address is behind every campaign on this deployment.
  */
 function Counts({
   card,
   earnedToken,
-  copy,
 }: {
   card: CardHistory;
   earnedToken: TokenMeta | null;
-  copy: HistoryCopy;
 }) {
   const dominant = card.earned[0];
   const others = card.earned.length - 1;
 
   return (
-    <div className="flex flex-col gap-2">
-      <StatRow>
-        <StatTile
-          label="CAMPAIGNS JOINED"
-          value={card.campaignsJoined.toLocaleString()}
-          hint={
-            card.campaignsDelivered === card.campaignsJoined
-              ? "credited on every one"
-              : `${card.campaignsDelivered.toLocaleString()} with a credited action`
-          }
-        />
-        <StatTile
-          label="TIERS CROSSED"
-          value={card.tiers.toLocaleString()}
-          hint={copy.tiersHint}
-        />
-        <StatTile
-          label="REFERRALS BROUGHT"
-          value={card.referrals.toLocaleString()}
-          hint={`${card.actions.toLocaleString()} verified ${card.actions === 1 ? "action" : "actions"}`}
-        />
-        <EarnedTile
-          dominant={dominant}
-          others={others}
-          meta={earnedToken}
-          emptyHint={copy.earnedEmptyHint}
-        />
-      </StatRow>
-
-      <p className="text-xs text-ink-muted">
-        {card.projects.toLocaleString()} {card.projects === 1 ? "project" : "projects"} worked with
-        {card.promotingSince !== undefined
-          ? ` · promoting since ${formatDate(card.promotingSince)}`
-          : card.promotingSinceBlock !== undefined
-            ? // The block did not resolve to a date. Still true, and better than a dash.
-              ` · promoting since block ${card.promotingSinceBlock.toLocaleString()}`
-            : ""}
-      </p>
-    </div>
+    <StatRow>
+      <StatTile label="CAMPAIGNS JOINED" value={card.campaignsJoined.toLocaleString()} />
+      <StatTile label="TIERS CROSSED" value={card.tiers.toLocaleString()} />
+      <StatTile label="REFERRALS BROUGHT" value={card.referrals.toLocaleString()} />
+      <EarnedTile dominant={dominant} others={others} meta={earnedToken} />
+    </StatRow>
   );
 }
 
@@ -336,31 +288,22 @@ function EarnedTile({
   dominant,
   others,
   meta,
-  emptyHint,
 }: {
   dominant: CardHistory["earned"][number] | undefined;
   others: number;
   meta: TokenMeta | null;
-  emptyHint: string;
 }) {
-  if (!dominant) {
-    return <StatTile label="EARNED" value="0" hint={emptyHint} />;
-  }
-
-  if (!meta) {
-    return <StatTile label="EARNED" value="—" hint="reward token could not be read" />;
-  }
+  if (!dominant) return <StatTile label="EARNED" value="0" />;
+  if (!meta) return <StatTile label="EARNED" value="—" />;
 
   return (
     <StatTile
       label="EARNED"
       value={formatTokenAmount(dominant.paid, meta.decimals, {compact: true})}
       unit={meta.symbol}
-      hint={
-        others > 0
-          ? `+ ${others} other ${others === 1 ? "token" : "tokens"} — never totalled together`
-          : `across ${dominant.campaigns} ${dominant.campaigns === 1 ? "campaign" : "campaigns"}`
-      }
+      // Earnings in other tokens are counted, never converted — the count qualifies the figure it
+      // sits on rather than describing it.
+      qualifier={others > 0 ? `+ ${others} other ${others === 1 ? "token" : "tokens"}` : undefined}
     />
   );
 }
@@ -477,13 +420,7 @@ function Milestones({
  * counts actions instead, which is comparable across campaigns because it counts events rather than
  * their units.
  *
- * Two rows explain themselves rather than sitting flat, and neither is the promoter's failing:
- *
- *  - **Every KPI campaign-wide.** No promoter could ever be credited — `reportUserAction` reverts
- *    `AggregateKpi` before attribution — so "no credited actions" here is a project-side
- *    misconfiguration, not a miss. Campaign 8 "Gyndore" is the live case.
- *  - **Ended before its own end time.** `end()` is project-callable at any moment, and a campaign
- *    killed hours after launch offered no chance to deliver.
+ * A row is its counts and its status pill — no explanatory sentence underneath.
  */
 function CampaignRows({rows}: {rows: readonly CampaignHistoryRow[]}) {
   if (rows.length === 0) return null;
@@ -519,21 +456,6 @@ function CampaignRows({rows}: {rows: readonly CampaignHistoryRow[]}) {
                 <span>{row.kinds.map((kind) => KPI_KIND_LABEL[kind]).join(" · ")}</span>
               ) : null}
             </div>
-
-            {row.aggregateOnly ? (
-              <p className="text-xs text-warning">
-                Nothing here was creditable to a promoter — every KPI on this campaign is
-                campaign-wide, which the contract never attributes to anyone.
-              </p>
-            ) : !row.delivered ? (
-              <p className="text-xs text-ink-muted">No credited actions yet.</p>
-            ) : null}
-
-            {row.endedEarly === true ? (
-              <p className="text-xs text-ink-secondary">
-                The project ended this campaign before its scheduled end time.
-              </p>
-            ) : null}
           </li>
         ))}
       </ul>
@@ -542,40 +464,22 @@ function CampaignRows({rows}: {rows: readonly CampaignHistoryRow[]}) {
 }
 
 /**
- * Where the numbers came from and how far they can be trusted.
+ * How far the numbers above can be trusted.
  *
- * The indexed block is stated rather than hidden: a promoter who just crossed a tier and cannot see it
- * needs "indexed to 4 blocks ago", not a card that looks wrong. Same reasoning as `partial` — a count
- * that might be a floor has to say so, because the alternative is a total that is quietly too low.
+ * A count that might be a floor has to say so, because the alternative is a total that is quietly too
+ * low.
  */
-function Footer({
-  card,
-  indexedBlock,
-  lag,
-  copy,
-}: {
-  card: CardHistory;
-  indexedBlock: bigint | undefined;
-  lag: bigint | undefined;
-  copy: HistoryCopy;
-}) {
+function Footer({card, copy}: {card: CardHistory; copy: HistoryCopy}) {
   return (
     <div className="mt-3 flex flex-col gap-1 border-t border-hairline pt-2">
       {card.partial ? (
-        <p className="text-xs text-warning">
+        <p className="text-xs text-brand">
           Some history could not be read in full, so every count above is a floor rather than a total.
         </p>
       ) : null}
 
       {card.orphanPayouts > 0 ? (
-        <p className="text-xs text-warning">{copy.orphanNote(card.orphanPayouts)}</p>
-      ) : null}
-
-      {indexedBlock !== undefined && indexedBlock > BigInt(0) ? (
-        <p className="tnum text-xs text-ink-muted">
-          Indexed to block {indexedBlock.toLocaleString()}
-          {lag !== undefined ? ` · ${lag.toLocaleString()} behind the chain` : ""}
-        </p>
+        <p className="text-xs text-brand">{copy.orphanNote(card.orphanPayouts)}</p>
       ) : null}
     </div>
   );

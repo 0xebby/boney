@@ -1,5 +1,6 @@
 import {getAddress, encodeAbiParameters, type Hex} from "viem";
-import {AMOUNT_MODE, effectiveScale, type EventSource} from "./kpiSource";
+import {AMOUNT_MODE, effectiveScale, matchesTopicFilter, type EventSource} from "./kpiSource";
+import type {AttributionLookup} from "./attributionWindows";
 
 /**
  * Turning raw event logs into the `reportUserAction` calls a campaign will accept.
@@ -24,17 +25,20 @@ export type IndexedLog = {
   topics: readonly Hex[];
   data: Hex;
   blockNumber: bigint;
-  /** Block timestamp, needed for `TouchWindowVerifier` evidence. */
+  /** Block timestamp, needed to place the action inside an attribution window. */
   timestamp: bigint;
 };
+
+/** One credit-bearing action as `Campaign` reads it out of `evidence`. */
+export type EvidenceAction = {blockNumber: bigint; timestamp: bigint; amount: bigint};
 
 /** One referral's accumulated activity for a single KPI. */
 export type ActorTotal = {
   referral: `0x${string}`;
   /** Post-scaling progress across every matched log. */
   amount: bigint;
-  /** Per-log contributions, for verifier evidence. Ordered by block. */
-  actions: {timestamp: bigint; amount: bigint}[];
+  /** Per-log contributions, for evidence. Ordered by block. */
+  actions: EvidenceAction[];
   /** Highest block that contributed, so a cursor can advance past it. */
   lastBlock: bigint;
 };
@@ -77,30 +81,20 @@ export function rawAmount(log: IndexedLog, mode: EventSource["amountMode"]): big
 }
 
 /**
- * One credit-bearing action, decoded down to the two fields crediting needs.
+ * One credit-bearing action, decoded down to the fields crediting needs.
  *
  * The shape both sources reduce to before folding: `aggregateByActor` gets here by decoding raw logs,
  * `aggregateActions` by reading an indexer that already decoded them. `raw` is pre-scaling and already
  * mode-resolved — 1 under `count`, the payload value under `dataWord0` — which is what lets the fold
  * below stay unaware of amount modes entirely.
  */
-export type DecodedAction = {timestamp: bigint; raw: bigint};
+export type DecodedAction = {blockNumber: bigint; timestamp: bigint; raw: bigint};
 
 /** Per-referral accumulator, before scaling. */
 type RawTotals = Map<
   string,
   {referral: `0x${string}`; actions: DecodedAction[]; lastBlock: bigint}
 >;
-
-/**
- * Per-actor earliest creditable block timestamp, keyed by lowercased address.
- *
- * The floor for a user is `max(touchOf(campaign, user).signedAt, campaign.startTime)`: activity is
- * only creditable once the user is attributed *and* the campaign has begun tracking. An actor absent
- * from the map has no live touch and is dropped entirely, matching `Campaign.reportUserAction`
- * reverting `NoAttribution` for them.
- */
-export type ActorFloors = ReadonlyMap<string, bigint>;
 
 /**
  * Folds logs into per-referral totals.
@@ -110,47 +104,51 @@ export type ActorFloors = ReadonlyMap<string, bigint>;
  * credit nothing — a promoter's referrals could act all day and their progress would never move.
  *
  * Logs are sorted by block before folding so `actions` is chronological regardless of the order the
- * RPC returned pages in; `TouchWindowVerifier` compares each action's timestamp against a floor,
- * and out-of-order evidence would still verify but reads as corrupt.
+ * RPC returned pages in. `Campaign.reportUserAction` rejects evidence whose block numbers go
+ * backwards (`UnorderedEvidence`), because it walks the actions oldest first.
  *
- * ## `floors` is not optional, deliberately
+ * ## `attribution` is not optional, deliberately
  *
- * Per-user attribution filtering is the trickiest correctness rule in this repo
- * (`boneyMd/KPI_VERIFICATION.md` §8): without it, activity a user performed *before* they were ever
- * attributed credits a promoter who did not cause it, and activity from before the campaign existed
- * credits one that was not running. `relayCore.aggregateDeltas` has enforced it since it shipped;
- * this fold did not, so the relayer and the two callers of this function disagreed about what a
- * referral was owed — the exact disagreement `useObservedActions` says must be impossible.
+ * Per-action attribution is the trickiest correctness rule in this repo
+ * (`boneyMd/KPI_VERIFICATION.md` §8). `Campaign` credits each action to whoever held the referral at
+ * that action's block, and skips the ones nobody held — so an action this fold keeps but the chain
+ * would skip inflates `newTotal` above what can ever be credited, and every later run re-sends the
+ * same unreachable figure. Applying the same rule here keeps the claim and the chain in agreement.
  *
  * Passing `null` opts out explicitly and is for diagnostics only — a scratch script asking "what is
  * on chain at all", where attribution is not the question. It is a required argument rather than an
  * optional one so that opting out is a visible decision at the call site instead of an omission.
  *
- * A log whose timestamp is unresolved (`0`) is dropped rather than assumed to clear the floor, the
- * same way the relayer treats a block it could not resolve.
+ * @param logs Matched logs for one KPI, in any order.
+ * @param source Event source describing how to read an actor and an amount out of a log.
+ * @param attribution Per-action attribution, or null to keep every log.
+ * @returns Per-referral totals keyed by lowercased address.
  */
 export function aggregateByActor(
   logs: readonly IndexedLog[],
   source: EventSource,
-  floors: ActorFloors | null,
+  attribution: AttributionLookup | null,
 ): Map<string, ActorTotal> {
   const raw: RawTotals = new Map();
 
   const ordered = [...logs].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : 1));
 
   for (const log of ordered) {
+    if (!matchesTopicFilter(log, source)) continue;
+
     const referral = actorFromTopic(log, source.actorTopic);
     if (!referral) continue;
     const amount = rawAmount(log, source.amountMode);
     if (amount === null) continue;
 
-    if (floors) {
-      const floor = floors.get(referral.toLowerCase());
-      if (floor === undefined || floor === BigInt(0)) continue;
-      if (log.timestamp === BigInt(0) || log.timestamp < floor) continue;
-    }
+    if (attribution && !attribution.at(referral, log.blockNumber, log.timestamp)) continue;
 
-    accumulate(raw, referral, {timestamp: log.timestamp, raw: amount}, log.blockNumber);
+    accumulate(
+      raw,
+      referral,
+      {blockNumber: log.blockNumber, timestamp: log.timestamp, raw: amount},
+      log.blockNumber,
+    );
   }
 
   return foldActions(raw, effectiveScale(source));
@@ -168,30 +166,40 @@ export function aggregateByActor(
  * upstream because `count` is a property of the KPI, not of the log: the same `Transfer` counts as 1
  * for one campaign and contributes its `value` for another.
  *
- * `floors` carries the same meaning and the same non-optionality as in `aggregateByActor`, and matters
- * here for a specific reason: the subgraph stores actions *deliberately unfiltered* — see the
+ * `attribution` carries the same meaning and the same non-optionality as in `aggregateByActor`, and
+ * matters here for a specific reason: the subgraph stores actions *deliberately unfiltered* — see the
  * "No attribution check" note in `subgraph/src/transfer.ts`, which defers the decision because a
  * promoter switch moves `signedAt` afterwards. That deferral is only sound if the consumer actually
- * applies the floor, and this is the consumer.
+ * applies the rule, and this is the consumer.
+ *
+ * A KPI carrying `filterTopic` must not be read through this path. The subgraph stores actions
+ * without their topics, so the filter cannot be applied here and the total would count logs the
+ * chain will not credit; `aggregateByActor` is the path that enforces it.
+ *
+ * @param actions Decoded actions for one KPI, in any order.
+ * @param source Event source describing how an amount folds.
+ * @param attribution Per-action attribution, or null to keep every action.
+ * @returns Per-referral totals keyed by lowercased address.
  */
 export function aggregateActions(
   actions: readonly {user: `0x${string}`; value: bigint; blockNumber: bigint; timestamp: bigint}[],
   source: EventSource,
-  floors: ActorFloors | null,
+  attribution: AttributionLookup | null,
 ): Map<string, ActorTotal> {
   const raw: RawTotals = new Map();
 
   const ordered = [...actions].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : 1));
 
   for (const action of ordered) {
-    if (floors) {
-      const floor = floors.get(action.user.toLowerCase());
-      if (floor === undefined || floor === BigInt(0)) continue;
-      if (action.timestamp === BigInt(0) || action.timestamp < floor) continue;
-    }
+    if (attribution && !attribution.at(action.user, action.blockNumber, action.timestamp)) continue;
 
     const amount = source.amountMode === AMOUNT_MODE.count ? BigInt(1) : action.value;
-    accumulate(raw, action.user, {timestamp: action.timestamp, raw: amount}, action.blockNumber);
+    accumulate(
+      raw,
+      action.user,
+      {blockNumber: action.blockNumber, timestamp: action.timestamp, raw: amount},
+      action.blockNumber,
+    );
   }
 
   return foldActions(raw, effectiveScale(source));
@@ -242,10 +250,11 @@ function foldActions(raw: RawTotals, scale: bigint): Map<string, ActorTotal> {
 /**
  * Splits a scaled total back across the actions that produced it, preserving the sum exactly.
  *
- * Per-action amounts must sum to the scaled total, or `TouchWindowVerifier` sees evidence that
- * disagrees with the claim and reverts `EvidenceExceedsClaim`. Scaling each action independently would
- * not sum, so the total is apportioned and the remainder lands on the final entry — which is also the
- * newest, and therefore the one most likely to clear the window floor.
+ * Per-action amounts must sum to the scaled total, or the two disagree about what happened: the
+ * chain's oldest-first walk would leave part of `newTotal` unattributed, and a verifier reading the
+ * same evidence reverts `EvidenceExceedsClaim` when it sums higher. Scaling each action independently
+ * would not sum, so the total is apportioned and the remainder lands on the final entry — which is
+ * also the newest, and therefore the one held by the promoter attributed most recently.
  *
  * Shares come from each action's own `raw`, which is already mode-resolved. That matters: an earlier
  * version re-read the log's data word here regardless of mode, so a `count` KPI split a total of *n
@@ -257,14 +266,102 @@ function apportion(
   actions: readonly DecodedAction[],
   scaledTotal: bigint,
   scale: bigint,
-): {timestamp: bigint; amount: bigint}[] {
-  const out: {timestamp: bigint; amount: bigint}[] = [];
+): EvidenceAction[] {
+  const out: EvidenceAction[] = [];
   let assigned = BigInt(0);
 
   for (let i = 0; i < actions.length; i++) {
     const share = i === actions.length - 1 ? scaledTotal - assigned : actions[i]!.raw / scale;
     assigned += share;
-    out.push({timestamp: actions[i]!.timestamp, amount: share});
+    out.push({
+      blockNumber: actions[i]!.blockNumber,
+      timestamp: actions[i]!.timestamp,
+      amount: share,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Merges adjacent actions until the list fits `Campaign.MAX_EVIDENCE_ACTIONS`.
+ *
+ * A merged entry carries the block and timestamp of the *newest* action folded into it, so it
+ * resolves to the promoter who held the referral at that point. Same-block actions merge first,
+ * which is lossless; beyond that the fold is coarse and can move an older action's amount onto a
+ * later promoter, so it only runs when the list would otherwise be rejected outright.
+ *
+ * @param actions Evidence actions, oldest first.
+ * @param limit Maximum entries the campaign will accept.
+ * @returns The same total, in at most `limit` entries.
+ */
+export function foldToLimit(
+  actions: readonly EvidenceAction[],
+  limit: number,
+): EvidenceAction[] {
+  if (limit <= 0) throw new Error("evidence limit must be positive");
+  if (actions.length <= limit) return [...actions];
+
+  // Same-block actions are indistinguishable to the chain's walk, so collapsing them loses nothing.
+  const byBlock: EvidenceAction[] = [];
+  for (const action of actions) {
+    const last = byBlock[byBlock.length - 1];
+    if (last && last.blockNumber === action.blockNumber) {
+      last.amount += action.amount;
+      if (action.timestamp > last.timestamp) last.timestamp = action.timestamp;
+      continue;
+    }
+    byBlock.push({...action});
+  }
+  if (byBlock.length <= limit) return byBlock;
+
+  // Still too long: fold runs of consecutive actions, each onto its newest member.
+  const perGroup = Math.ceil(byBlock.length / limit);
+  const out: EvidenceAction[] = [];
+  for (let i = 0; i < byBlock.length; i += perGroup) {
+    const group = byBlock.slice(i, i + perGroup);
+    const newest = group[group.length - 1]!;
+    let amount = BigInt(0);
+    for (const action of group) amount += action.amount;
+    out.push({blockNumber: newest.blockNumber, timestamp: newest.timestamp, amount});
+  }
+
+  return out;
+}
+
+/**
+ * Splits a referral's evidence across the promoters who held it, as `Campaign._tally` does.
+ *
+ * The report is one cumulative figure per referral, but the credit is not: the chain walks the
+ * evidence and adds each action's amount to whoever held the referral at that action's block. So a
+ * referral whose attribution moved carries work belonging to two promoters at once, and the figure a
+ * panel shows for *one* of them is this split, never the referral's own total.
+ *
+ * Runs over the apportioned evidence rather than the raw logs deliberately — the chain sees only what
+ * `encodeActions` sends, including the remainder `apportion` lands on the final action, so tallying
+ * anything else could disagree with what gets credited.
+ *
+ * No ceiling is applied. `_tally` stops at the verified total, which for an ungated KPI is the claim
+ * itself; a gated KPI's trimming is Boney's ceiling and is reported separately (`describeCeiling`).
+ *
+ * @param referral The wallet the actions belong to.
+ * @param actions Evidence actions for that referral, oldest first.
+ * @param attribution Per-action attribution, as the chain would resolve it.
+ * @returns Amount per promoter id, keyed lowercase. Actions nobody held are dropped.
+ */
+export function tallyByPromoter(
+  referral: `0x${string}`,
+  actions: readonly EvidenceAction[],
+  attribution: AttributionLookup,
+): Map<string, bigint> {
+  const out = new Map<string, bigint>();
+
+  for (const action of actions) {
+    const promoterId = attribution.at(referral, action.blockNumber, action.timestamp);
+    if (!promoterId) continue;
+
+    const key = promoterId.toLowerCase();
+    out.set(key, (out.get(key) ?? BigInt(0)) + action.amount);
   }
 
   return out;
@@ -279,27 +376,17 @@ export type ReportDecision =
 /**
  * Whether a referral's totals are worth a `reportUserAction` call.
  *
- * Both refusals mirror named contract behavior:
+ * The one refusal mirrors named contract behavior: a total no greater than what is already credited
+ * makes `Campaign` return early on `delta == 0`, and a *lower* total reverts `NonMonotonic`.
+ * `newTotal` is cumulative, not a delta, so re-indexing the same range must be a no-op rather than
+ * double-crediting.
  *
- *  - No live touch → `NoAttribution(user)` (`Campaign.sol:318`). Unattributed activity has no
- *    payee, and this is the constraint that makes "just index every mint on the contract"
- *    impossible: only wallets that clicked a tracking link and signed can ever be credited.
- *  - Not greater than what is already credited → `Campaign` returns early on `delta == 0`, and a
- *    *lower* total reverts `NonMonotonic`. `newTotal` is cumulative, not a delta, so re-indexing
- *    the same range must be a no-op rather than double-crediting.
+ * Whether the referral is attributed *now* is deliberately not a condition. `Campaign` credits each
+ * evidence action to whoever held the referral at that action's block, so a report can pay a promoter
+ * whose touch has since been superseded — and gating on the live touch is exactly what would drop
+ * that credit. Actions nobody held were already dropped upstream by `AttributionLookup`.
  */
-export function decideReport(
-  total: ActorTotal,
-  attributed: boolean,
-  alreadyCredited: bigint,
-): ReportDecision {
-  if (!attributed) {
-    return {
-      send: false,
-      referral: total.referral,
-      reason: "no live attribution touch — Campaign would revert NoAttribution",
-    };
-  }
+export function decideReport(total: ActorTotal, alreadyCredited: bigint): ReportDecision {
   if (total.amount <= alreadyCredited) {
     return {
       send: false,
@@ -311,24 +398,34 @@ export function decideReport(
 }
 
 /**
- * Encodes `TouchWindowVerifier.Action[]` for the `evidence` argument.
+ * Encodes `Types.Action[]` for the `evidence` argument.
  *
- * Only meaningful when the KPI names a verifier; a KPI with `verifier == address(0)` has its
- * evidence ignored entirely (`Campaign.sol:325`), so the caller passes `"0x"` there rather than
- * paying calldata for a blob nothing reads.
+ * Sent for every KPI, not only the ones naming a verifier: `Campaign` decodes it itself to credit
+ * each action to whoever held the referral at that action's block. A report with empty evidence falls
+ * back to crediting whoever holds the touch now.
+ *
+ * @param actions Evidence actions, oldest first and non-decreasing by block.
+ * @returns ABI-encoded `Types.Action[]`.
  */
-export function encodeActions(actions: readonly {timestamp: bigint; amount: bigint}[]): Hex {
+export function encodeActions(actions: readonly EvidenceAction[]): Hex {
   return encodeAbiParameters(
     [
       {
         type: "tuple[]",
         components: [
+          {type: "uint64", name: "blockNumber"},
           {type: "uint64", name: "timestamp"},
           {type: "uint256", name: "amount"},
         ],
       },
     ],
-    [actions.map((a) => ({timestamp: a.timestamp, amount: a.amount}))],
+    [
+      actions.map((a) => ({
+        blockNumber: a.blockNumber,
+        timestamp: a.timestamp,
+        amount: a.amount,
+      })),
+    ],
   );
 }
 

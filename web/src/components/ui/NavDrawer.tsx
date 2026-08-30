@@ -8,13 +8,14 @@ import {isActiveNav, type NavItem} from "@/lib/nav";
 /**
  * NavDrawer — the nav below `sm`, as a panel from the left rather than a strip across the top.
  *
- * The bar it replaces put five links in an `overflow-x-auto` strip between the brand mark and the
- * wallet cluster. That fits, but the nav is what gets squeezed, and a horizontally scrolling nav is
- * undiscoverable: the items past the fold are invisible with no affordance saying they exist. A
- * drawer trades one tap for showing every destination at full label width.
+ * The bar it replaces put the links in an `overflow-x-auto` strip beside the brand mark. That fits,
+ * but the nav is what gets squeezed, and a horizontally scrolling nav is undiscoverable: the items
+ * past the fold are invisible with no affordance saying they exist. A drawer trades one tap for
+ * showing every destination at full label width, and at phone widths it is also the only way the
+ * brand mark, Create and the wallet button fit on one line.
  *
- * Rendered only below `sm` (`sm:hidden` on the trigger). From `sm` up the top bar carries the nav
- * itself and this contributes nothing but an unmounted panel.
+ * Rendered only below `sm` (`sm:hidden` on the trigger). From `sm` up the top bar carries the nav on
+ * its own row and this contributes nothing but an unmounted panel.
  *
  * The dialog behaviour here is hand-rolled rather than pulled from a headless-UI dependency, in
  * keeping with `DataTable` being hand-rolled for the same reason: the behaviour is a handful of
@@ -121,7 +122,11 @@ export function NavDrawer({items}: {items: NavItem[]}) {
             already dismissible from the labelled Close control and from Escape. Announcing a
             full-screen button called nothing would add noise without adding a route out.
           */}
-          <div aria-hidden onClick={close} className="absolute inset-0 bg-plane/80" />
+          <div
+            aria-hidden
+            onClick={close}
+            className="absolute inset-0 overscroll-contain bg-plane/80"
+          />
 
           <div
             ref={panelRef}
@@ -148,8 +153,16 @@ export function NavDrawer({items}: {items: NavItem[]}) {
               </button>
             </div>
 
-            <nav aria-label="Main" className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-              {items.map(({href, label, icon}) => {
+            {/*
+              `overscroll-contain` as well as the body lock above: on iOS a scroll gesture that runs
+              past the end of this list otherwise chains to the page behind the drawer, which is how
+              you close it and find yourself somewhere else.
+            */}
+            <nav
+              aria-label="Main"
+              className="flex flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-2"
+            >
+              {items.map(({href, label}) => {
                 const active = isActiveNav(pathname, href);
                 return (
                   <Link
@@ -159,15 +172,12 @@ export function NavDrawer({items}: {items: NavItem[]}) {
                     aria-current={active ? "page" : undefined}
                     // `min-h-11` rather than padding alone: 44px is the smallest target that is
                     // reliably hittable with a thumb, and the bar's own 30px links are not.
-                    className={`flex min-h-11 items-center gap-3 rounded-md px-3 text-sm transition-colors ${
+                    className={`flex min-h-11 items-center rounded-md px-3 text-sm transition-colors ${
                       active
                         ? "bg-surface-2 font-semibold text-brand"
                         : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
                     }`}
                   >
-                    <span aria-hidden className="text-xs opacity-70">
-                      {icon}
-                    </span>
                     {label}
                   </Link>
                 );

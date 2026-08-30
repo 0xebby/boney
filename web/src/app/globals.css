@@ -25,6 +25,10 @@
   --brand: #ffc800;
   --brand-dim: #b38c00;
 
+  /* Ethos Network's green, lifted to clear the dark plane. Attribution only — never a series or
+     status color, and always set beside the word "Ethos". */
+  --brand-ethos: #1fa34a;
+
   /* Chrome — warm-tinted so hairlines belong to the palette rather than reading gray */
   --gridline: #2a2721;
   --baseline: #3a352b;
@@ -76,6 +80,7 @@
 
   --color-brand: var(--brand);
   --color-brand-dim: var(--brand-dim);
+  --color-brand-ethos: var(--brand-ethos);
 
   --color-gridline: var(--gridline);
   --color-baseline: var(--baseline);
@@ -153,6 +158,60 @@ body {
 
 .animate-blink {
   animation: blink 1.2s steps(1, end) infinite;
+}
+
+/**
+ * Dialog entry: the overlay fades, the panel rises into it.
+ *
+ * Short and single-shot. The reduced-motion block below collapses both to nothing.
+ */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-overlay-in {
+  animation: overlay-in 140ms ease-out both;
+}
+
+.animate-dialog-in {
+  animation: dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/**
+ * Landing hero entry: each line rises into place, staggered by `[animation-delay:…]` at the call site.
+ *
+ * `both` so an element with a delay is held out of sight rather than flashing at full opacity first.
+ * Transform and opacity only, and the reduced-motion block below flattens it to a single frame.
+ */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise-in {
+  animation: rise-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Respect reduced-motion for every transition in the app. */

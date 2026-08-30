@@ -137,7 +137,7 @@ export function DiscoverPage({
               <option value={ALL_CAMPAIGNS}>All campaigns</option>
               {withPromoters.map((g) => (
                 <option key={g.view.campaign} value={g.view.campaign}>
-                  Campaign #{g.view.campaignId.toString()} · {projectName(g.view)} —{" "}
+                  {projectName(g.view)} · #{g.view.campaignId.toString()} —{" "}
                   {g.promoters.length} promoter
                   {g.promoters.length === 1 ? "" : "s"}
                 </option>
@@ -426,7 +426,7 @@ function SplitCell({parts, loading}: {parts?: ScoreParts; loading: boolean}) {
   const split = scoreSplit(parts);
   if (split.total === 0) {
     return (
-      <span className="text-xs text-warning" title="No attested values on record for this wallet">
+      <span className="text-xs text-brand" title="No attested values on record for this wallet">
         unattested
       </span>
     );

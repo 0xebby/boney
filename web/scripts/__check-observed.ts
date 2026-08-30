@@ -6,7 +6,7 @@
  */
 import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
-import {decodeEventSource} from "../src/lib/kpiSource";
+import {decodeEventSource, topicFilterArray} from "../src/lib/kpiSource";
 import {catalogSignature} from "../src/lib/eventNames";
 import {aggregateByActor, type IndexedLog} from "../src/lib/indexerCore";
 import {planWindows} from "../src/lib/promoters";
@@ -73,9 +73,12 @@ async function main() {
     console.log(`\nkpi ${i}: ${source ? catalogSignature(source.topic0) ?? source.topic0 : "no source"}`);
     if (!source) continue;
 
-    const topics: (Hex | Hex[] | null)[] = [source.topic0];
-    for (let t = 1; t < source.actorTopic; t++) topics.push(null);
-    topics.push(referrals.map((r) => pad(r, {size: 32})));
+    // Same slots the panel narrows on, built by the same helper: the actor position ORs the
+    // referrals, and a fixed-topic filter pins its own index.
+    const topics: (Hex | Hex[] | null)[] = [
+      source.topic0,
+      ...topicFilterArray(source, referrals.map((r) => pad(r, {size: 32}))),
+    ];
 
     const logs: IndexedLog[] = [];
     let failed = 0;

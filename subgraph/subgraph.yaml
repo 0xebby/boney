@@ -2,8 +2,9 @@
 #
 # Addresses and startBlock come from `web/src/lib/deployments.ts`, generated from Foundry's broadcast
 # receipt, so they describe what actually landed on chain. Base Sepolia was redeployed and reseeded
-# 2026-08-23 to the five-project demo fixture (Sygma, Aave, Open Mint NFT, WETH, Uniswap); every
-# earlier deployment (0x0FF749bB…, 0x424b10cB…, 0xC0E30d14…, 0xe07C214C…) is dead and must not be re-added.
+# 2026-08-29 to the two-campaign fixture (Venus on canonical WETH, Sdy Labs on a fresh Open Mint NFT),
+# both ungated; every earlier deployment (0x0FF749bB…, 0x424b10cB…, 0xC0E30d14…, 0xe07C214C…,
+# 0x6427217e…) is dead and must not be re-added.
 #
 # `startBlock` is the CampaignRegistry DEPLOYMENT block, not a recent one. Templates only spawn from
 # `CampaignCreated`, and a dynamically created data source never indexes blocks before it was
@@ -19,9 +20,9 @@ dataSources:
     name: CampaignRegistry
     network: base-sepolia
     source:
-      address: "0x6427217ea49EddeB51471005830962a6f0Df8e24"
+      address: "0x3e0a2fc423dE77bEE9147879308BFfFC6129c4EE"
       abi: CampaignRegistry
-      startBlock: 45856660
+      startBlock: 46110182
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -47,9 +48,9 @@ dataSources:
     name: AttributionRegistry
     network: base-sepolia
     source:
-      address: "0x83e507246C584471A5645aed1Ab086B174ec5a29"
+      address: "0xe04C5185eDd4C9b1c91e31c790843c335766258e"
       abi: AttributionRegistry
-      startBlock: 45856660
+      startBlock: 46110182
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -102,7 +103,6 @@ templates:
   # baked into the handler, so two presets over the same event are two templates, not one.
   #
   # `TransferToActor` is ERC-20/721 `Transfer` with the recipient as actor and `value` as the amount.
-  # This is the shape every campaign in the current fixture uses.
   - kind: ethereum/contract
     name: TransferToActor
     network: base-sepolia
@@ -162,7 +162,7 @@ templates:
         - event: Deposit(indexed address,uint256)
           handler: handleWethDeposit
 
-  # `Withdrawal`'s counterpart. Present because the fixture uses it, though no preset declares it yet.
+  # `Withdrawal`'s counterpart. Present for the unwrap side of a WETH campaign; no preset declares it.
   - kind: ethereum/contract
     name: WethWithdrawal
     network: base-sepolia
