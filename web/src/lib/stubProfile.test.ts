@@ -71,10 +71,38 @@ describe("the dev wallet's pin", () => {
 describe("unpinned addresses", () => {
   it("derive a profile from their own bytes", () => {
     const figures = stubFiguresFor(UNPINNED);
-    expect(figures.score).toBeGreaterThanOrEqual(600);
+    expect(figures.score).toBeGreaterThanOrEqual(2250);
     expect(figures.score).toBeLessThanOrEqual(2650);
     expect(figures.followers).toBeGreaterThan(0);
     expect(figures.profileId).toBeGreaterThanOrEqual(10_000);
+  });
+
+  /**
+   * The property the band exists for. An address is derived because its wallet is on the stub
+   * allowlist, so a derived score under a campaign's `minReputation` reads as a bypass that did not
+   * work — the Venus fixture gates at 19,500 and the weakest derived wallet has to clear it.
+   */
+  it("clear a campaign gate with no pin at all", () => {
+    const scores = Array.from({length: 200}, (_, i) => {
+      const address = `0x${String(i).padStart(40, "d")}`;
+      return stubBoneyScoreFor(address);
+    });
+
+    expect(Math.min(...scores)).toBeGreaterThanOrEqual(20_000);
+    expect(Math.max(...scores)).toBeLessThan(MAX_BONEY_SCORE);
+  });
+
+  /**
+   * Short of the reach ceiling, for the same reason the dev wallet's pin is: every follower count past
+   * ~10M clamps to 2800, which would hide a bug in the log normalisation.
+   */
+  it("stay off the reach clamp", () => {
+    const reaches = Array.from({length: 200}, (_, i) =>
+      reachFromFollowers(stubFiguresFor(`0x${String(i).padStart(40, "d")}`).followers),
+    );
+
+    expect(Math.max(...reaches)).toBeLessThan(2800);
+    expect(Math.min(...reaches)).toBeGreaterThan(1500);
   });
 
   /** The `stub_` prefix is how a reader of an attest response tells a derived score from a pinned one. */
@@ -89,14 +117,14 @@ describe("unpinned addresses", () => {
     expect(b).toEqual(a);
   });
 
-  it("spread across the rank ladder rather than clustering", () => {
+  it("vary their follower counts within the band rather than clustering", () => {
     const counts = Array.from({length: 40}, (_, i) => {
       const address = `0x${String(i).padStart(40, "a")}`;
       return stubFiguresFor(address).followers;
     });
 
-    // A single point would make the promoter directory useless for exercising ranks — the failure the
-    // general stub's global --followers flag has and this does not.
+    // A single point would leave the reach curve untested and the promoter directory identical row to
+    // row — the failure the general stub's global --followers flag has and this does not.
     expect(new Set(counts).size).toBeGreaterThan(30);
     expect(Math.max(...counts) / Math.min(...counts)).toBeGreaterThan(100);
   });
