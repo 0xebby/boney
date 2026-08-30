@@ -1,5 +1,5 @@
 import {describe, it, expect, afterEach, beforeEach} from "vitest";
-import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {readGuide, writeGuide} from "./guideStore";
@@ -27,6 +27,7 @@ import type {CampaignGuide} from "./campaignGuide";
 
 const CHAIN = 84532;
 const CAMPAIGN = "0xAbC0000000000000000000000000000000000001";
+const OTHER = "0xAbC0000000000000000000000000000000000002";
 const GUIDE: CampaignGuide = {
   summary: "Bridge to Base and hold the position for a week.",
   siteUrl: "https://example.org/",
@@ -77,11 +78,10 @@ describe("the file backend", () => {
   });
 
   it("leaves other campaigns in place when one is written", async () => {
-    const other = "0xAbC0000000000000000000000000000000000002";
     await writeGuide(CHAIN, CAMPAIGN, GUIDE);
-    await writeGuide(CHAIN, other, {summary: "Something else entirely."});
+    await writeGuide(CHAIN, OTHER, {summary: "Something else entirely."});
     expect(await readGuide(CHAIN, CAMPAIGN)).toEqual(GUIDE);
-    expect((await readGuide(CHAIN, other))?.summary).toBe("Something else entirely.");
+    expect((await readGuide(CHAIN, OTHER))?.summary).toBe("Something else entirely.");
   });
 
   it("deletes the entry when every field is emptied", async () => {
@@ -98,6 +98,29 @@ describe("the file backend", () => {
   it("reads a store that is not an object as empty", async () => {
     writeFileSync(storeFile, "[]", "utf8");
     expect(await readGuide(CHAIN, CAMPAIGN)).toBeNull();
+  });
+
+  it("writes into a store that has never been created", async () => {
+    // The absent store is the one unreadable-looking state a write must still proceed from —
+    // otherwise the first guide on a fresh deploy could never be stored.
+    expect(await writeGuide(CHAIN, CAMPAIGN, GUIDE)).toBe(true);
+    expect(await readGuide(CHAIN, CAMPAIGN)).toEqual(GUIDE);
+  });
+
+  /**
+   * `writeGuide` writes the whole store back, so a read it could not complete must stop the write
+   * rather than merge into `{}`. Getting this wrong loses every other guide and reports success —
+   * the failure the store's single key makes total.
+   */
+  it("refuses to write over a store it could not read", async () => {
+    await writeGuide(CHAIN, CAMPAIGN, GUIDE);
+    const before = readFileSync(storeFile, "utf8");
+
+    writeFileSync(storeFile, "{not json", "utf8");
+    expect(await writeGuide(CHAIN, OTHER, {summary: "Should not land."})).toBe(false);
+
+    writeFileSync(storeFile, before, "utf8");
+    expect(await readGuide(CHAIN, CAMPAIGN)).toEqual(GUIDE);
   });
 
   it("reports false rather than throwing when the path cannot be written", async () => {
