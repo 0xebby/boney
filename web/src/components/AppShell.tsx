@@ -74,7 +74,7 @@ function WalletButton() {
         disabled={isPending || (!isConnected && !injected)}
         // `truncate` needs a width constraint to have anything to truncate against; in the bar
         // that is a max-width, so a long address ellipses instead of squeezing the nav.
-        className="max-w-[11rem] truncate rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50"
+        className="min-h-11 max-w-[11rem] truncate rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 sm:min-h-0"
         title={isConnected ? `${address} — click to disconnect` : "Connect an injected wallet"}
       >
         {/* "Connect wallet" is 40px of a 375px bar that has none to spare, and the shorter label
@@ -432,8 +432,11 @@ export function AppShell({children}: {children: ReactNode}) {
           one.
         */}
         <div className="-mt-2 mb-3 flex justify-end">
+          {/* Wraps below `sm`. Held on one line it measured wider than a narrow phone's content
+              column, and in a `justify-end` row the overflow runs off the *leading* edge — so the
+              whole credit sat outside the viewport with nothing to scroll to it. */}
           <span
-            className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-ink-muted"
+            className="inline-flex flex-wrap items-center justify-end gap-x-1 text-right text-[11px] text-ink-muted sm:whitespace-nowrap"
             title="A BoneyScore is composed from an Ethos credibility score and X reach."
           >
             BoneyScore is powered by
