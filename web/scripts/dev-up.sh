@@ -28,6 +28,10 @@ RPC="${RPC:-$(command grep -E '^NEXT_PUBLIC_BASE_SEPOLIA_RPC=' .env.local 2>/dev
 RPC="${RPC:-https://base-sepolia-rpc.publicnode.com}"
 INTERVAL="${INTERVAL:-120}"
 
+# Next 16 permits one dev server per directory, and this machine runs other projects' servers.
+# `PORT=3001 ./scripts/dev-up.sh` moves the app when 3000 is already taken.
+PORT="${PORT:-3000}"
+
 # Reads a var out of a dotenv file without sourcing it — sourcing would execute whatever is in there
 # and would also clobber this shell's own RPC/INTERVAL.
 from_env_file() { # from_env_file <file> <var>
@@ -83,8 +87,8 @@ start "ethos stub" "$LOGS/ethos-stub.log" pnpm ethos:stub:dev
 waitfor "ethos stub" "http://127.0.0.1:8787/health" 30 || exit 1
 
 # ---- 2. next dev ---------------------------------------------------------------------------------
-start "next dev" "$LOGS/next-dev.log" pnpm dev
-waitfor "next dev" "http://localhost:3000/" 90 || exit 1
+start "next dev" "$LOGS/next-dev.log" pnpm dev --port "$PORT"
+waitfor "next dev" "http://localhost:$PORT/" 90 || exit 1
 
 # ---- 3. relay, then 4. indexer -------------------------------------------------------------------
 if [ -n "$RELAYER_KEY" ]; then
@@ -111,7 +115,7 @@ else
 fi
 
 echo
-echo "up:  app http://localhost:3000   stub http://127.0.0.1:8787"
+echo "up:  app http://localhost:$PORT   stub http://127.0.0.1:8787"
 echo "logs: $LOGS"
 echo "Ctrl-C to stop everything."
 wait

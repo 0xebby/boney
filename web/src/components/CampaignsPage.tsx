@@ -15,6 +15,8 @@ import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
+import {WelcomeDialog} from "@/components/WelcomeDialog";
+import {welcomeFigure} from "@/lib/welcome";
 import {
   filterCampaigns,
   summarize,
@@ -109,6 +111,17 @@ export function CampaignsPage() {
   // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
   const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
 
+  // The welcome dialog's headline number, from the same totals the tiles below read.
+  const welcome = useMemo(
+    () =>
+      welcomeFigure({
+        pool: summary.totalPool,
+        token: singleToken,
+        activeCount: summary.activeCount,
+      }),
+    [summary.totalPool, summary.activeCount, singleToken],
+  );
+
   const columns = useMemo(
     () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, guides, chainId),
     [tokens, now, joinedAddresses, kpiSpecs, guides, chainId],
@@ -126,206 +139,212 @@ export function CampaignsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      {/*
-        The list page doubles as the landing page, so the name gets hero treatment here rather
-        than the small page-title treatment every other route uses. Lowercase to match the brand
-        mark in the top bar.
-      */}
-      <header className="py-6 text-center sm:py-12">
+    <>
+      {/* Outside the column below, not the first child of it: `space-y-5` would give the overlay a
+          top margin, and an `inset-0` box shifts for one. */}
+      <WelcomeDialog figure={welcome} ready={!isLoading && !error} />
+
+      <div className="space-y-5">
         {/*
-          The wordmark and both lines are one lockup, inside a `w-fit` box.
-
-          That box is as wide as its widest child, so no line can run wider than the name it sits
-          under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
-          it. Centring them against the page instead let the blocks meet at a shared midpoint while
-          their edges disagreed, which is what read as misaligned — and capping only the first line
-          left the second free to set the box's width, so the first one wrapped early inside a box
-          wider than the wordmark.
+          The list page doubles as the landing page, so the name gets hero treatment here rather
+          than the small page-title treatment every other route uses. Lowercase to match the brand
+          mark in the top bar.
         */}
-        <div className="mx-auto w-fit">
-          <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-            Boneyard
-          </h1>
-          <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
-            The Marketplace for Verifiable Web3 Growth.
-          </p>
-
+        <header className="py-6 text-center sm:py-12">
           {/*
-            Capped to the same measure as the line above it. Left unbounded it was the widest child,
-            so it — not the wordmark — decided how wide the box was.
+            The wordmark and both lines are one lockup, inside a `w-fit` box.
+
+            That box is as wide as its widest child, so no line can run wider than the name it sits
+            under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
+            it. Centring them against the page instead let the blocks meet at a shared midpoint while
+            their edges disagreed, which is what read as misaligned — and capping only the first line
+            left the second free to set the box's width, so the first one wrapped early inside a box
+            wider than the wordmark.
           */}
-          <p className="animate-rise-in mx-auto mt-4 max-w-[15rem] text-balance text-xs leading-snug text-ink-secondary [animation-delay:120ms] sm:mt-5 sm:max-w-none">
-            Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
-          </p>
-        </div>
-      </header>
+          <div className="mx-auto w-fit">
+            <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
+              Boneyard
+            </h1>
+            <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
+              The Marketplace for Verifiable Web3 Growth.
+            </p>
 
-      <StatRow>
-        <StatTile
-          label="Active campaigns"
-          value={summary.activeCount.toLocaleString("en-US")}
-          qualifier={`of ${summary.count.toLocaleString("en-US")}`}
-        />
-        <StatTile
-          label="Total Reward Pool"
-          value={
-            singleToken
-              ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
-              : mixedLabel
-          }
-          unit={singleToken?.symbol}
-          //accent="var(--series-1)"
-        />
-        <StatTile
-          label="Rewards Earned"
-          value={
-            singleToken
-              ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
-              : "—"
-          }
-          unit={singleToken?.symbol}
-          //accent="var(--series-3)"
-        />
-        {/*
+            {/*
+              Capped to the same measure as the line above it. Left unbounded it was the widest child,
+              so it — not the wordmark — decided how wide the box was.
+            */}
+            <p className="animate-rise-in mx-auto mt-4 max-w-[15rem] text-balance text-xs leading-snug text-ink-secondary [animation-delay:120ms] sm:mt-5 sm:max-w-none">
+              Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
+            </p>
+          </div>
+        </header>
 
-        */}
-        <StatTile
-          label="Pool Utilization"
-          value={
-            singleToken
-              ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
-              : "—"
-          }
-          //hint="across all campaigns"
-        />
-      </StatRow>
-
-      {/* One filter row above everything it scopes — never per-card filters. Search leads it, on the
-          same line as the status and eligibility controls it narrows with: it is one control among
-          them rather than a hero field, and sharing their row is what keeps the three baselines
-          aligned. The controls sit at the trailing edge, above the table's own right-aligned
-          columns; what the row *says* stays at the left.
-
-          Only from `sm` up, though. Below it the field takes the whole line and the rest wraps, and a
-          trailing edge there leaves each wrapped group at its own offset — which is the ragged column
-          the row exists to prevent. On a phone they stack against the left edge instead. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
-        {/* `flex-1` so the field runs from the left edge to whatever sits next in the row, rather than
-            stopping at a fixed width and leaving a gap the eye reads as a missing control. `min-w-56`
-            keeps a project name legible once the row is crowded. */}
-        <div className="w-full sm:min-w-56 sm:flex-1">
-          <label className="sr-only" htmlFor="campaign-search">
-            Search campaigns, project names, or campaign IDs
-          </label>
-          <input
-            id="campaign-search"
-            type="search"
-            value={filters.search}
-            onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
-            placeholder="Search campaigns, projects, or IDs…"
-            className="h-11 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand sm:h-8"
+        <StatRow>
+          <StatTile
+            label="Active campaigns"
+            value={summary.activeCount.toLocaleString("en-US")}
+            qualifier={`of ${summary.count.toLocaleString("en-US")}`}
           />
-        </div>
-
-        {/* No `mr-auto`: the field beside it already absorbs the row's free space, and two elements
-            competing for it split it between them. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
-          {visible.length !== campaigns.length ? (
-            <span className="text-xs text-ink-muted">
-              {visible.length} of {campaigns.length}
-            </span>
-          ) : null}
-
-          {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
-              column that quietly stopped describing the tail of the list would read as "no KPIs
-              here". */}
-          {kpiSpecsDropped > 0 ? (
-            <span className="text-xs text-ink-muted">
-              KPI kinds not loaded for {kpiSpecsDropped} campaign
-              {kpiSpecsDropped === 1 ? "" : "s"}
-            </span>
-          ) : null}
-        </div>
-
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
-          <input
-            type="checkbox"
-            checked={filters.joinableOnly}
-            onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
-            className="size-3.5 accent-[var(--brand)]"
-          />
-          Joinable by me
-        </label>
-
-        {/* `flex-wrap`: six chips measure wider than a phone's content column, and wrapping inside
-            their own box keeps every status visible — an `overflow-x-auto` strip would put half of
-            them behind a gesture nothing advertises. */}
-        <div className="flex flex-wrap items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
-          {STATUS_OPTIONS.map((option) => {
-            const active = filters.status === option;
-            return (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setFilters((f) => ({...f, status: option}))}
-                aria-pressed={active}
-                className={`rounded px-2 py-1.5 text-xs transition-colors sm:py-1 ${
-                  active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
-                }`}
-              >
-                {option === "all" ? "All" : option}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <Card padded={false}>
-        {isLoading ? (
-          <SkeletonRows rows={4} cols={7} />
-        ) : error ? (
-          <ErrorState message={String(error)} onRetry={() => refetch()} />
-        ) : (
-          <DataTable
-            rows={visible}
-            columns={columns}
-            rowKey={(c) => c.campaign}
-            initialSort={{key: "project", dir: "asc"}}
-            isRefreshing={isRefreshing}
-            emptyState={
-              <EmptyState
-                title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
-                description={
-                  campaigns.length === 0
-                    ? "Create the first campaign to start a performance-based collaboration."
-                    : "Try clearing the filters or widening your search."
-                }
-                action={
-                  campaigns.length === 0 ? (
-                    <Link
-                      href="/create"
-                      className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
-                    >
-                      Create a campaign
-                    </Link>
-                  ) : null
-                }
-              />
+          <StatTile
+            label="Total Reward Pool"
+            value={
+              singleToken
+                ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
+                : mixedLabel
             }
+            unit={singleToken?.symbol}
+            //accent="var(--series-1)"
           />
-        )}
-      </Card>
+          <StatTile
+            label="Rewards Earned"
+            value={
+              singleToken
+                ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
+                : "—"
+            }
+            unit={singleToken?.symbol}
+            //accent="var(--series-3)"
+          />
+          {/*
 
-      {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
-          and not found what they came for is the one who wants an explanation, and the hero's job is
-          to get them to the list. */}
-      <p className="text-xs text-ink-muted">
-        <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
-          See how it works
-        </Link>
-      </p>
-    </div>
+          */}
+          <StatTile
+            label="Pool Utilization"
+            value={
+              singleToken
+                ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
+                : "—"
+            }
+            //hint="across all campaigns"
+          />
+        </StatRow>
+
+        {/* One filter row above everything it scopes — never per-card filters. Search leads it, on the
+            same line as the status and eligibility controls it narrows with: it is one control among
+            them rather than a hero field, and sharing their row is what keeps the three baselines
+            aligned. The controls sit at the trailing edge, above the table's own right-aligned
+            columns; what the row *says* stays at the left.
+
+            Only from `sm` up, though. Below it the field takes the whole line and the rest wraps, and a
+            trailing edge there leaves each wrapped group at its own offset — which is the ragged column
+            the row exists to prevent. On a phone they stack against the left edge instead. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
+          {/* `flex-1` so the field runs from the left edge to whatever sits next in the row, rather than
+              stopping at a fixed width and leaving a gap the eye reads as a missing control. `min-w-56`
+              keeps a project name legible once the row is crowded. */}
+          <div className="w-full sm:min-w-56 sm:flex-1">
+            <label className="sr-only" htmlFor="campaign-search">
+              Search campaigns, project names, or campaign IDs
+            </label>
+            <input
+              id="campaign-search"
+              type="search"
+              value={filters.search}
+              onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
+              placeholder="Search campaigns, projects, or IDs…"
+              className="h-11 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand sm:h-8"
+            />
+          </div>
+
+          {/* No `mr-auto`: the field beside it already absorbs the row's free space, and two elements
+              competing for it split it between them. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
+            {visible.length !== campaigns.length ? (
+              <span className="text-xs text-ink-muted">
+                {visible.length} of {campaigns.length}
+              </span>
+            ) : null}
+
+            {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
+                column that quietly stopped describing the tail of the list would read as "no KPIs
+                here". */}
+            {kpiSpecsDropped > 0 ? (
+              <span className="text-xs text-ink-muted">
+                KPI kinds not loaded for {kpiSpecsDropped} campaign
+                {kpiSpecsDropped === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
+            <input
+              type="checkbox"
+              checked={filters.joinableOnly}
+              onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
+              className="size-3.5 accent-[var(--brand)]"
+            />
+            Joinable by me
+          </label>
+
+          {/* `flex-wrap`: six chips measure wider than a phone's content column, and wrapping inside
+              their own box keeps every status visible — an `overflow-x-auto` strip would put half of
+              them behind a gesture nothing advertises. */}
+          <div className="flex flex-wrap items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
+            {STATUS_OPTIONS.map((option) => {
+              const active = filters.status === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setFilters((f) => ({...f, status: option}))}
+                  aria-pressed={active}
+                  className={`rounded px-2 py-1.5 text-xs transition-colors sm:py-1 ${
+                    active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {option === "all" ? "All" : option}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <Card padded={false}>
+          {isLoading ? (
+            <SkeletonRows rows={4} cols={7} />
+          ) : error ? (
+            <ErrorState message={String(error)} onRetry={() => refetch()} />
+          ) : (
+            <DataTable
+              rows={visible}
+              columns={columns}
+              rowKey={(c) => c.campaign}
+              initialSort={{key: "project", dir: "asc"}}
+              isRefreshing={isRefreshing}
+              emptyState={
+                <EmptyState
+                  title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
+                  description={
+                    campaigns.length === 0
+                      ? "Create the first campaign to start a performance-based collaboration."
+                      : "Try clearing the filters or widening your search."
+                  }
+                  action={
+                    campaigns.length === 0 ? (
+                      <Link
+                        href="/create"
+                        className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
+                      >
+                        Create a campaign
+                      </Link>
+                    ) : null
+                  }
+                />
+              }
+            />
+          )}
+        </Card>
+
+        {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
+            and not found what they came for is the one who wants an explanation, and the hero's job is
+            to get them to the list. */}
+        <p className="text-xs text-ink-muted">
+          <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
+            See how it works
+          </Link>
+        </p>
+      </div>
+    </>
   );
 }
 
