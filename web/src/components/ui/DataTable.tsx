@@ -89,7 +89,7 @@ export function DataTable<T>({
                   scope="col"
                   aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
                   style={col.width ? {width: col.width} : undefined}
-                  className={`px-3 py-2 font-bold text-brand ${
+                  className={`px-2 py-2 font-bold text-brand sm:px-3 ${
                     col.numeric ? "text-right" : "text-left"
                   } ${col.hideOnMobile ? "hidden md:table-cell" : ""}`}
                 >
@@ -132,7 +132,7 @@ export function DataTable<T>({
               {columns.map((col) => (
                 <td
                   key={col.key}
-                  className={`px-3 py-2.5 align-middle ${
+                  className={`px-2 py-2.5 align-middle sm:px-3 ${
                     col.numeric ? "tnum text-right" : "text-left"
                   } ${col.hideOnMobile ? "hidden md:table-cell" : ""}`}
                 >

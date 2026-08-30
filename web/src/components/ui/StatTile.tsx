@@ -44,7 +44,7 @@ export function StatTile({
   accent?: string;
 }) {
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-hairline bg-surface-1 p-4">
+    <div className="flex flex-col gap-1 rounded-lg border border-hairline bg-surface-1 p-3 sm:p-4">
       <div className="flex items-center gap-2">
         {accent ? (
           <span aria-hidden className="h-3 w-0.5 rounded-full" style={{background: accent}} />
@@ -53,7 +53,7 @@ export function StatTile({
       </div>
 
       <div className="flex flex-wrap items-baseline gap-x-1.5">
-        <span className="font-display text-3xl leading-tight text-ink">{value}</span>
+        <span className="font-display text-2xl leading-tight text-ink sm:text-3xl">{value}</span>
         {unit ? (
           <span className="text-sm font-semibold text-ink-secondary">{unit}</span>
         ) : null}
@@ -76,9 +76,18 @@ export function StatTile({
   );
 }
 
-/** A responsive row of stat tiles — the KPI row, not a grouped bar chart. */
+/**
+ * A responsive row of stat tiles — the KPI row, not a grouped bar chart.
+ *
+ * Two columns from the narrowest width up. A phone-width column of full-width tiles gave each
+ * number a band of its own with the next one below the fold, which is the whole row's job undone:
+ * these are meant to be read against each other. An odd last tile spans both columns while the grid
+ * is two wide, so a three-tile row does not leave a hole.
+ */
 export function StatRow({children}: {children: ReactNode}) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
+    <div className="grid grid-cols-2 gap-2.5 max-lg:[&>*:last-child:nth-child(odd)]:col-span-2 sm:gap-3 lg:grid-cols-4">
+      {children}
+    </div>
   );
 }
