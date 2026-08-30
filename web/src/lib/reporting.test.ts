@@ -276,9 +276,46 @@ describe("planObservedReport", () => {
     return new Map(
       pairs.map(([referral, observed]) => [
         referral.toLowerCase(),
-        {referral, observed, actions: [{timestamp: BigInt(NOW), amount: observed}]},
+        {
+          referral,
+          observed,
+          actions: [{timestamp: BigInt(NOW), amount: observed}],
+          // A referral that never re-signed has one promoter, so its split is a single entry equal to
+          // its total. The re-touched shape is `retouched`.
+          byPromoter: new Map([[ID_A.toLowerCase(), observed]]),
+        },
       ]),
     );
+  }
+
+  /**
+   * A referral whose attribution moved: `mine` earned under this KOL, `earlier` under the previous one.
+   *
+   * The shape the panel got wrong. `observed` stays the referral's whole attributed history, because
+   * that is what `reportUserAction` takes, but only `mine` belongs to the KOL being reported for.
+   */
+  function retouched(
+    referral: `0x${string}`,
+    mine: bigint,
+    earlier: bigint,
+  ): Map<string, ObservedReferral> {
+    return new Map([
+      [
+        referral.toLowerCase(),
+        {
+          referral,
+          observed: mine + earlier,
+          actions: [
+            {timestamp: BigInt(NOW - 100), amount: earlier},
+            {timestamp: BigInt(NOW), amount: mine},
+          ],
+          byPromoter: new Map([
+            [ID_B.toLowerCase(), earlier],
+            [ID_A.toLowerCase(), mine],
+          ]),
+        },
+      ],
+    ]);
   }
 
   const credited = new Map([
@@ -290,31 +327,50 @@ describe("planObservedReport", () => {
     kol: kol(),
     observed: seen([REF_1, BigInt(12)], [REF_2, BigInt(3)]),
     credited,
+    creditedTo: credited,
     aggregate: false,
     hasSource: true,
     progress: BigInt(5),
   };
 
+  /**
+   * `planObservedReport` with the single-promoter default filled in.
+   *
+   * `creditedTo` follows `credited` unless a case sets it: they are the same figure whenever one
+   * promoter has held a referral for its whole history, so overriding only `credited` would otherwise
+   * build a fixture the chain cannot produce.
+   */
+  function planned(over: Partial<Parameters<typeof planObservedReport>[0]> = {}) {
+    const nowCredited = over.credited ?? credited;
+    return planObservedReport({
+      ...base,
+      ...over,
+      credited: nowCredited,
+      creditedTo: over.creditedTo ?? nowCredited,
+    });
+  }
+
   it("credits the observed total, not a tier threshold", () => {
     // The whole point: the figures come from the logs. A ladder is never consulted, so a report
     // cannot be aimed at a payout.
-    const plan = planObservedReport(base);
+    const plan = planned();
     if (!plan.ok) throw new Error("expected a plan");
 
     expect(plan.calls.map((c) => c.newTotal)).toEqual([BigInt(12), BigInt(3)]);
+    expect(plan.calls.map((c) => c.elsewhere)).toEqual([BigInt(0), BigInt(0)]);
     expect(plan.totalDelta).toBe(BigInt(10)); // 12 - 5 already credited, plus 3 - 0
     expect(plan.projectedProgress).toBe(BigInt(15));
   });
 
   it("reports nothing for a KOL whose referrals have not acted", () => {
-    const plan = planObservedReport({...base, observed: new Map()});
+    const plan = planned({observed: new Map()});
     expect(plan).toMatchObject({ok: false});
     if (plan.ok) return;
     expect(plan.reason).toMatch(/no KPI actions observed/);
   });
 
   it("refuses a KPI with no event source rather than inventing a figure", () => {
-    const plan = planObservedReport({...base, hasSource: false});
+    const plan = planned({hasSource: false});
     expect(plan).toMatchObject({ok: false});
     if (plan.ok) return;
     expect(plan.reason).toMatch(/no event source/);
@@ -323,8 +379,7 @@ describe("planObservedReport", () => {
   it("is idempotent once everything observed is credited", () => {
     // `newTotal` is cumulative, so a second click over the same logs has nothing to send — the same
     // property that makes re-running the indexer safe.
-    const plan = planObservedReport({
-      ...base,
+    const plan = planned({
       credited: new Map([
         [REF_1.toLowerCase(), BigInt(12)],
         [REF_2.toLowerCase(), BigInt(3)],
@@ -336,22 +391,20 @@ describe("planObservedReport", () => {
   });
 
   it("distinguishes 'nothing new' from 'nothing happened'", () => {
-    const nothingNew = planObservedReport({
-      ...base,
+    const nothingNew = planned({
       observed: seen([REF_1, BigInt(5)]),
       credited: new Map([[REF_1.toLowerCase(), BigInt(5)]]),
     });
     if (nothingNew.ok) throw new Error("expected a refusal");
     expect(nothingNew.reason).toMatch(/already credited/);
 
-    const nothingHappened = planObservedReport({...base, observed: new Map()});
+    const nothingHappened = planned({observed: new Map()});
     if (nothingHappened.ok) throw new Error("expected a refusal");
     expect(nothingHappened.reason).toMatch(/not .*observed|no KPI actions/);
   });
 
   it("skips a referral with partial credit but keeps the others", () => {
-    const plan = planObservedReport({
-      ...base,
+    const plan = planned({
       credited: new Map([
         [REF_1.toLowerCase(), BigInt(12)],
         [REF_2.toLowerCase(), BigInt(1)],
@@ -366,8 +419,7 @@ describe("planObservedReport", () => {
   it("ignores activity from a wallet that is not a live referral of this KOL", () => {
     // Observed totals are folded from logs filtered by referral, but a stale map entry must not
     // become a call: `reportUserAction` would revert NoAttribution for a wallet this KOL never had.
-    const plan = planObservedReport({
-      ...base,
+    const plan = planned({
       kol: kol({live: [{...touch({referral: REF_1}), status: "live"}]}),
       observed: seen([REF_1, BigInt(12)], [REF_3, BigInt(99)]),
     });
@@ -377,22 +429,79 @@ describe("planObservedReport", () => {
     expect(plan.calls[0]!.referral).toBe(REF_1);
   });
 
+  it("credits this KOL only its own segment of a re-touched referral", () => {
+    // The bug this exists for. REF_1 did 7 under ID_B, then re-signed under ID_A and did 5. The
+    // report is still the referral's cumulative 12 — that is what the ABI takes — but ID_A earned 5,
+    // and crediting it the whole 12 - 0 remainder is what made the panel read as the previous spell's
+    // total plus the current one while the chain itself split them correctly.
+    const plan = planned({
+      kol: kol({live: [{...touch({referral: REF_1}), status: "live"}]}),
+      observed: retouched(REF_1, BigInt(5), BigInt(7)),
+      credited: new Map([[REF_1.toLowerCase(), BigInt(0)]]),
+    });
+    if (!plan.ok) throw new Error("expected a plan");
+
+    expect(plan.calls[0]).toMatchObject({
+      referral: REF_1,
+      newTotal: BigInt(12),
+      delta: BigInt(5),
+      elsewhere: BigInt(7),
+    });
+    expect(plan.totalDelta).toBe(BigInt(5));
+    expect(plan.projectedProgress).toBe(BigInt(10));
+  });
+
+  it("subtracts what this KOL already holds, not the referral's total", () => {
+    // ID_A has 2 of its 5 already. The referral's own credited total is 9 (7 of it ID_B's), so a plan
+    // built from that alone would send 3 as ID_A's gain by coincidence and 5 - 2 by accident.
+    const plan = planned({
+      kol: kol({live: [{...touch({referral: REF_1}), status: "live"}]}),
+      observed: retouched(REF_1, BigInt(5), BigInt(7)),
+      credited: new Map([[REF_1.toLowerCase(), BigInt(9)]]),
+      creditedTo: new Map([[REF_1.toLowerCase(), BigInt(2)]]),
+    });
+    if (!plan.ok) throw new Error("expected a plan");
+
+    expect(plan.calls[0]).toMatchObject({newTotal: BigInt(12), delta: BigInt(3)});
+    expect(plan.totalDelta).toBe(BigInt(3));
+  });
+
+  it("still sends a call whose whole remainder belongs to an earlier promoter", () => {
+    // Nothing has happened since the referral re-signed, so this KOL gains nothing — but the 7 the
+    // previous one earned is still unreported, and no KOL the panel can select holds it any more.
+    // Dropping the call would strand that work for the unattended indexer to find.
+    const plan = planned({
+      kol: kol({live: [{...touch({referral: REF_1}), status: "live"}]}),
+      observed: retouched(REF_1, BigInt(0), BigInt(7)),
+      credited: new Map([[REF_1.toLowerCase(), BigInt(0)]]),
+    });
+    if (!plan.ok) throw new Error("expected a plan");
+
+    expect(plan.calls).toHaveLength(1);
+    expect(plan.calls[0]).toMatchObject({
+      newTotal: BigInt(7),
+      delta: BigInt(0),
+      elsewhere: BigInt(7),
+    });
+    expect(plan.totalDelta).toBe(BigInt(0));
+    expect(plan.projectedProgress).toBe(BigInt(5));
+  });
+
   it("carries per-action evidence through for a verifier-gated KPI", () => {
-    const plan = planObservedReport(base);
+    const plan = planned();
     if (!plan.ok) throw new Error("expected a plan");
     expect(plan.calls[0]!.actions).toEqual([{timestamp: BigInt(NOW), amount: BigInt(12)}]);
   });
 
   it("refuses an aggregate KPI", () => {
-    const plan = planObservedReport({...base, aggregate: true});
+    const plan = planned({aggregate: true});
     expect(plan).toMatchObject({ok: false});
     if (plan.ok) return;
     expect(plan.reason).toMatch(/AggregateKpi/);
   });
 
   it("passes the KOL's own block through as the reason", () => {
-    const plan = planObservedReport({
-      ...base,
+    const plan = planned({
       kol: kol({live: [], blocked: "attribution expired"}),
     });
     expect(plan).toMatchObject({ok: false, reason: "attribution expired"});

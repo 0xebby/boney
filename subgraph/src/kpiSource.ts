@@ -48,12 +48,18 @@ export const SYGMA_DEPOSIT_TOPIC0: string =
   "0x17bc3181e17a9620a479c24e6c606e474ba84fc036877b768926872e8cd0e11f";
 
 /**
- * Byte length of a well-formed event-source blob: five 32-byte words.
+ * Byte length of an unfiltered event-source blob: five 32-byte words.
  *
  * `TouchWindowVerifier` reads `params` as a bare 32-byte `uint64` lookback, so length is what tells
- * the two encodings apart — exactly as `ENCODED_HEX_LENGTH` does in `kpiSource.ts`.
+ * the encodings apart — exactly as `ENCODED_HEX_LENGTH` does in `kpiSource.ts`.
  */
 const PARAMS_BYTE_LENGTH: i32 = 160;
+
+/** Byte length of the filtered form: the same five words plus `filterTopic` and `filterValue`. */
+const FILTERED_PARAMS_BYTE_LENGTH: i32 = 224;
+
+/** `filterValue` of an unfiltered source, and the value a mint's `from` topic carries. */
+const ZERO_TOPIC: string = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 export class EventSource {
   source: Bytes;
@@ -61,13 +67,25 @@ export class EventSource {
   actorTopic: i32;
   amountMode: i32;
   scale: BigInt;
+  filterTopic: i32;
+  filterValue: Bytes;
 
-  constructor(source: Bytes, topic0: Bytes, actorTopic: i32, amountMode: i32, scale: BigInt) {
+  constructor(
+    source: Bytes,
+    topic0: Bytes,
+    actorTopic: i32,
+    amountMode: i32,
+    scale: BigInt,
+    filterTopic: i32,
+    filterValue: Bytes,
+  ) {
     this.source = source;
     this.topic0 = topic0;
     this.actorTopic = actorTopic;
     this.amountMode = amountMode;
     this.scale = scale;
+    this.filterTopic = filterTopic;
+    this.filterValue = filterValue;
   }
 }
 
@@ -78,25 +96,38 @@ export class EventSource {
  * normal case for KPIs that carry a verifier lookback or nothing at all, and a throw here would fail
  * the whole handler and stall indexing over a field no campaign is required to set.
  *
- * The five fields are static types, so `abi.encode(a,b,c,d,e)` and the encoding of the static tuple
- * `(a,b,c,d,e)` are byte-identical — which is why one `ethereum.decode` call covers it.
+ * The fields are static types, so `abi.encode(a,b,…)` and the encoding of the static tuple `(a,b,…)`
+ * are byte-identical — which is why one `ethereum.decode` call covers each form. Both lengths are
+ * accepted: a source with no fixed-topic filter is encoded short, so every blob written before the
+ * filter existed still decodes.
  */
 export function decodeEventSource(params: Bytes): EventSource | null {
-  if (params.length != PARAMS_BYTE_LENGTH) return null;
+  const filtered = params.length == FILTERED_PARAMS_BYTE_LENGTH;
+  if (params.length != PARAMS_BYTE_LENGTH && !filtered) return null;
 
-  const decoded = ethereum.decode("(address,bytes32,uint8,uint8,uint256)", params);
+  const signature = filtered
+    ? "(address,bytes32,uint8,uint8,uint256,uint8,bytes32)"
+    : "(address,bytes32,uint8,uint8,uint256)";
+  const decoded = ethereum.decode(signature, params);
   if (decoded == null) return null;
 
   const parts = decoded.toTuple();
-  if (parts.length != 5) return null;
+  if (parts.length != (filtered ? 7 : 5)) return null;
 
   const actorTopic = parts[2].toI32();
   const amountMode = parts[3].toI32();
+  const filterTopic = filtered ? parts[5].toI32() : 0;
+  const filterValue = filtered
+    ? parts[6].toBytes()
+    : Bytes.fromHexString(ZERO_TOPIC);
 
   // Same validity range the TypeScript decoder enforces: `topics[0]` is the signature, so an actor
-  // at position 0 cannot exist, and only two amount modes are defined.
+  // at position 0 cannot exist, only two amount modes are defined, and a topic cannot be both the
+  // credited actor and a literal the log must carry.
   if (actorTopic < 1 || actorTopic > 3) return null;
   if (amountMode != AMOUNT_MODE_COUNT && amountMode != AMOUNT_MODE_DATA_WORD_0) return null;
+  if (filterTopic < 0 || filterTopic > 3) return null;
+  if (filterTopic == actorTopic) return null;
 
   return new EventSource(
     changetype<Bytes>(parts[0].toAddress()),
@@ -104,6 +135,8 @@ export function decodeEventSource(params: Bytes): EventSource | null {
     actorTopic,
     amountMode,
     parts[4].toBigInt(),
+    filterTopic,
+    filterValue,
   );
 }
 
@@ -112,7 +145,9 @@ export function decodeEventSource(params: Bytes): EventSource | null {
  *
  * A preset is identified by all three of `(topic0, actorTopic, amountMode)`, not by the event alone:
  * `Transfer` with the recipient as actor and `Transfer` with the sender as actor credit different
- * wallets from the same log, so they cannot share a handler.
+ * wallets from the same log, so they cannot share a handler. A fixed-topic filter is not part of the
+ * identity: it narrows which logs a consumer credits, not which event shape is indexed, and a
+ * template is shared across campaigns whose filters differ.
  *
  * Null is a real answer, not a failure. A subgraph can only index signatures its manifest declares,
  * and a project may name any event on chain — see `UnsupportedSource` in the schema for what happens

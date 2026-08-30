@@ -1,5 +1,5 @@
 import {getAddress, encodeAbiParameters, type Hex} from "viem";
-import {AMOUNT_MODE, effectiveScale, type EventSource} from "./kpiSource";
+import {AMOUNT_MODE, effectiveScale, matchesTopicFilter, type EventSource} from "./kpiSource";
 import type {AttributionLookup} from "./attributionWindows";
 
 /**
@@ -134,6 +134,8 @@ export function aggregateByActor(
   const ordered = [...logs].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : 1));
 
   for (const log of ordered) {
+    if (!matchesTopicFilter(log, source)) continue;
+
     const referral = actorFromTopic(log, source.actorTopic);
     if (!referral) continue;
     const amount = rawAmount(log, source.amountMode);
@@ -169,6 +171,10 @@ export function aggregateByActor(
  * "No attribution check" note in `subgraph/src/transfer.ts`, which defers the decision because a
  * promoter switch moves `signedAt` afterwards. That deferral is only sound if the consumer actually
  * applies the rule, and this is the consumer.
+ *
+ * A KPI carrying `filterTopic` must not be read through this path. The subgraph stores actions
+ * without their topics, so the filter cannot be applied here and the total would count logs the
+ * chain will not credit; `aggregateByActor` is the path that enforces it.
  *
  * @param actions Decoded actions for one KPI, in any order.
  * @param source Event source describing how an amount folds.
@@ -318,6 +324,44 @@ export function foldToLimit(
     let amount = BigInt(0);
     for (const action of group) amount += action.amount;
     out.push({blockNumber: newest.blockNumber, timestamp: newest.timestamp, amount});
+  }
+
+  return out;
+}
+
+/**
+ * Splits a referral's evidence across the promoters who held it, as `Campaign._tally` does.
+ *
+ * The report is one cumulative figure per referral, but the credit is not: the chain walks the
+ * evidence and adds each action's amount to whoever held the referral at that action's block. So a
+ * referral whose attribution moved carries work belonging to two promoters at once, and the figure a
+ * panel shows for *one* of them is this split, never the referral's own total.
+ *
+ * Runs over the apportioned evidence rather than the raw logs deliberately — the chain sees only what
+ * `encodeActions` sends, including the remainder `apportion` lands on the final action, so tallying
+ * anything else could disagree with what gets credited.
+ *
+ * No ceiling is applied. `_tally` stops at the verified total, which for an ungated KPI is the claim
+ * itself; a gated KPI's trimming is Boney's ceiling and is reported separately (`describeCeiling`).
+ *
+ * @param referral The wallet the actions belong to.
+ * @param actions Evidence actions for that referral, oldest first.
+ * @param attribution Per-action attribution, as the chain would resolve it.
+ * @returns Amount per promoter id, keyed lowercase. Actions nobody held are dropped.
+ */
+export function tallyByPromoter(
+  referral: `0x${string}`,
+  actions: readonly EvidenceAction[],
+  attribution: AttributionLookup,
+): Map<string, bigint> {
+  const out = new Map<string, bigint>();
+
+  for (const action of actions) {
+    const promoterId = attribution.at(referral, action.blockNumber, action.timestamp);
+    if (!promoterId) continue;
+
+    const key = promoterId.toLowerCase();
+    out.set(key, (out.get(key) ?? BigInt(0)) + action.amount);
   }
 
   return out;

@@ -100,6 +100,7 @@ export function ReportPanel({
   const {
     progress: promoterProgress,
     credited: creditedMap,
+    creditedTo,
     ceiling,
     configured: verifierConfigured,
     gated,
@@ -108,6 +109,7 @@ export function ReportPanel({
   } = useKolReportState({
     campaign: detail.address,
     promoter: kol?.promoter,
+    promoterId: kol?.promoterId,
     referrals: liveReferrals,
     kpiIndex,
     kpiVerifier: kpi?.spec.verifier,
@@ -152,15 +154,31 @@ export function ReportPanel({
       kol,
       observed: activity.observed,
       credited: creditedMap,
+      creditedTo,
       aggregate: kpi.spec.aggregate,
       hasSource: activity.source !== null,
       progress: promoterProgress,
     });
-  }, [kol, kpi, simulating, seed, promoterProgress, creditedMap, activity.observed, activity.source]);
+  }, [
+    kol,
+    kpi,
+    simulating,
+    seed,
+    promoterProgress,
+    creditedMap,
+    creditedTo,
+    activity.observed,
+    activity.source,
+  ]);
 
   // What the report would actually be allowed to credit, against what was measured. Computed on the
   // observed path only: the simulate path credits an invented figure that Boney never saw, so its
   // ceiling is always 0 and saying so would just be noise on top of the warning it already carries.
+  //
+  // Each referral's *whole* observed total, not the selected KOL's segment of it — deliberately. The
+  // ceiling this is compared against is `observedProgressOf(campaign, kpi, referral)`, which is
+  // per-referral and cumulative across every promoter who held it. Narrowing this to one promoter's
+  // share would compare a segment against a lifetime total and read as capped when nothing is.
   const measured = useMemo(
     () =>
       liveReferrals.reduce(
@@ -185,18 +203,18 @@ export function ReportPanel({
   const loading = stateLoading || activity.isLoading;
 
   const submit = async () => {
-    if (!plan?.ok || !kpi) return;
-    await report.report(detail.address, kpiIndex, plan.calls);
+    if (!plan?.ok || !kpi || !kol) return;
+    await report.report(detail.address, kpiIndex, kol.promoter, plan.calls, {
+      campaignName: detail.name,
+      kpiLabel: KPI_KIND_LABEL[kpi.spec.kind],
+    });
     onDone();
     await Promise.all([touchScan.refetch(), refetchState(), activity.refetch()]);
   };
 
   return (
     <Card>
-      <CardHeader
-        title="Report progress"
-        subtitle="Testing tool — credits a KOL from its referrals' on-chain activity, without waiting for the indexer"
-      />
+      <CardHeader title="Report progress" />
 
       {scanning ? (
         <p className="text-xs text-ink-muted">Scanning joins and attribution touches…</p>
@@ -213,6 +231,7 @@ export function ReportPanel({
               source={activity.source}
               observed={activity.observed}
               referrals={liveReferrals}
+              promoterId={kol?.promoterId}
               loading={loading}
               unitLabel={kpi ? KPI_KIND_LABEL[kpi.spec.kind] : ""}
               simulate={simulate}
@@ -242,14 +261,14 @@ export function ReportPanel({
           ) : activity.error ? (
             // The scan's own failure, said in place of the plan's reason: a failed scan observes
             // nothing, and "no actions observed" would report that as a fact about the referrals.
-            <p className="text-xs text-warning">
+            <p className="text-xs text-brand">
               Cannot report: the KPI event scan failed, so nothing was observed.{" "}
               <span className="font-mono text-[11px] text-ink-secondary">
                 {String(activity.error)}
               </span>
             </p>
           ) : (
-            <p className="text-xs text-warning">Cannot report: {plan.reason}</p>
+            <p className="text-xs text-brand">Cannot report: {plan.reason}</p>
           )}
 
           {loading || ceilingStatus === null ? null : (
@@ -302,7 +321,7 @@ export function ReportPanel({
           ) : null}
 
           {activity.failedWindows > 0 ? (
-            <p className="text-xs text-warning">
+            <p className="text-xs text-brand">
               {activity.failedWindows} log window
               {activity.failedWindows === 1 ? "" : "s"} failed to load, Refetch...
             </p>
@@ -398,6 +417,7 @@ function ObservedField({
   source,
   observed,
   referrals,
+  promoterId,
   loading,
   unitLabel,
   simulate,
@@ -408,6 +428,8 @@ function ObservedField({
   source: EventSource | null;
   observed: ReadonlyMap<string, ObservedReferral>;
   referrals: readonly `0x${string}`[];
+  /** The selected KOL's id, to pick its own segment out of each referral's split. */
+  promoterId: `0x${string}` | undefined;
   loading: boolean;
   unitLabel: string;
   simulate: boolean;
@@ -415,10 +437,20 @@ function ObservedField({
   decimals: number;
   symbol: string;
 }) {
-  const total = referrals.reduce(
-    (sum, r) => sum + (observed.get(r.toLowerCase())?.observed ?? BigInt(0)),
-    BigInt(0),
-  );
+  // The selected KOL's share, and everything measured on these referrals. They differ whenever a
+  // referral re-signed: `ObservedReferral.observed` is that referral's whole attributed history and the
+  // chain splits it back per promoter, so showing the total here read as the previous promoter's work
+  // plus this one's — the number a project was about to credit, attributed to the wrong wallet.
+  const promoterKey = promoterId?.toLowerCase();
+  let mine = BigInt(0);
+  let total = BigInt(0);
+  for (const referral of referrals) {
+    const seen = observed.get(referral.toLowerCase());
+    if (!seen) continue;
+    total += seen.observed;
+    if (promoterKey) mine += seen.byPromoter.get(promoterKey) ?? BigInt(0);
+  }
+  const earlier = total > mine ? total - mine : BigInt(0);
 
   // The simulate path keeps the old readout, relabelled to say what the figure is: invented, and
   // aimed squarely at a payout. Same number, no longer presented as a fact about anyone's activity.
@@ -426,7 +458,7 @@ function ObservedField({
     return (
       <div>
         <span className="text-xs text-ink-muted">Simulated amount</span>
-        <div className="mt-1 rounded border border-warning/40 bg-surface-2 px-2 py-1.5 text-xs">
+        <div className="mt-1 rounded border border-brand-dim/40 bg-surface-2 px-2 py-1.5 text-xs">
           {seed ? (
             <>
               <span className="font-mono text-ink">{seed.delta.toString()}</span>{" "}
@@ -437,7 +469,7 @@ function ObservedField({
           )}
         </div>
 
-        <p className="mt-1 text-[11px] text-warning">
+        <p className="mt-1 text-[11px] text-brand">
           {seed ? (
             <>
               Invented figure: clears tier {seed.index + 1} at {seed.threshold.toString()} and pays{" "}
@@ -461,7 +493,7 @@ function ObservedField({
           <span className="text-ink-muted">No event source</span>
         ) : (
           <>
-            <span className="font-mono text-ink">{total.toString()}</span>{" "}
+            <span className="font-mono text-ink">{mine.toString()}</span>{" "}
             <span className="text-ink-muted">{unitLabel.toLowerCase()}</span>
           </>
         )}
@@ -472,6 +504,12 @@ function ObservedField({
           " "
         ) : !source ? (
           "This KPI declares no event source, so nothing about it is observable."
+        ) : earlier > BigInt(0) ? (
+          <>
+            This KOL&rsquo;s share of <span className="font-mono">{total.toString()}</span>;{" "}
+            <span className="font-mono">{earlier.toString()}</span> credits an earlier promoter.
+            Measured from {eventSourceSummary(source, catalogSignature(source.topic0))}
+          </>
         ) : (
           <>Measured from {eventSourceSummary(source, catalogSignature(source.topic0))}</>
         )}
@@ -509,7 +547,7 @@ function SimulateToggle({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 accent-warning"
+        className="mt-0.5 accent-brand"
       />
       <span>
         <span className="text-ink-secondary">Simulate un-observed progress</span>
@@ -556,14 +594,39 @@ function PlanBreakdown({
 }) {
   const crosses = seed !== null && plan.projectedProgress >= seed.threshold;
 
+  // What the same calls credit to *other* promoters. A cumulative `newTotal` covers a referral's whole
+  // attributed history, so a report can carry work from a spell under someone else — stated here
+  // because it moves nobody the panel has selected, and an unexplained gap between the figures reads
+  // as the plan losing units.
+  const elsewhere = plan.calls.reduce((sum, call) => sum + call.elsewhere, BigInt(0));
+  const unit = unitLabel.toLowerCase();
+  const txCount = `${plan.calls.length} transaction${plan.calls.length === 1 ? "" : "s"}`;
+
   return (
     <div className="rounded border border-hairline bg-surface-2 p-3 text-xs">
       <p className="text-ink-secondary">
-        {shortAddress(kol.promoter)} goes from{" "}
-        <span className="font-mono text-ink">{progress.toString()}</span> to{" "}
-        <span className="font-mono text-ink">{plan.projectedProgress.toString()}</span>{" "}
-        {unitLabel.toLowerCase()} across {plan.calls.length} transaction
-        {plan.calls.length === 1 ? "" : "s"}.
+        {plan.totalDelta === BigInt(0) ? (
+          <>
+            {shortAddress(kol.promoter)} stays at{" "}
+            <span className="font-mono text-ink">{progress.toString()}</span> {unit}: the{" "}
+            <span className="font-mono text-ink">{elsewhere.toString()}</span> in {txCount} credits an
+            earlier promoter.
+          </>
+        ) : (
+          <>
+            {shortAddress(kol.promoter)} goes from{" "}
+            <span className="font-mono text-ink">{progress.toString()}</span> to{" "}
+            <span className="font-mono text-ink">{plan.projectedProgress.toString()}</span> {unit}{" "}
+            across {txCount}.
+            {elsewhere > BigInt(0) ? (
+              <>
+                {" "}
+                A further <span className="font-mono text-ink">{elsewhere.toString()}</span> credits
+                earlier promoters.
+              </>
+            ) : null}
+          </>
+        )}
       </p>
 
       <ul className="mt-2 space-y-1">
@@ -571,14 +634,20 @@ function PlanBreakdown({
           <li key={call.referral} className="flex justify-between gap-3 font-mono text-ink-muted">
             <span>{shortAddress(call.referral)}</span>
             <span>
-              +{call.delta.toString()} → newTotal {call.newTotal.toString()}
+              +{call.delta.toString()}
+              {call.elsewhere > BigInt(0) ? (
+                <span className="text-ink-muted"> (+{call.elsewhere.toString()} earlier)</span>
+              ) : null}{" "}
+              → newTotal {call.newTotal.toString()}
             </span>
           </li>
         ))}
       </ul>
 
-      <p className={`mt-2 ${crosses ? "text-warning" : "text-ink-muted"}`}>
-        {crosses && seed ? (
+      <p className={`mt-2 ${crosses ? "text-brand" : "text-ink-muted"}`}>
+        {plan.totalDelta === BigInt(0) ? (
+          "Credits an earlier promoter only, so no tier moves and nothing pays out here."
+        ) : crosses && seed ? (
           <>
             Crosses tier {seed.index + 1} at {seed.threshold.toString()}, so this pays{" "}
             {formatTokenAmount(seed.reward, decimals)} {symbol} inline —{" "}
@@ -621,7 +690,7 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
 
   if (status.kind === "unconfigured") {
     return (
-      <p className="text-xs text-warning">
+      <p className="text-xs text-brand">
         Boney&rsquo;s verifier has no configuration for this KPI, so every report will credit nothing —
         permanently.
       </p>
@@ -630,7 +699,7 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
 
   if (status.kind === "blocked") {
     return (
-      <p className="text-xs text-warning">
+      <p className="text-xs text-brand">
         Boney has observed <span className="font-mono">0</span> {unit} for these referrals, so this
         report will confirm successfully but credits nothing.
       </p>
@@ -639,7 +708,7 @@ function CeilingNotice({status, unitLabel}: {status: CeilingStatus; unitLabel: s
 
   if (status.kind === "capped") {
     return (
-      <p className="text-xs text-warning">
+      <p className="text-xs text-brand">
         Boney has observed <span className="font-mono">{status.ceiling.toString()}</span> of the{" "}
         <span className="font-mono">{status.measured.toString()}</span> {unit} measured here, so this
         report will be trimmed to the smaller figure.

@@ -59,6 +59,10 @@ type Kpi @entity(immutable: false) {
   amountMode: Int
   "Divisor the consumer applies. Stored, never applied here."
   scale: BigInt
+  "Indexed topic that must equal `filterValue`, 1-based over `topics`; 0 or null means no filter."
+  filterTopic: Int
+  "Raw topic word `topics[filterTopic]` must equal. Stored, never applied here."
+  filterValue: Bytes
 }
 
 """

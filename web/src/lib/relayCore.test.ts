@@ -16,7 +16,7 @@ import {
   type RelayLog,
 } from "./relayCore";
 import {attributionLookup, buildAttributionWindows, type TouchLog} from "./attributionWindows";
-import {AMOUNT_MODE} from "./kpiSource";
+import {AMOUNT_MODE, decodeEventSource, encodeEventSource} from "./kpiSource";
 
 // Checksummed with `cast to-check-sum-address` rather than by hand — a mistyped checksum makes viem
 // throw somewhere far from the typo.
@@ -646,6 +646,44 @@ describe("describeConfigDrift", () => {
   /** Nothing to compare against, so this must not be read as a COUNT and rejected. */
   it("skips the aggregation check when the blob carries no amount mode", () => {
     const r = describeConfigDrift({...agreed, indexerAmountMode: undefined});
+    expect(r).toBeNull();
+  });
+});
+
+describe("describeConfigDrift — a filtered event source", () => {
+  const TRANSFER_TOPIC0 = toEventSelector(TRANSFER_SIG);
+  const ROUTER = "0x816Fc6EeE47e3157A666827a0C06205294C81770" as const;
+
+  /**
+   * `EventMetricKpiVerifier.KpiConfig` carries no filter field, so the filter is not a drift axis:
+   * both halves read it from the same immutable blob and cannot disagree about it.
+   */
+  it("agrees with an unfiltered verifier config", () => {
+    const params = encodeEventSource({
+      source: TOKEN,
+      topic0: TRANSFER_TOPIC0,
+      actorTopic: 2,
+      amountMode: AMOUNT_MODE.dataWord0,
+      scale: BigInt(1e18),
+      filterTopic: 1,
+      filterValue: pad(ROUTER.toLowerCase() as Hex, {size: 32}),
+    });
+    const decoded = decodeEventSource(params);
+    expect(decoded?.filterTopic).toBe(1);
+
+    const r = describeConfigDrift({
+      event: parseEventSignature(TRANSFER_SIG).event,
+      verifierTopic0: TRANSFER_TOPIC0,
+      verifierTarget: TOKEN,
+      verifierScale: BigInt(1e18),
+      verifierAggregation: AGGREGATION.sum,
+      verifierUserParamIndex: 1,
+      indexerTopic0: decoded!.topic0,
+      indexerSource: decoded!.source,
+      indexerScale: decoded!.scale,
+      indexerAmountMode: decoded!.amountMode,
+      indexerActorTopic: decoded!.actorTopic,
+    });
     expect(r).toBeNull();
   });
 });

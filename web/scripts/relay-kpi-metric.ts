@@ -40,7 +40,12 @@ import {
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, EventMetricKpiVerifierAbi, AttributionRegistryAbi} from "../src/lib/abis";
 import {getDeployment} from "../src/lib/chains";
-import {decodeEventSource} from "../src/lib/kpiSource";
+import {
+  decodeEventSource,
+  matchesTopicFilter,
+  topicFilterArray,
+  type EventSource,
+} from "../src/lib/kpiSource";
 import {blockChunks} from "../src/lib/indexerCore";
 import {
   attributionLookup,
@@ -108,11 +113,22 @@ function reporterKey(): Hex | undefined {
   return (value || undefined) as Hex | undefined;
 }
 
-/** Fetches matching logs across a range the RPC will actually accept. */
+/**
+ * Fetches matching logs across a range the RPC will actually accept.
+ *
+ * @param client Chain to read from.
+ * @param address Contract whose logs are scanned.
+ * @param topic0 Event signature hash to match.
+ * @param source Event source from the KPI's params, or null when it could not be decoded.
+ * @param fromBlock First block to scan.
+ * @param toBlock Last block to scan.
+ * @returns Every matching log in the range.
+ */
 async function fetchLogs(
   client: PublicClient,
   address: `0x${string}`,
   topic0: Hex,
+  source: EventSource | null,
   fromBlock: bigint,
   toBlock: bigint,
 ): Promise<RelayLog[]> {
@@ -125,10 +141,15 @@ async function fetchLogs(
       address,
       fromBlock: chunk.from,
       toBlock: chunk.to,
+      topics: [
+        topic0.toLowerCase() as Hex,
+        ...(source ? topicFilterArray(source) : []),
+      ],
     });
 
     for (const log of logs) {
       if (log.topics[0]?.toLowerCase() !== topic0.toLowerCase()) continue;
+      if (source && !matchesTopicFilter(log, source)) continue;
       if (log.blockNumber === null) continue;
       out.push({topics: log.topics, data: log.data, blockNumber: log.blockNumber});
     }
@@ -268,7 +289,14 @@ async function main(): Promise<void> {
 
   // ── scan and decode ────────────────────────────────────────────
 
-  const logs = await fetchLogs(client, config.targetContract, topic0, range.fromBlock, range.toBlock);
+  const logs = await fetchLogs(
+    client,
+    config.targetContract,
+    topic0,
+    indexerSource,
+    range.fromBlock,
+    range.toBlock,
+  );
   const {decoded, undecodable} = decodeUserEvents(logs, event, config);
 
   console.log(`\n  ${logs.length} matching log(s), ${decoded.length} decoded`);

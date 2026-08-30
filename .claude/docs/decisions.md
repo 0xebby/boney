@@ -303,8 +303,7 @@ by having the user re-sign during the grace window.
 ### Reporting windows — why they can never overlap escrow return
 
 `_requireReportableStatus` mirrors `settle`'s guard, so crediting and paying open and close together.
-It is the exact complement of `reclaimUnspent`, which requires `block.timestamp > endedAt +
-CLAIM_GRACE` — so reporting closes on exactly the second reclaim opens and escrow is never reclaimable
+It is the exact complement of `reclaimUnspent`, which requires `block.timestamp > endedAt + CLAIM_GRACE` — so reporting closes on exactly the second reclaim opens and escrow is never reclaimable
 while credit is still owed.
 
 **Paused is intentionally excluded** from reportable statuses. Pausing halts reporting, and it cannot
