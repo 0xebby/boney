@@ -13,6 +13,19 @@ import {getDeployment} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {buildCreateCampaignArgs, toWireKpis} from "@/lib/campaignArgs";
 import {describeTxError} from "@/lib/txErrors";
+import {useConfirmSignature} from "@/components/SignatureGate";
+import type {SignIntent} from "@/lib/signIntent";
+import {
+  createCampaignIntent,
+  fundCampaignIntent,
+  joinCampaignIntent,
+  lifecycleIntent,
+  reportIntent,
+  settleIntent,
+  storeTouchIntent,
+  type IntentContext,
+  type ReportedCall,
+} from "@/lib/writeIntents";
 import {encodeActions} from "@/lib/indexerCore";
 import {
   buildTouch,
@@ -33,7 +46,13 @@ import type {CampaignDraft} from "@/lib/validation";
  * *before* the user signs. Sending without simulating turns every one of those into an opaque
  * "transaction failed" after gas is spent.
  *
- * State machine: idle → preparing → submitted → confirmed, with error reachable from any step.
+ * State machine: idle → preparing → submitted → confirmed, with error reachable from any step. Every
+ * writer passes a `SignIntent` describing the prompt, which `SignatureGate` shows for confirmation
+ * before the wallet opens; declining returns to `idle` rather than to `error`.
+ *
+ * Each writer takes an optional trailing `IntentContext` carrying the human labels it cannot derive
+ * — a token symbol, a campaign name, a KPI label. Without it the confirmation names the address or
+ * index instead.
  */
 
 export type TxStatus = "idle" | "preparing" | "submitted" | "confirmed" | "error";
@@ -75,6 +94,7 @@ export type {TxErrorCopy} from "@/lib/txErrors";
  */
 function useTx() {
   const [state, setState] = useState<TxState>(IDLE);
+  const confirmSignature = useConfirmSignature();
   const reset = useCallback(() => setState(IDLE), []);
 
   const run = useCallback(
@@ -82,7 +102,15 @@ function useTx() {
       send: () => Promise<Hex>,
       onConfirmed: ((receipt: TransactionReceipt) => void) | undefined,
       client: PublicClient,
+      intent: SignIntent,
     ) => {
+      // Declining is a decision, not a failure: state returns to idle so the trigger is live again
+      // and no error is shown for something the user chose.
+      if (!(await confirmSignature(intent))) {
+        setState(IDLE);
+        return;
+      }
+
       try {
         setState({status: "preparing"});
         const hash = await send();
@@ -108,7 +136,7 @@ function useTx() {
         setState({status: "error", ...describeTxError(err)});
       }
     },
-    [],
+    [confirmSignature],
   );
 
   return {state, setState, reset, run};
@@ -147,7 +175,7 @@ export function useCreateCampaign() {
   const [campaignAddress, setCampaignAddress] = useState<`0x${string}` | undefined>();
 
   const create = useCallback(
-    async (draft: CampaignDraft, tokenDecimals: number) => {
+    async (draft: CampaignDraft, tokenDecimals: number, ctx?: IntentContext) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to create a campaign."});
         return;
@@ -196,6 +224,7 @@ export function useCreateCampaign() {
           }
         },
         publicClient,
+        createCampaignIntent(draft, ctx),
       );
     },
     [publicClient, walletClient, deployment, run, setState],
@@ -219,7 +248,7 @@ export function useFundCampaign() {
   const [needsApproval, setNeedsApproval] = useState(false);
 
   const fund = useCallback(
-    async (campaignId: bigint, amount: bigint, token: `0x${string}`) => {
+    async (campaignId: bigint, amount: bigint, token: `0x${string}`, ctx?: IntentContext) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to fund this campaign."});
         return;
@@ -266,6 +295,7 @@ export function useFundCampaign() {
         },
         undefined,
         publicClient,
+        fundCampaignIntent(campaignId, amount, token, ctx?.decimals ?? 18, ctx),
       );
     },
     [publicClient, walletClient, deployment, run, setState],
@@ -294,7 +324,7 @@ export function useCampaignLifecycle() {
   const [action, setAction] = useState<LifecycleAction | null>(null);
 
   const execute = useCallback(
-    async (campaign: `0x${string}`, fn: LifecycleAction) => {
+    async (campaign: `0x${string}`, fn: LifecycleAction, ctx?: IntentContext) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to manage this campaign."});
         return;
@@ -315,6 +345,7 @@ export function useCampaignLifecycle() {
         },
         undefined,
         publicClient,
+        lifecycleIntent(fn, campaign, ctx),
       );
     },
     [publicClient, walletClient, run, setState],
@@ -350,7 +381,7 @@ export function useJoinCampaign() {
   const [promoterId, setPromoterId] = useState<Hex | undefined>();
 
   const join = useCallback(
-    async (campaign: `0x${string}`) => {
+    async (campaign: `0x${string}`, ctx?: IntentContext) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to join this campaign."});
         return;
@@ -379,6 +410,7 @@ export function useJoinCampaign() {
           if (joined) setPromoterId(joined.args.promoterId);
         },
         publicClient,
+        joinCampaignIntent(campaign, ctx),
       );
     },
     [publicClient, walletClient, run, setState],
@@ -410,7 +442,12 @@ export function useSettleRewards() {
   const [pendingKpi, setPendingKpi] = useState<number | null>(null);
 
   const settle = useCallback(
-    async (campaign: `0x${string}`, promoter: `0x${string}`, kpiIndex: number) => {
+    async (
+      campaign: `0x${string}`,
+      promoter: `0x${string}`,
+      kpiIndex: number,
+      ctx?: IntentContext,
+    ) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to settle these rewards."});
         return;
@@ -432,6 +469,7 @@ export function useSettleRewards() {
         },
         undefined,
         publicClient,
+        settleIntent(campaign, promoter, kpiIndex, ctx),
       );
     },
     [publicClient, walletClient, run, setState],
@@ -470,7 +508,7 @@ export function useStoreTouch() {
   const [touch, setTouch] = useState<Touch | undefined>();
 
   const storeTouch = useCallback(
-    async (campaign: `0x${string}`, promoterId: Hex) => {
+    async (campaign: `0x${string}`, promoterId: Hex, ctx?: IntentContext) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to confirm attribution."});
         return;
@@ -520,6 +558,7 @@ export function useStoreTouch() {
         },
         undefined,
         publicClient,
+        storeTouchIntent(campaign, promoterId, ctx),
       );
     },
     [publicClient, walletClient, deployment, run, setState],
@@ -551,6 +590,7 @@ export function useStoreTouch() {
  */
 export function useReportUserAction() {
   const {publicClient, walletClient} = useWriteContext();
+  const confirmSignature = useConfirmSignature();
   const [state, setState] = useState<TxState>(IDLE);
   const [sent, setSent] = useState(0);
   const [total, setTotal] = useState(0);
@@ -565,17 +605,21 @@ export function useReportUserAction() {
     async (
       campaign: `0x${string}`,
       kpiIndex: number,
-      calls: readonly {
-        referral: `0x${string}`;
-        newTotal: bigint;
+      promoter: `0x${string}`,
+      calls: readonly (ReportedCall & {
         actions?: readonly {blockNumber: bigint; timestamp: bigint; amount: bigint}[];
-      }[],
+      })[],
+      ctx?: IntentContext,
     ) => {
       if (!publicClient || !walletClient) {
         setState({status: "error", message: "Connect a wallet to report progress."});
         return;
       }
       if (calls.length === 0) return;
+
+      // One confirmation for the whole plan, not one per call: the batch is decided together, and a
+      // dialog per referral would be a dozen prompts stacked behind the wallet's own.
+      if (!(await confirmSignature(reportIntent(campaign, kpiIndex, promoter, calls, ctx)))) return;
 
       const account = walletClient.account;
       setSent(0);
@@ -626,7 +670,7 @@ export function useReportUserAction() {
         }
       }
     },
-    [publicClient, walletClient],
+    [publicClient, walletClient, confirmSignature],
   );
 
   return {

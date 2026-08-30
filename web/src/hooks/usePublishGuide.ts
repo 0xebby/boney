@@ -4,6 +4,8 @@ import {useCallback, useState} from "react";
 import {useWalletClient} from "wagmi";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {canonicalGuideMessage, isEmptyGuide, type CampaignGuide} from "@/lib/campaignGuide";
+import {useConfirmSignature} from "@/components/SignatureGate";
+import {publishGuideIntent, type IntentContext} from "@/lib/writeIntents";
 
 /**
  * Publishes a campaign's off-chain guide, signed by the project wallet.
@@ -38,16 +40,19 @@ export type PublishState =
 export function usePublishGuide() {
   const {data: walletClient} = useWalletClient();
   const chainId = useBoneyChainId();
+  const confirmSignature = useConfirmSignature();
   const [state, setState] = useState<PublishState>({status: "idle"});
 
   const reset = useCallback(() => setState({status: "idle"}), []);
 
   const publish = useCallback(
-    async (campaign: `0x${string}`, guide: CampaignGuide) => {
+    async (campaign: `0x${string}`, guide: CampaignGuide, ctx?: IntentContext) => {
       if (!walletClient) {
         setState({status: "error", message: "Connect the project wallet to publish the guide."});
         return;
       }
+
+      if (!(await confirmSignature(publishGuideIntent(campaign, isEmptyGuide(guide), ctx)))) return;
 
       let signature: `0x${string}`;
       try {
@@ -103,7 +108,7 @@ export function usePublishGuide() {
         });
       }
     },
-    [walletClient, chainId],
+    [walletClient, chainId, confirmSignature],
   );
 
   return {publish, reset, state};
