@@ -20,6 +20,10 @@ plan.md
 future.md
 changes.md
 
+# Local testing notes. Holds throwaway Base Sepolia keys for driving the fixture by hand, and
+# this repo is public — so it is ignored by name here as well as in .git/info/exclude.
+testing.md
+
 # Internal code reviews and the unpublished protocol spec. Both live in boneyMd/ alongside the
 # published docs, and this repo is public — findings.md details high-severity bugs, so it must never
 # be staged. Drop the spec/ rule when the spec is ready to publish.

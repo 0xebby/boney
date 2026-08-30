@@ -30,7 +30,8 @@ import {chainFor, rpcFor} from "@/lib/serverChain";
  *    overwriting its own guide is not abuse.
  */
 
-/** Node runtime: `node:fs` in `guideStore`, and viem's verification path wants Node crypto. */
+/** Node runtime: `node:fs` and Netlify Blobs in `guideStore`, and viem's verification path wants
+ * Node crypto. */
 export const runtime = "nodejs";
 /** The store changes under a running server, and a stale guide is a wrong instruction. Never cache. */
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
 
   // `null` rather than a 404: "this campaign has no stored guide" is the ordinary answer for almost
   // every campaign, and a 404 would make the client treat the normal case as a failed request.
-  return Response.json({guide: readGuide(chainId, campaign)});
+  return Response.json({guide: await readGuide(chainId, campaign)});
 }
 
 export async function POST(request: NextRequest) {
@@ -125,13 +126,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!writeGuide(chain.id, campaign, clean)) {
-    // Expected on Netlify, whose function filesystem is ephemeral and read-only. Say so and hand back
-    // the entry to commit, rather than reporting a success the next request would contradict.
+  if (!(await writeGuide(chain.id, campaign, clean))) {
+    // Netlify persists through Blobs, so this is no longer the ordinary deployed answer — it is a host
+    // with no writable store at all. Hand back the entry to commit rather than reporting a success the
+    // next request would contradict.
     return fail(
       "store_unwritable",
-      "This deployment cannot store guides — its filesystem is read-only. Add the entry below to " +
-        "`CATALOG` in web/src/lib/campaignGuide.ts instead.",
+      "This deployment has no writable guide store. Add the entry below to `CATALOG` in " +
+        "web/src/lib/campaignGuide.ts instead.",
       501,
       {entry: {[campaign.toLowerCase()]: clean}},
     );
