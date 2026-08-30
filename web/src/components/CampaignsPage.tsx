@@ -132,29 +132,30 @@ export function CampaignsPage() {
         than the small page-title treatment every other route uses. Lowercase to match the brand
         mark in the top bar.
       */}
-      <header className="py-8 text-center sm:py-12">
+      <header className="py-6 text-center sm:py-12">
         {/*
-          The wordmark and its line are one lockup, inside a `w-fit` box.
+          The wordmark and both lines are one lockup, inside a `w-fit` box.
 
-          That box is as wide as its widest child, so the line can never run wider than the name it
-          sits under: on a phone it wraps inside the wordmark's own measure, on a desktop it centres
-          under it on one line. Centring both against the page instead let the two blocks meet at a
-          shared midpoint while their edges disagreed, which is what read as misaligned.
+          That box is as wide as its widest child, so no line can run wider than the name it sits
+          under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
+          it. Centring them against the page instead let the blocks meet at a shared midpoint while
+          their edges disagreed, which is what read as misaligned — and capping only the first line
+          left the second free to set the box's width, so the first one wrapped early inside a box
+          wider than the wordmark.
         */}
         <div className="mx-auto w-fit">
           <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
             Boneyard
           </h1>
-          <p className="animate-rise-in mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
+          <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
             The Marketplace for Verifiable Web3 Growth.
           </p>
 
           {/*
-            Inside the lockup rather than beside it: centred against the page it took the full column
-            width and met the two lines above only at their midpoint, so its edges disagreed with
-            theirs. In the `w-fit` box all three share one measure.
+            Capped to the same measure as the line above it. Left unbounded it was the widest child,
+            so it — not the wordmark — decided how wide the box was.
           */}
-          <p className="animate-rise-in mt-5 text-xs text-ink-secondary [animation-delay:120ms]">
+          <p className="animate-rise-in mx-auto mt-4 max-w-[15rem] text-balance text-xs leading-snug text-ink-secondary [animation-delay:120ms] sm:mt-5 sm:max-w-none">
             Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
           </p>
         </div>
@@ -190,7 +191,7 @@ export function CampaignsPage() {
 
         */}
         <StatTile
-          label="Pool Utilization across all campaigns"
+          label="Pool Utilization"
           value={
             singleToken
               ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
@@ -204,8 +205,12 @@ export function CampaignsPage() {
           same line as the status and eligibility controls it narrows with: it is one control among
           them rather than a hero field, and sharing their row is what keeps the three baselines
           aligned. The controls sit at the trailing edge, above the table's own right-aligned
-          columns; what the row *says* stays at the left. */}
-      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          columns; what the row *says* stays at the left.
+
+          Only from `sm` up, though. Below it the field takes the whole line and the rest wraps, and a
+          trailing edge there leaves each wrapped group at its own offset — which is the ragged column
+          the row exists to prevent. On a phone they stack against the left edge instead. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
         {/* `flex-1` so the field runs from the left edge to whatever sits next in the row, rather than
             stopping at a fixed width and leaving a gap the eye reads as a missing control. `min-w-56`
             keeps a project name legible once the row is crowded. */}
@@ -219,13 +224,13 @@ export function CampaignsPage() {
             value={filters.search}
             onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
             placeholder="Search campaigns, projects, or IDs…"
-            className="h-8 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand"
+            className="h-11 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand sm:h-8"
           />
         </div>
 
         {/* No `mr-auto`: the field beside it already absorbs the row's free space, and two elements
             competing for it split it between them. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
           {visible.length !== campaigns.length ? (
             <span className="text-xs text-ink-muted">
               {visible.length} of {campaigns.length}
@@ -253,7 +258,10 @@ export function CampaignsPage() {
           Joinable by me
         </label>
 
-        <div className="flex items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
+        {/* `flex-wrap`: six chips measure wider than a phone's content column, and wrapping inside
+            their own box keeps every status visible — an `overflow-x-auto` strip would put half of
+            them behind a gesture nothing advertises. */}
+        <div className="flex flex-wrap items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
           {STATUS_OPTIONS.map((option) => {
             const active = filters.status === option;
             return (
@@ -262,7 +270,7 @@ export function CampaignsPage() {
                 type="button"
                 onClick={() => setFilters((f) => ({...f, status: option}))}
                 aria-pressed={active}
-                className={`rounded px-2 py-1 text-xs transition-colors ${
+                className={`rounded px-2 py-1.5 text-xs transition-colors sm:py-1 ${
                   active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
                 }`}
               >
@@ -361,7 +369,9 @@ function buildColumns(
       // The campaign's on-chain name, which is what a project puts its own name in. The project
       // wallet stands in where a campaign was created without one.
       sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
-      width: "220px",
+      // `min()` rather than a flat 220px: the same declaration is the column's share of a phone's
+      // width and its measure on a desktop, which an inline width cannot express with a breakpoint.
+      width: "min(220px, 42vw)",
       /*
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
@@ -371,7 +381,7 @@ function buildColumns(
         column's measure a constant, so the badge is free to come and go.
       */
       render: (c) => (
-        <span className="flex max-w-[220px] items-center gap-2">
+        <span className="flex max-w-[42vw] items-center gap-2 sm:max-w-[220px]">
           <Link
             href={`/campaign/${c.campaignId}`}
             title={projectName(c)}
