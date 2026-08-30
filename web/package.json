@@ -22,6 +22,7 @@
     "seed": "tsx scripts/seed-local.ts",
     "index": "tsx scripts/indexer.ts",
     "relay": "tsx scripts/relay-kpi-metric.ts",
+    "fund:test": "tsx scripts/fund-test-wallets.ts",
     "sygma:deposit": "tsx scripts/sygma-deposit.ts",
     "demo:seed": "tsx scripts/demo-seed.ts",
     "swap:weth-usdc": "tsx scripts/uniswap-swap.ts",
