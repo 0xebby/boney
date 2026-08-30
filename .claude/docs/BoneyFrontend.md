@@ -25,7 +25,8 @@ indexer — and health-checks each rather than sleeping. Logs in `/tmp/boney-dev
 
 The relay-before-indexer ordering is not cosmetic and fails **silently**: see `BoneyGeneral.md` §6.
 
-App on `localhost:3000`, ethos stub on `127.0.0.1:8787`.
+App on `localhost:3000`, ethos stub on `127.0.0.1:8787`. `PORT=3001 pnpm dev:up` moves the app
+and its health check when another project already holds 3000.
 
 ---
 
@@ -63,7 +64,7 @@ Six nav routes plus three unlisted ones. That is the **whole** route table — `
 
 | Route | Component | What it is |
 | --- | --- | --- |
-| `/` | `CampaignsPage` | the marketplace. `boneyard` hero, then the campaign list. Public. |
+| `/` | `CampaignsPage` | the marketplace. `boneyard` hero, then the campaign list. Public. First visit also opens `WelcomeDialog`, once per `WELCOME_VERSION`; `?welcome=1` reopens it. |
 | `/my` | `MyCampaignsPage` | the same list filtered to the connected wallet's projects. Needs a wallet. |
 | `/discover` | `DiscoverPage` | browse **promoters** by BoneyScore rank. Public — a project evaluating the marketplace shouldn't have to connect first. |
 | `/card` | `BoneyCard` via `useBoneyCard` | the connected wallet's own card: score, scale, qualification, history, earnings. The verify-to-join affordance lives *inside* the card, never in the header. |
