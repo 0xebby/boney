@@ -101,7 +101,7 @@ export function ProjectPromotersPanel({
         <div className="p-4 pb-0">
           <CardHeader
             title="Payouts by promoter"
-            subtitle="Amounts released by crossed tiers, read from the campaign's own settlement events"
+            subtitle="Amounts released by crossed tiers"
           />
         </div>
 
@@ -285,7 +285,7 @@ function ScanNotes({
       ) : null}
 
       {unaccounted > BigInt(0) ? (
-        <p className="text-warning">
+        <p className="text-brand">
           The campaign reports {formatTokenAmount(unaccounted, decimals, {compact: true})} {symbol}{" "}
           paid outside the scanned range, so the amounts below are a floor rather than the full
           total.
@@ -293,7 +293,7 @@ function ScanNotes({
       ) : null}
 
       {orphans > 0 ? (
-        <p className="text-warning">
+        <p className="text-brand">
           {orphans} paid wallet{orphans === 1 ? "" : "s"} did not appear in the join scan, so
           {orphans === 1 ? " its" : " their"} payouts are missing from the rows above.
         </p>

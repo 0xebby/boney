@@ -13,11 +13,15 @@
  * Colour is not the only carrier: the word is always present, which keeps the marker legible in
  * monochrome and to anyone who does not distinguish the hue. It carries no glyph — a decorative tick
  * was the widest part of the badge and said nothing the word does not.
+ *
+ * A tinted label with no border, sized to sit beside a campaign name without competing with it. It
+ * never sets its column's width — the cell it lives in is capped, so the badge appearing with a
+ * connected wallet leaves the table's columns where they were.
  */
 export function JoinedBadge() {
   return (
     <span
-      className="inline-flex shrink-0 items-center whitespace-nowrap rounded border border-brand-dim bg-brand/10 px-1 py-0.5 text-[10px] font-medium leading-none text-brand"
+      className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-brand/10 px-1 py-px text-[9px] font-medium uppercase leading-none tracking-wide text-brand"
       title="You have joined this campaign as a promoter"
     >
       Joined

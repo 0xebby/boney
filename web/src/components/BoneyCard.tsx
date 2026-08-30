@@ -59,8 +59,6 @@ export function BoneyCard({
   history,
   historyUnavailable,
   historyLoading,
-  indexedBlock,
-  lag,
   earnedToken,
   onVerify,
   onRetryScore,
@@ -77,8 +75,6 @@ export function BoneyCard({
   history: CardHistory | undefined;
   historyUnavailable: GraphUnavailable | undefined;
   historyLoading: boolean;
-  indexedBlock: bigint | undefined;
-  lag: bigint | undefined;
   earnedToken: TokenMeta | null;
   onVerify?: () => void;
   onRetryScore?: () => void;
@@ -104,8 +100,6 @@ export function BoneyCard({
       card={history}
       unavailable={historyUnavailable}
       isLoading={historyLoading}
-      indexedBlock={indexedBlock}
-      lag={lag}
       earnedToken={earnedToken}
       onRetry={onRetryHistory}
     />
@@ -127,7 +121,7 @@ export function BoneyCard({
         drop the score campaigns read back to zero.
       */}
       {onChainExpired ? (
-        <p className="text-xs text-warning">
+        <p className="text-xs text-brand">
           Your on-chain attestations have expired. Re-verify to restore the score campaigns read.
         </p>
       ) : null}
@@ -227,12 +221,6 @@ function ScoredHead({
           <p className="font-display text-4xl leading-tight text-ink">
             {total.toLocaleString()}
           </p>
-          {/*
-            Labelled, not left to imply delivery. This number is credibility and audience only —
-            nothing a promoter has done on Boneyard moves it, which is the whole reason stage 2
-            exists.
-          */}
-          <p className="mt-0.5 text-xs text-ink-muted">credibility &amp; reach — not delivery</p>
         </div>
         {/* `muted` tone: this is the viewer's own standing, not a row they are vetting. */}
         <RankBadge rank={score.rank} tone="muted" />
@@ -248,7 +236,7 @@ function ScoredHead({
         <Meter
           value={total}
           max={scale.max}
-          label="of the maximum attainable score"
+          ariaLabel="Score against the network maximum"
           valueText={`${total.toLocaleString()} / ${scale.max.toLocaleString()}`}
         />
       ) : null}
@@ -259,7 +247,7 @@ function ScoredHead({
         {reachUnconfirmed ? (
           // Words, not colour. `fetchFollowers` returns 0 for an outage and for an empty account
           // alike, so this is a suspicion and has to read as one.
-          <span className="text-warning">reach unconfirmed — follower count unavailable</span>
+          <span className="text-brand">reach unconfirmed — follower count unavailable</span>
         ) : (
           <span>{compactNumber(followers)} followers</span>
         )}

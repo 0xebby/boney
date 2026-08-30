@@ -133,46 +133,31 @@ export function CampaignsPage() {
         mark in the top bar.
       */}
       <header className="py-8 text-center sm:py-12">
-        <h1 className="font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-          Boneyard
-        </h1>
-        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-brand sm:text-base">
-          The Marketplace for Verifiable Web3 Growth.
-        </p>
-
         {/*
-          Search is promoted out of the filter row and into the hero: on a marketplace landing
-          page it is the primary way in, not one control among several. The status and
-          "joinable" filters stay below, where they scope the table they sit above.
+          The wordmark and its line are one lockup, inside a `w-fit` box.
+
+          That box is as wide as its widest child, so the line can never run wider than the name it
+          sits under: on a phone it wraps inside the wordmark's own measure, on a desktop it centres
+          under it on one line. Centring both against the page instead let the two blocks meet at a
+          shared midpoint while their edges disagreed, which is what read as misaligned.
         */}
-        <div className="mx-auto mt-6 max-w-lg">
-          <label className="sr-only" htmlFor="campaign-search">
-            Search campaigns, project names, or campaign IDs
-          </label>
-          <input
-            id="campaign-search"
-            type="search"
-            value={filters.search}
-            onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
-            placeholder="Search campaigns, projects, or campaign IDs…"
-            className="h-11 w-full rounded-lg border border-hairline-strong bg-surface-1 px-4 text-sm text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand"
-          />
+        <div className="mx-auto w-fit">
+          <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
+            Boneyard
+          </h1>
+          <p className="animate-rise-in mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
+            The Marketplace for Verifiable Web3 Growth.
+          </p>
+
+          {/*
+            Inside the lockup rather than beside it: centred against the page it took the full column
+            width and met the two lines above only at their midpoint, so its edges disagreed with
+            theirs. In the `w-fit` box all three share one measure.
+          */}
+          <p className="animate-rise-in mt-5 text-xs text-ink-secondary [animation-delay:120ms]">
+            Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
+          </p>
         </div>
-
-        {/*
-          The "Create a campaign" button itself lives in the top bar, which has no room for a
-          subtitle — so its supporting line sits here instead, where the landing page can afford
-          to spell out what a project is actually signing up for.
-        */}
-        <p className="mt-5 text-xs text-ink-secondary">
-          Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
-        </p>
-
-        <p className="mt-2 text-xs text-ink-muted">
-          <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
-            See how it works
-          </Link>
-        </p>
       </header>
 
       <StatRow>
@@ -215,11 +200,32 @@ export function CampaignsPage() {
         />
       </StatRow>
 
-      {/* One filter row above everything it scopes — never per-card filters. Search lives in the
-          hero above, so this row is status and eligibility only. The controls sit at the trailing
-          edge, above the table's own right-aligned columns; what the row *says* stays at the left. */}
+      {/* One filter row above everything it scopes — never per-card filters. Search leads it, on the
+          same line as the status and eligibility controls it narrows with: it is one control among
+          them rather than a hero field, and sharing their row is what keeps the three baselines
+          aligned. The controls sit at the trailing edge, above the table's own right-aligned
+          columns; what the row *says* stays at the left. */}
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-        <div className="mr-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+        {/* `flex-1` so the field runs from the left edge to whatever sits next in the row, rather than
+            stopping at a fixed width and leaving a gap the eye reads as a missing control. `min-w-56`
+            keeps a project name legible once the row is crowded. */}
+        <div className="w-full sm:min-w-56 sm:flex-1">
+          <label className="sr-only" htmlFor="campaign-search">
+            Search campaigns, project names, or campaign IDs
+          </label>
+          <input
+            id="campaign-search"
+            type="search"
+            value={filters.search}
+            onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
+            placeholder="Search campaigns, projects, or IDs…"
+            className="h-8 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand"
+          />
+        </div>
+
+        {/* No `mr-auto`: the field beside it already absorbs the row's free space, and two elements
+            competing for it split it between them. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {visible.length !== campaigns.length ? (
             <span className="text-xs text-ink-muted">
               {visible.length} of {campaigns.length}
@@ -302,6 +308,15 @@ export function CampaignsPage() {
           />
         )}
       </Card>
+
+      {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
+          and not found what they came for is the one who wants an explanation, and the hero's job is
+          to get them to the list. */}
+      <p className="text-xs text-ink-muted">
+        <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
+          See how it works
+        </Link>
+      </p>
     </div>
   );
 }
@@ -346,11 +361,21 @@ function buildColumns(
       // The campaign's on-chain name, which is what a project puts its own name in. The project
       // wallet stands in where a campaign was created without one.
       sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
+      width: "220px",
+      /*
+        Capped at the column's own width, with the name truncating inside it.
+        `overflow-x-auto` handles the table's total; this line only has to stop one cell from
+        setting it. The table lays out `auto`, so a cell's widest possible content is what sizes
+        its column: an uncapped name — or a `Joined` badge that appears when the wallet connects
+        and vanishes when it disconnects — moved every column to its right. The cap makes this
+        column's measure a constant, so the badge is free to come and go.
+      */
       render: (c) => (
-        <span className="inline-flex items-center gap-2">
+        <span className="flex max-w-[220px] items-center gap-2">
           <Link
             href={`/campaign/${c.campaignId}`}
-            className="font-medium text-ink hover:underline"
+            title={projectName(c)}
+            className="min-w-0 truncate font-medium text-ink hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
             {projectName(c)}

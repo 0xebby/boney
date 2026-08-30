@@ -288,7 +288,7 @@ function AlreadyAttributed({
       {campaignId !== undefined ? (
         <Link
           href={`/campaign/${campaignId}`}
-          className="inline-block rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
+          className="block w-full rounded-md border border-hairline-strong px-4 py-2 text-center text-sm font-medium text-ink hover:bg-surface-hover"
         >
           Go to the campaign
         </Link>

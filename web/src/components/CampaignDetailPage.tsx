@@ -20,7 +20,7 @@ import {ProjectPromotersPanel} from "@/components/ProjectPromotersPanel";
 import {ReportPanel} from "@/components/ReportPanel";
 import {PromoterPanel} from "@/components/PromoterPanel";
 import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
-import {projectName} from "@/lib/projects";
+import {hasProjectName, projectName} from "@/lib/projects";
 import {viewerRole, visibleSections} from "@/lib/viewerRole";
 import {classifyTouch, type ReferredCampaign} from "@/lib/referrals";
 import {
@@ -165,28 +165,36 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
   const explorer =
     chainId !== undefined ? explorerAddressUrl(chainId, detail.address) : undefined;
 
+  /**
+   * What the page is called.
+   *
+   * The campaign's own name, with the registry index as the fallback for a campaign created directly
+   * against the contracts without one.
+   */
+  const title = hasProjectName(detail)
+    ? projectName({name: detail.name, project: detail.project})
+    : `Campaign #${campaignId.toString()}`;
+
   return (
     <div className="space-y-5">
       <header className="space-y-2">
         <div className="flex items-center gap-2 text-xs text-ink-muted">
           <BackLink />
           <span aria-hidden>/</span>
-          <span>Campaign #{detail.address ? campaignId.toString() : "—"}</span>
+          <span>{title}</span>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <h1 className="font-display text-2xl text-ink">
-              Campaign #{campaignId.toString()}
-            </h1>
+            <h1 className="font-display text-2xl text-ink">{title}</h1>
             <StatusPill status={detail.status} />
           </div>
 
           <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-muted">
             <div className="flex gap-1.5">
-              <dt>Project</dt>
-              <dd className="font-medium text-ink-secondary">
-                {projectName({name: detail.name, project: detail.project})}
+              <dt>Campaign</dt>
+              <dd className="tnum font-medium text-ink-secondary">
+                #{detail.address ? campaignId.toString() : "—"}
               </dd>
             </div>
             <div className="flex gap-1.5">
@@ -311,10 +319,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
 
           {sections.escrowReturn ? (
             <Card>
-              <CardHeader
-                title="Escrow return"
-                subtitle="Unspent funds after the settlement window"
-              />
+              <CardHeader title="Escrow return" />
               {detail.status === "Ended" || detail.status === "Cancelled" ? (
                 <div className="space-y-2 text-xs">
                   {reclaimOpen ? (

@@ -494,7 +494,7 @@ function RankTable() {
                     {rank.reachOnly ? (
                       <span
                         title="Reachable on follower count alone — no Ethos credibility required"
-                        className="rounded border border-warning/50 px-1 text-[10px] text-warning"
+                        className="rounded border border-brand-dim/50 px-1 text-[10px] text-brand"
                       >
                         reach-only
                       </span>
@@ -522,7 +522,7 @@ function RankTable() {
                   {rank.min === 0 ? (
                     "—"
                   ) : minEthos === 0 ? (
-                    <span className="text-warning">none</span>
+                    <span className="text-brand">none</span>
                   ) : (
                     minEthos.toLocaleString("en-US")
                   )}
