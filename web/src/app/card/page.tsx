@@ -81,8 +81,6 @@ export default function Page() {
         history={card.history}
         historyUnavailable={card.historyUnavailable}
         historyLoading={card.historyLoading}
-        indexedBlock={card.indexedBlock}
-        lag={card.lag}
         earnedToken={card.earnedToken}
         onVerify={onVerify}
         onRetryScore={() => void card.refetchScore()}

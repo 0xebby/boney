@@ -10,7 +10,7 @@ export type NoticeTone = "critical" | "warning" | "good" | "info";
  */
 const TONE: Record<NoticeTone, {box: string; title: string}> = {
   critical: {box: "border-critical/30 bg-critical/5", title: "text-critical"},
-  warning: {box: "border-warning/30 bg-warning/5", title: "text-warning"},
+  warning: {box: "border-brand-dim/30 bg-brand/5", title: "text-brand"},
   good: {box: "border-good/30 bg-good/5", title: "text-good"},
   info: {box: "border-brand-dim bg-brand/5", title: "text-brand"},
 };

@@ -122,8 +122,6 @@ export function BoneyCardHistory({
   card,
   unavailable,
   isLoading,
-  indexedBlock,
-  lag,
   earnedToken,
   voice = SELF,
   onRetry,
@@ -133,9 +131,6 @@ export function BoneyCardHistory({
   /** Present only on a failed one. Mutually exclusive with `card` by construction. */
   unavailable: GraphUnavailable | undefined;
   isLoading: boolean;
-  indexedBlock: bigint | undefined;
-  /** Blocks behind the chain head. Undefined until both numbers are in. */
-  lag: bigint | undefined;
   /** Metadata for the dominant earned token. Null when the read has not landed or failed. */
   earnedToken: TokenMeta | null;
   /** Defaults to the connected wallet reading its own card. */
@@ -163,7 +158,7 @@ export function BoneyCardHistory({
         <Filled card={card} earnedToken={earnedToken} copy={copy} />
       )}
 
-      {card ? <Footer card={card} indexedBlock={indexedBlock} lag={lag} copy={copy} /> : null}
+      {card ? <Footer card={card} copy={copy} /> : null}
     </Card>
   );
 }
@@ -469,40 +464,22 @@ function CampaignRows({rows}: {rows: readonly CampaignHistoryRow[]}) {
 }
 
 /**
- * Where the numbers came from and how far they can be trusted.
+ * How far the numbers above can be trusted.
  *
- * The indexed block is stated rather than hidden: a promoter who just crossed a tier and cannot see it
- * needs "indexed to 4 blocks ago", not a card that looks wrong. Same reasoning as `partial` — a count
- * that might be a floor has to say so, because the alternative is a total that is quietly too low.
+ * A count that might be a floor has to say so, because the alternative is a total that is quietly too
+ * low.
  */
-function Footer({
-  card,
-  indexedBlock,
-  lag,
-  copy,
-}: {
-  card: CardHistory;
-  indexedBlock: bigint | undefined;
-  lag: bigint | undefined;
-  copy: HistoryCopy;
-}) {
+function Footer({card, copy}: {card: CardHistory; copy: HistoryCopy}) {
   return (
     <div className="mt-3 flex flex-col gap-1 border-t border-hairline pt-2">
       {card.partial ? (
-        <p className="text-xs text-warning">
+        <p className="text-xs text-brand">
           Some history could not be read in full, so every count above is a floor rather than a total.
         </p>
       ) : null}
 
       {card.orphanPayouts > 0 ? (
-        <p className="text-xs text-warning">{copy.orphanNote(card.orphanPayouts)}</p>
-      ) : null}
-
-      {indexedBlock !== undefined && indexedBlock > BigInt(0) ? (
-        <p className="tnum text-xs text-ink-muted">
-          Indexed to block {indexedBlock.toLocaleString()}
-          {lag !== undefined ? ` · ${lag.toLocaleString()} behind the chain` : ""}
-        </p>
+        <p className="text-xs text-brand">{copy.orphanNote(card.orphanPayouts)}</p>
       ) : null}
     </div>
   );

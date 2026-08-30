@@ -90,8 +90,6 @@ export function PublicBoneyCard({card}: {card: PublicCard}) {
         card={history}
         unavailable={card.historyUnavailable}
         isLoading={false}
-        indexedBlock={card.indexedBlock}
-        lag={card.lag}
         earnedToken={card.earnedToken}
         voice={{kind: "other", subject}}
       />
@@ -113,12 +111,11 @@ function ScoredHead({score}: {score: Extract<PublicCard["score"], {kind: "scored
         <div>
           <p className="text-xs font-bold text-brand">BONEYSCORE</p>
           <p className="font-display text-4xl leading-tight text-ink">{total.toLocaleString()}</p>
-          <p className="mt-0.5 text-xs text-ink-muted">credibility &amp; reach — not delivery</p>
         </div>
         {/*
           `tone="default"` here, unlike the header badge on `/card`. A `reachOnly` rank — one reachable
           on follower count with no Ethos credibility behind it — is exactly the caution a reader vetting
-          somebody else's card should see, which is the audience `RankBadge`'s warning outline was
+          somebody else's card should see, which is the audience `RankBadge`'s brand outline was
           written for.
         */}
         <div className="flex items-center gap-3">
@@ -135,7 +132,7 @@ function ScoredHead({score}: {score: Extract<PublicCard["score"], {kind: "scored
         {reachUnconfirmed ? (
           // Words, not colour. `fetchFollowers` returns 0 for a throttled source and for an empty
           // account alike, so this is a suspicion and has to read as one.
-          <span className="text-warning">reach unconfirmed — follower count unavailable</span>
+          <span className="text-brand">reach unconfirmed — follower count unavailable</span>
         ) : (
           <span>{compactNumber(followers)} followers</span>
         )}

@@ -148,9 +148,6 @@ export default async function Image({params}: {params: Promise<{wallet: string}>
                 {scored.rank.name.toUpperCase()}
               </div>
             </div>
-            <div style={{fontSize: 22, color: INK_MUTED, marginTop: 6}}>
-              {"credibility & reach — not delivery"}
-            </div>
           </div>
         ) : (
           // No claimed profile, or Ethos was unreachable. Neither is a zero.

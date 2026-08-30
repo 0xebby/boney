@@ -219,10 +219,7 @@ export function PromoterDashboard() {
       */}
       <Card padded={false}>
         <div className="px-4 pt-4">
-          <CardHeader
-            title="Wallets you referred"
-            subtitle="Grouped by campaign — the wallets currently attributed to your promoter id on each"
-          />
+          <CardHeader title="Wallets you referred" />
         </div>
         {isLoading || joinedQuery.isLoading || attributions.isLoading ? (
           <SkeletonRows rows={2} cols={4} />

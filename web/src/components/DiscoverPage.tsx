@@ -426,7 +426,7 @@ function SplitCell({parts, loading}: {parts?: ScoreParts; loading: boolean}) {
   const split = scoreSplit(parts);
   if (split.total === 0) {
     return (
-      <span className="text-xs text-warning" title="No attested values on record for this wallet">
+      <span className="text-xs text-brand" title="No attested values on record for this wallet">
         unattested
       </span>
     );
