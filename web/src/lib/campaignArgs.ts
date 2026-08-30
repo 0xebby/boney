@@ -1,6 +1,12 @@
 import {KPI_KIND, type CampaignConfig, type KpiSpec, type RewardTier} from "./types";
 import {parseAmount, parseCount, isAddress, type CampaignDraft, type EventSourceDraft} from "./validation";
-import {AMOUNT_MODE, encodeEventSource, eventTopic, type AmountMode} from "./kpiSource";
+import {
+  AMOUNT_MODE,
+  encodeEventSource,
+  eventTopic,
+  normalizeTopicValue,
+  type AmountMode,
+} from "./kpiSource";
 
 /**
  * Converts a validated `CampaignDraft` into the exact tuple arguments
@@ -158,13 +164,37 @@ function encodeKpiParams(src: EventSourceDraft | undefined, path: string): `0x${
   // A blank scale means no scaling, matching how a blank target means 0.
   const scale = src.scale.trim() ? requireCount(src.scale, `${path}.scale`) : BigInt(1);
 
-  return encodeEventSource({
+  // An absent or "0" filter topic is the normal case, and the one that keeps the blob at its
+  // original five words.
+  const filterTopic = Number(src.filterTopic?.trim() || "0");
+  if (!Number.isInteger(filterTopic) || filterTopic < 0 || filterTopic > 3) {
+    throw new DraftEncodingError(`${path}.filterTopic`, `must be 0..3, got "${src.filterTopic}"`);
+  }
+  if (filterTopic !== 0 && filterTopic === actorTopic) {
+    throw new DraftEncodingError(
+      `${path}.filterTopic`,
+      `must differ from the actor topic, got ${filterTopic}`,
+    );
+  }
+
+  const head = {
     source: src.source.trim() as `0x${string}`,
     topic0: eventTopic(signature),
     actorTopic: actorTopic as 1 | 2 | 3,
     amountMode,
     scale,
-  });
+  };
+  if (filterTopic === 0) return encodeEventSource(head);
+
+  const filterValue = normalizeTopicValue(src.filterValue ?? "");
+  if (!filterValue) {
+    throw new DraftEncodingError(
+      `${path}.filterValue`,
+      `must be an address or a 32-byte word, got "${src.filterValue ?? ""}"`,
+    );
+  }
+
+  return encodeEventSource({...head, filterTopic: filterTopic as 1 | 2 | 3, filterValue});
 }
 
 function normalizeVerifier(raw: string, path: string): `0x${string}` {

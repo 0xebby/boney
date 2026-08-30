@@ -6,8 +6,8 @@ import {pad, toHex, type Hex, type PublicClient} from "viem";
 import {getDeployment, isDeployed} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {planWindows} from "@/lib/promoters";
-import {decodeEventSource, type EventSource} from "@/lib/kpiSource";
-import {aggregateByActor, type IndexedLog} from "@/lib/indexerCore";
+import {decodeEventSource, topicFilterArray, type EventSource} from "@/lib/kpiSource";
+import {aggregateByActor, tallyByPromoter, type IndexedLog} from "@/lib/indexerCore";
 import {attributionLookup, type AttributionWindows} from "@/lib/attributionWindows";
 import {CampaignAbi} from "@/lib/abis";
 import type {ObservedReferral} from "@/lib/reporting";
@@ -106,13 +106,15 @@ export function useObservedActions({
       const head = await publicClient.getBlockNumber({cacheTime: 0});
       const {windows: scanWindows, skippedBefore} = planWindows(deployment.startBlock, head);
 
-      // `topics[0]` is the signature and the actor sits at `source.actorTopic`; the positions
-      // between are wildcards. An array at the actor position is an OR over the referrals, so one
-      // request covers every wallet this KOL brought in.
+      // `topics[0]` is the signature and the actor sits at `source.actorTopic`; a fixed-topic
+      // filter, when the KPI carries one, sits at its own index and the rest are wildcards. An array
+      // at the actor position is an OR over the referrals, so one request covers every wallet this
+      // KOL brought in.
       const actorFilter = referrals.map((r) => pad(r.toLowerCase() as Hex, {size: 32}));
-      const topics: (Hex | Hex[] | null)[] = [source.topic0];
-      for (let i = 1; i < source.actorTopic; i++) topics.push(null);
-      topics.push(actorFilter);
+      const topics: (Hex | Hex[] | null)[] = [
+        source.topic0,
+        ...topicFilterArray(source, actorFilter),
+      ];
 
       const logs: IndexedLog[] = [];
       let failedWindows = 0;
@@ -180,13 +182,18 @@ export function useObservedActions({
         functionName: "startTime",
       })) as bigint;
 
-      const totals = aggregateByActor(logs, source, attributionLookup(windows, startTime));
+      const attribution = attributionLookup(windows, startTime);
+      const totals = aggregateByActor(logs, source, attribution);
       const observed = new Map<string, ObservedReferral>();
       for (const [addr, total] of totals) {
         observed.set(addr, {
           referral: total.referral,
           observed: total.amount,
           actions: total.actions,
+          // The same split `Campaign` makes when it credits the evidence. Carried alongside the
+          // referral's total because a panel selected by promoter has to show one promoter's share of
+          // it, not the referral's whole attributed history.
+          byPromoter: tallyByPromoter(total.referral, total.actions, attribution),
         });
       }
 

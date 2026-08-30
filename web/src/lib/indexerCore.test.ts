@@ -9,6 +9,7 @@ import {
   encodeActions,
   foldToLimit,
   rawAmount,
+  tallyByPromoter,
   type IndexedLog,
 } from "./indexerCore";
 import {attributionLookup, buildAttributionWindows, type TouchLog} from "./attributionWindows";
@@ -647,5 +648,237 @@ describe("blockChunks", () => {
 
   it("rejects a non-positive chunk size rather than looping forever", () => {
     expect(() => blockChunks(BigInt(0), BigInt(10), BigInt(0))).toThrow(/positive/);
+  });
+});
+
+// ── the fixed-topic filter ───────────────────────────────────────
+
+const TRANSFER_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" as const;
+
+/** The LiFi router on Base Sepolia, and a second address to point a filter at instead. */
+const ROUTER = "0x816Fc6EeE47e3157A666827a0C06205294C81770" as const;
+const OTHER_ROUTER = "0x4200000000000000000000000000000000000006" as const;
+
+const asTopic = (address: `0x${string}`) =>
+  pad(address.toLowerCase() as `0x${string}`, {size: 32});
+
+/** An ERC-20 `Transfer`, with the sender at topic 1 and the recipient at topic 2. */
+function transferLog(
+  from: `0x${string}`,
+  to: `0x${string}`,
+  value: bigint,
+  blockNumber: bigint,
+): IndexedLog {
+  return {
+    topics: [TRANSFER_TOPIC, asTopic(from), asTopic(to)],
+    data: pad(toHex(value), {size: 32}),
+    blockNumber,
+    timestamp: BigInt(1_700_000_000),
+  };
+}
+
+function transferSource(overrides: Partial<EventSource> = {}): EventSource {
+  return source({
+    topic0: TRANSFER_TOPIC,
+    actorTopic: 2,
+    amountMode: AMOUNT_MODE.dataWord0,
+    ...overrides,
+  });
+}
+
+describe("aggregateByActor — the fixed-topic filter", () => {
+  const ZERO = "0x0000000000000000000000000000000000000000" as const;
+
+  it("keeps only the logs whose filtered topic matches", () => {
+    const logs = [
+      transferLog(ROUTER, ALICE, BigInt(4e15), BigInt(100)),
+      transferLog(OTHER_ROUTER, ALICE, BigInt(9e15), BigInt(101)),
+      transferLog(ROUTER, ALICE, BigInt(2e15), BigInt(102)),
+    ];
+
+    const filtered = aggregateByActor(
+      logs,
+      transferSource({filterTopic: 1, filterValue: asTopic(ROUTER)}),
+      null,
+    );
+    expect(filtered.get(ALICE.toLowerCase())?.amount).toBe(BigInt(6));
+    expect(filtered.get(ALICE.toLowerCase())?.actions).toHaveLength(2);
+  });
+
+  it("counts every log when no filter is set", () => {
+    const logs = [
+      transferLog(ROUTER, ALICE, BigInt(4e15), BigInt(100)),
+      transferLog(OTHER_ROUTER, ALICE, BigInt(9e15), BigInt(101)),
+      transferLog(ROUTER, ALICE, BigInt(2e15), BigInt(102)),
+    ];
+
+    expect(aggregateByActor(logs, transferSource(), null).get(ALICE.toLowerCase())?.amount).toBe(
+      BigInt(15),
+    );
+  });
+
+  it("credits nothing when the filter names a router nobody used", () => {
+    const logs = [transferLog(ROUTER, ALICE, BigInt(9e15), BigInt(100))];
+
+    const totals = aggregateByActor(
+      logs,
+      transferSource({filterTopic: 1, filterValue: asTopic(OTHER_ROUTER)}),
+      null,
+    );
+    expect(totals.size).toBe(0);
+  });
+
+  it("reads a zero filter value as mints only", () => {
+    // The `erc721-mint-only` preset: `from == address(0)` is a mint, anything else is a resale.
+    const logs = [
+      transferLog(ZERO, ALICE, BigInt(1), BigInt(100)),
+      transferLog(BOB, ALICE, BigInt(2), BigInt(101)),
+      transferLog(ZERO, ALICE, BigInt(3), BigInt(102)),
+      transferLog(ZERO, BOB, BigInt(4), BigInt(103)),
+    ];
+
+    const totals = aggregateByActor(
+      logs,
+      transferSource({
+        amountMode: AMOUNT_MODE.count,
+        scale: BigInt(1),
+        filterTopic: 1,
+        filterValue: asTopic(ZERO),
+      }),
+      null,
+    );
+    expect(totals.get(ALICE.toLowerCase())?.amount).toBe(BigInt(2));
+    expect(totals.get(BOB.toLowerCase())?.amount).toBe(BigInt(1));
+  });
+
+  it("drops a log that does not carry the filtered topic at all", () => {
+    // An ERC-721 `Transfer` indexes the token id, so a filter on topic 3 finds a word; a
+    // three-topic ERC-20 log has nothing there and must not slip through.
+    const logs = [transferLog(ROUTER, ALICE, BigInt(9e15), BigInt(100))];
+
+    const totals = aggregateByActor(
+      logs,
+      transferSource({filterTopic: 3, filterValue: asTopic(ROUTER)}),
+      null,
+    );
+    expect(totals.size).toBe(0);
+  });
+});
+
+describe("the LiFi swap this filter was built for", () => {
+  // Base Sepolia tx 0x48a3b136…a957: a swap through the LiFi router emits
+  // `LiFiGenericSwapCompleted`, which indexes only `transactionId`, plus a WETH `Transfer` from the
+  // router to the receiver carrying `toAmount` to the wei. The Transfer is the reachable proxy.
+  const ACTOR = "0xba954E89cE301415964E9405f09F4Cc7c668976A" as const;
+  const TO_AMOUNT = BigInt("0x237035aba27000");
+  const WETH = "0x4200000000000000000000000000000000000006" as const;
+
+  const swapSource = (filterValue: `0x${string}`): EventSource => ({
+    source: WETH,
+    topic0: TRANSFER_TOPIC,
+    actorTopic: 2,
+    amountMode: AMOUNT_MODE.dataWord0,
+    scale: BigInt(1e15),
+    filterTopic: 1,
+    filterValue,
+  });
+
+  const logs = [
+    transferLog(ROUTER, ACTOR, TO_AMOUNT, BigInt(46111150)),
+    // Unrelated WETH arriving at the same wallet: a plain send, not a swap.
+    transferLog(BOB, ACTOR, BigInt(50e15), BigInt(46111160)),
+  ];
+
+  it("credits the swap's toAmount and nothing else", () => {
+    const totals = aggregateByActor(logs, swapSource(asTopic(ROUTER)), null);
+    expect(totals.get(ACTOR.toLowerCase())?.amount).toBe(BigInt(9));
+    expect(totals.get(ACTOR.toLowerCase())?.actions).toHaveLength(1);
+  });
+
+  it("credits nothing when the filter points at a different router", () => {
+    expect(aggregateByActor(logs, swapSource(asTopic(OTHER_ROUTER)), null).size).toBe(0);
+  });
+
+  it("would credit the unrelated transfer too without the filter", () => {
+    const {source, topic0, actorTopic, amountMode, scale} = swapSource(asTopic(ROUTER));
+    const unfiltered: EventSource = {source, topic0, actorTopic, amountMode, scale};
+    expect(aggregateByActor(logs, unfiltered, null).get(ACTOR.toLowerCase())?.amount).toBe(
+      BigInt(59),
+    );
+  });
+});
+
+/**
+ * The split `Campaign._tally` makes, mirrored in the browser.
+ *
+ * A referral's observed total is one number, but the credit is not: the chain walks the evidence and
+ * adds each action to whoever held the referral at that action's block. A panel that selects by
+ * promoter has to show that promoter's share, and the only way it cannot disagree with the chain is
+ * to tally the same apportioned actions `encodeActions` sends.
+ */
+describe("tallyByPromoter", () => {
+  const T = BigInt(1_700_000_000);
+  const EXPIRES = T + BigInt(86_400);
+
+  it("credits each action to whoever held the referral at its block", () => {
+    const attribution = lookup([
+      touchLog(ALICE, BigInt(10), EXPIRES, ID_A),
+      touchLog(ALICE, BigInt(30), EXPIRES, ID_B),
+    ]);
+    const actions = [
+      {blockNumber: BigInt(20), timestamp: T, amount: BigInt(4)},
+      {blockNumber: BigInt(40), timestamp: T, amount: BigInt(6)},
+    ];
+
+    const tally = tallyByPromoter(ALICE, actions, attribution);
+    expect(tally.get(ID_A.toLowerCase())).toBe(BigInt(4));
+    expect(tally.get(ID_B.toLowerCase())).toBe(BigInt(6));
+  });
+
+  it("sums repeat spells under the same promoter", () => {
+    const attribution = lookup([touchLog(ALICE, BigInt(10), EXPIRES, ID_A)]);
+    const actions = [
+      {blockNumber: BigInt(20), timestamp: T, amount: BigInt(4)},
+      {blockNumber: BigInt(21), timestamp: T, amount: BigInt(6)},
+    ];
+
+    const tally = tallyByPromoter(ALICE, actions, attribution);
+    expect(tally.size).toBe(1);
+    expect(tally.get(ID_A.toLowerCase())).toBe(BigInt(10));
+  });
+
+  it("drops an action nobody held", () => {
+    // Before the first touch, so no window covers it — the same action `aggregateByActor` would have
+    // refused to count in the first place.
+    const attribution = lookup([touchLog(ALICE, BigInt(30), EXPIRES, ID_A)]);
+    const tally = tallyByPromoter(
+      ALICE,
+      [{blockNumber: BigInt(20), timestamp: T, amount: BigInt(4)}],
+      attribution,
+    );
+    expect(tally.size).toBe(0);
+  });
+
+  /**
+   * The property that makes the panel's figure trustworthy: tallying the apportioned actions cannot
+   * lose or invent units against the total the same scan produced.
+   */
+  it("sums to the referral's observed total over the evidence the chain receives", () => {
+    const attribution = lookup([
+      touchLog(ALICE, BigInt(10), EXPIRES, ID_A),
+      touchLog(ALICE, BigInt(30), EXPIRES, ID_B),
+    ]);
+    const logs = [
+      depositLog(ALICE, BigInt(4.5e15), BigInt(20), T),
+      depositLog(ALICE, BigInt(6.5e15), BigInt(40), T),
+    ];
+
+    const total = aggregateByActor(logs, source(), attribution).get(ALICE.toLowerCase());
+    if (!total) throw new Error("expected a total");
+
+    const tally = tallyByPromoter(ALICE, total.actions, attribution);
+    const summed = [...tally.values()].reduce((sum, v) => sum + v, BigInt(0));
+    expect(summed).toBe(total.amount);
   });
 });

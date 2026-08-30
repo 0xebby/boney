@@ -40,7 +40,7 @@ import {
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, BoneyAbi, AttributionRegistryAbi} from "../src/lib/abis";
-import {decodeEventSource, type EventSource} from "../src/lib/kpiSource";
+import {decodeEventSource, topicFilterArray, type EventSource} from "../src/lib/kpiSource";
 import {catalogSignature} from "../src/lib/eventNames";
 import {
   actorFromTopic,
@@ -132,8 +132,9 @@ async function fetchLogs(
       fromBlock: chunk.from,
       toBlock: chunk.to,
       // Filtered by the node, not here. These sources are busy contracts, and every non-matching
-      // log downloaded is payload the run pays for and then discards.
-      topics: [source.topic0.toLowerCase() as Hex],
+      // log downloaded is payload the run pays for and then discards. A fixed-topic filter narrows
+      // the same request; `aggregateByActor` applies it again over whatever comes back.
+      topics: [source.topic0.toLowerCase() as Hex, ...topicFilterArray(source)],
     });
 
     for (const log of logs) {

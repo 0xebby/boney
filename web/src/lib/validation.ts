@@ -1,5 +1,6 @@
 import {MAX_KPIS, MAX_TIERS_PER_KPI, MAX_CAMPAIGN_NAME_LENGTH, type KpiKind} from "./types";
 import {MAX_BONEY_SCORE} from "./boneyscore";
+import {normalizeTopicValue} from "./kpiSource";
 
 /**
  * Client-side mirrors of `Campaign`'s constructor validation.
@@ -49,6 +50,10 @@ export type EventSourceDraft = {
   amountMode: string;
   /** Divisor applied before crediting, so tier thresholds stay human numbers. */
   scale: string;
+  /** Indexed topic that must equal `filterValue`, as "0" (no filter) | "1" | "2" | "3". */
+  filterTopic?: string;
+  /** Address or 32-byte word `topics[filterTopic]` must equal. */
+  filterValue?: string;
 };
 
 export type KpiDraft = {
@@ -363,6 +368,35 @@ export function validateCampaignDraft(
 
       if (src.scale.trim() && parseCount(src.scale) === null) {
         issues.push({path: `kpis.${i}.eventSource.scale`, message: "Enter a whole number."});
+      }
+
+      const filterTopic = Number(src.filterTopic?.trim() || "0");
+      const filterValue = src.filterValue?.trim() ?? "";
+      if (!Number.isInteger(filterTopic) || filterTopic < 0 || filterTopic > 3) {
+        issues.push({
+          path: `kpis.${i}.eventSource.filterTopic`,
+          message: "The filter topic must be 1, 2, or 3, or none.",
+        });
+      } else if (filterTopic !== 0) {
+        if (filterTopic === topic) {
+          // One topic cannot both carry the credited wallet and be pinned to a literal.
+          issues.push({
+            path: `kpis.${i}.eventSource.filterTopic`,
+            message: "The filter topic must differ from the actor topic.",
+          });
+        }
+        if (!filterValue) {
+          // A zero value is a real filter — a mint's `from` — so it cannot stand in for "unset".
+          issues.push({
+            path: `kpis.${i}.eventSource.filterValue`,
+            message: "Enter the value this topic must equal.",
+          });
+        } else if (normalizeTopicValue(filterValue) === null) {
+          issues.push({
+            path: `kpis.${i}.eventSource.filterValue`,
+            message: "Enter an address or a 32-byte hex word.",
+          });
+        }
       }
 
       // TouchWindowVerifier reads params as a bare uint64 and returns lookback 0 unless the blob
