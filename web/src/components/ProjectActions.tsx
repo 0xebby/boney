@@ -26,12 +26,9 @@ import type {CampaignDetail} from "@/lib/campaignDetail";
  * blocked action still renders — disabled, with the reason — because "why can't I activate?" is
  * the question the panel exists to answer, and hiding the button answers it with silence.
  *
- * Destructive actions (`cancel`, `end`) require a second click to confirm: they are irreversible
- * on chain and `cancel` in particular cannot be undone once a campaign is Pending-no-more.
+ * Every action confirms through the signing dialog before the wallet opens, which is where the
+ * irreversibility of `cancel` and `end` is spelled out.
  */
-
-/** Actions that cannot be walked back, so they get a confirm step. */
-const NEEDS_CONFIRM: ReadonlySet<LifecycleAction> = new Set(["cancel", "end"]);
 
 export function ProjectActions({
   campaignId,
@@ -58,7 +55,6 @@ export function ProjectActions({
   const lifecycle = useCampaignLifecycle();
 
   const [fundAmount, setFundAmount] = useState("");
-  const [confirming, setConfirming] = useState<LifecycleAction | null>(null);
 
   const shortfall = fundingShortfall(detail.escrowBalance, detail.rewardPool);
 
@@ -86,12 +82,11 @@ export function ProjectActions({
   if (!isProject && !anyAvailable) return null;
 
   const runLifecycle = async (action: LifecycleAction) => {
-    if (NEEDS_CONFIRM.has(action) && confirming !== action) {
-      setConfirming(action);
-      return;
-    }
-    setConfirming(null);
-    await lifecycle.execute(detail.address, action);
+    await lifecycle.execute(detail.address, action, {
+      campaignName: detail.name,
+      symbol: token.symbol,
+      decimals: token.decimals,
+    });
     onDone();
   };
 
@@ -99,7 +94,11 @@ export function ProjectActions({
     e.preventDefault();
     const amount = parseAmount(fundAmount, token.decimals);
     if (amount === null || amount === BigInt(0)) return;
-    await fund.fund(campaignId, amount, detail.token);
+    await fund.fund(campaignId, amount, detail.token, {
+      campaignName: detail.name,
+      symbol: token.symbol,
+      decimals: token.decimals,
+    });
     onDone();
   };
 
@@ -178,26 +177,10 @@ export function ProjectActions({
             availability={a}
             disabled={!clockReady || isPending(lifecycle.state)}
             busy={lifecycle.action === a.action && isPending(lifecycle.state)}
-            confirming={confirming === a.action}
             onClick={() => void runLifecycle(a.action)}
           />
         ))}
       </div>
-
-      {confirming ? (
-        <p className="mt-2 text-xs text-warning">
-          {confirming === "cancel"
-            ? "Cancelling is permanent and returns escrow to you. Click again to confirm."
-            : "Ending starts the settlement window and cannot be undone. Click again to confirm."}{" "}
-          <button
-            type="button"
-            onClick={() => setConfirming(null)}
-            className="text-ink-muted underline hover:text-ink"
-          >
-            Never mind
-          </button>
-        </p>
-      ) : null}
 
       <TxFeedback state={lifecycle.state} onReset={lifecycle.reset} />
     </Card>
@@ -214,13 +197,11 @@ function ActionButton({
   availability,
   disabled,
   busy,
-  confirming,
   onClick,
 }: {
   availability: ActionAvailability;
   disabled: boolean;
   busy: boolean;
-  confirming: boolean;
   onClick: () => void;
 }) {
   const {action, available, reason} = availability;
@@ -234,14 +215,12 @@ function ActionButton({
       title={reason}
       aria-describedby={reason ? `${action}-reason` : undefined}
       className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        confirming
-          ? "border-warning text-warning"
-          : destructive
-            ? "border-hairline-strong text-critical hover:bg-surface-hover"
-            : "border-hairline-strong text-ink hover:bg-surface-hover"
+        destructive
+          ? "border-hairline-strong text-critical hover:bg-surface-hover"
+          : "border-hairline-strong text-ink hover:bg-surface-hover"
       }`}
     >
-      {busy ? "…" : confirming ? `Confirm ${actionLabel(action).toLowerCase()}` : actionLabel(action)}
+      {busy ? "…" : actionLabel(action)}
       {reason ? (
         <span id={`${action}-reason`} className="sr-only">
           {" "}

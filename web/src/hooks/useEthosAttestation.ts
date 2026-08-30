@@ -6,6 +6,8 @@ import type {PublicClient} from "viem";
 import {ReputationRegistryAbi, AttestationVerifierAbi} from "@/lib/abis";
 import {getDeployment} from "@/lib/chains";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
+import {useConfirmSignature} from "@/components/SignatureGate";
+import {attestationIntent} from "@/lib/writeIntents";
 
 /**
  * Fetch signed attestations for the connected wallet and submit them on chain.
@@ -117,6 +119,7 @@ export function useEthosAttestation() {
   const {address} = useAccount();
   const publicClient = usePublicClient({chainId: useBoneyChainId()});
   const {data: walletClient} = useWalletClient();
+  const confirmSignature = useConfirmSignature();
   const [state, setState] = useState<AttestState>({status: "idle"});
 
   const reset = useCallback(() => setState({status: "idle"}), []);
@@ -152,6 +155,14 @@ export function useEthosAttestation() {
       payload = json as AttestResponse;
     } catch (error) {
       setState({status: "error", message: (error as Error).message});
+      return false;
+    }
+
+    // Confirmed after the fetch, not before: the schema names and the number of transactions are
+    // what the signer needs to see, and neither is known until the attestor has answered.
+    const schemas = payload.signed.map((entry) => entry.schema);
+    if (!(await confirmSignature(attestationIntent(schemas)))) {
+      setState({status: "idle"});
       return false;
     }
 
@@ -208,7 +219,7 @@ export function useEthosAttestation() {
       smartFollowers: payload.smartFollowers,
     });
     return true;
-  }, [address, publicClient, walletClient]);
+  }, [address, publicClient, walletClient, confirmSignature]);
 
   return {state, attest, reset};
 }
