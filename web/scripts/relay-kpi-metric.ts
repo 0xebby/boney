@@ -90,6 +90,15 @@ const CONFIRMATIONS = BigInt(5);
 /** Users per `reportBatch` transaction. Bounded by block gas, not by anything on chain. */
 const BATCH_SIZE = 200;
 
+/**
+ * How many block-timestamp reads are in flight at once. Public endpoints throttle a wider fan-out,
+ * and a throttled batch costs more than a narrower one. Same constant `indexer.ts` uses.
+ */
+const TIMESTAMP_CONCURRENCY = 12;
+
+/** Per-request ceiling. A loaded public endpoint answers a single `eth_getBlockByNumber` in ~1s. */
+const RPC_TIMEOUT = 30_000;
+
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
   return i === -1 ? undefined : process.argv[i + 1];
@@ -169,7 +178,9 @@ async function main(): Promise<void> {
 
   const kpiIndex = BigInt(arg("--kpi") ?? "0");
 
-  const client = createPublicClient({transport: http(rpcUrl)}) as PublicClient;
+  const client = createPublicClient({
+    transport: http(rpcUrl, {timeout: RPC_TIMEOUT}),
+  }) as PublicClient;
   const chainId = await client.getChainId();
 
   const verifierArg = arg("--verifier") ?? getDeployment(chainId)?.eventMetricKpiVerifier;
@@ -360,14 +371,18 @@ async function main(): Promise<void> {
     }
     const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
 
-    // One read per distinct block, not per log. A busy range shares blocks heavily.
+    // One read per distinct block, not per log. A busy range shares blocks heavily, and the reads
+    // go out in bounded batches: a range carrying thousands of logs fans out past what a public
+    // endpoint will answer, and the whole run then fails on a timeout.
     const blockTimestamps = new Map<bigint, bigint>();
-    await Promise.all(
-      uniqueBlocks(decoded).map(async (blockNumber) => {
-        const block = await client.getBlock({blockNumber});
-        blockTimestamps.set(blockNumber, block.timestamp);
-      }),
-    );
+    const blocks = uniqueBlocks(decoded);
+    for (let i = 0; i < blocks.length; i += TIMESTAMP_CONCURRENCY) {
+      const batch = blocks.slice(i, i + TIMESTAMP_CONCURRENCY);
+      process.stdout.write(`\r    reading ${i + batch.length}/${blocks.length} block timestamps…`);
+      const read = await Promise.all(batch.map((blockNumber) => client.getBlock({blockNumber})));
+      read.forEach((block, j) => blockTimestamps.set(batch[j], block.timestamp));
+    }
+    if (blocks.length > 0) process.stdout.write("\r\x1b[K");
 
     const result = aggregateDeltas({decoded, attribution, blockTimestamps});
     for (const [user, delta] of result.deltas) deltas.set(user, delta);
