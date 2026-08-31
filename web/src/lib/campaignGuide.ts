@@ -25,16 +25,17 @@ import type {ValidationIssue} from "./validation";
  * ## Two sources, and why the catalog carries no URLs
  *
  * A stored guide (`guideStore.ts`, written by the project's own wallet through
- * `/api/campaign-guide`) beats `CATALOG`, which is committed and covers the five live fixture
- * campaigns from `script/SeedFive.s.sol`.
+ * `/api/campaign-guide`) beats `CATALOG`, which is committed and covers the two seeded fixture
+ * campaigns from `script/SeedTwo.s.sol`. Nothing else on the live registry is described here — a
+ * campaign created through the form is the project's own to publish a guide for.
  *
  * Every catalog entry deliberately omits `url`. `knownContracts.ts` sets the bar for this file — an
  * entry is a *claim*, and a wrong one here is worse than a wrong label: it is an outbound link a
- * referral was invited to click. Aave's and Uniswap's testnet interfaces could not be verified from
- * this repo the way their contract addresses and event topics were, and a plausible-looking guess at
- * a market slug or a chain query param is exactly the kind of hand-copied value F4 exists to avoid.
- * So the catalog carries prose, which is checkable against the seed script, and lets the explorer
- * link stand. A project that has a real UI supplies it through the form, where it is signed for.
+ * referral was invited to click. Neither watched contract has a third-party interface that could be
+ * verified from this repo the way its address and event topics were, and a plausible-looking guess at
+ * one is exactly the kind of hand-copied value F4 exists to avoid. So the catalog carries prose,
+ * which is checkable against the seed script, and lets the explorer link stand. A project that has a
+ * real UI supplies it through the form, where it is signed for.
  *
  * Pure and React-free (decision F6), like `kpiSource.ts` and `eventNames.ts`: the URL rules are the
  * part that can be wrong, and `vitest.config.mts` runs a `node` environment over `src/**\/*.test.ts`,
@@ -143,41 +144,28 @@ export function linkLabel(href: string): string {
 type GuidesByCampaign = Readonly<Record<string, CampaignGuide>>;
 
 /**
- * Base Sepolia's live fixture — the five campaigns `script/SeedFive.s.sol` creates, in the order it
- * creates them. Addresses read from `CampaignRegistry.campaignAt` on chain rather than from the
- * broadcast receipt, and every unit below is the `scale` the seed script actually passed.
+ * Base Sepolia's live fixture — the two campaigns `script/SeedTwo.s.sol` creates, in the order it
+ * creates them. Addresses read from `CampaignRegistry.campaignAt` on the registry
+ * `lib/deployments.ts` points at, and every unit below is the `scale` the seed script actually passed.
+ *
+ * A protocol redeploy invalidates this whole block at once: the registry mints each campaign with
+ * `new Campaign`, so a fresh registry produces fresh addresses and every key here becomes one nothing
+ * looks up. Re-key it in the same change that regenerates `lib/deployments.ts`.
  */
 const BASE_SEPOLIA: GuidesByCampaign = {
-  // id 0 — "Sygma Bridge". `_sygma`: gated bridge count, then WETH wrap volume at `MILLI`.
-  "0x938e0c2ef6e3ed250d1d004050091f0a26076fec": {
+  // id 0 — "Venus". `_venus`: one WETH `Deposit` read as volume at `MILLI`, then the same event counted.
+  "0x16fe7197f7df62d86cd7606fa6f72dbf30a23491": {
     summary:
-      "Bridge out of Base Sepolia through Sygma's generic-message handler. Wrapping ETH counts " +
-      "too — it is the step before a bridge, and the amount bridged is not readable from the " +
-      "event, so the second KPI measures the wrap instead.",
+      "Wrap ETH into WETH on Base's canonical predeploy. One Deposit event backs both KPIs — the " +
+      "first reads the amount wrapped, the second just counts the wraps — which is the clearest " +
+      "demonstration that the amount mode, not the event, decides the unit.",
     kpis: [
-      {
-        action:
-          "Make one bridge deposit to any destination domain. The fee is the only cost — the " +
-          "handler's deposit is a view call, so no tokens move.",
-        kpiIndex: 0,
-      },
-      {action: "Wrap ETH into WETH. One unit of progress per 0.001 ETH.", kpiIndex: 1},
+      {action: "Wrap ETH into WETH, measured by size. One unit per 0.001 ETH.", kpiIndex: 0},
+      {action: "The same wraps, counted. One unit per transaction, any size.", kpiIndex: 1},
     ],
   },
-  // id 1 — "Aave". `_aave`: COUNT on both legs, because `Supply` puts the depositor's address where
-  // the amount would be and `dataWord0` would credit progress equal to an address.
-  "0x014e8499da2f401f9f0fc4785952c141b1ea6be4": {
-    summary:
-      "Supply and withdraw on Aave V3's Base Sepolia pool. Both legs count, and both are counted " +
-      "rather than summed: the amount is not the first non-indexed word of either event, so the " +
-      "number of actions is the only honest reading available.",
-    kpis: [
-      {action: "Supply any asset to the pool. One unit per supply, whatever the size.", kpiIndex: 0},
-      {action: "Withdraw any asset back out. One unit per withdrawal.", kpiIndex: 1},
-    ],
-  },
-  // id 2 — "Open Mint NFT". `_nft`: ERC-721 `Transfer` counted, then `Minted`'s `paid` at `MILLI`.
-  "0x6dc20396480557e001ea986bd765d81a7279ded5": {
+  // id 1 — "Sdy Labs". `_sdyLabs`: ERC-721 `Transfer` counted, then `Minted`'s `paid` at `MILLI`.
+  "0xf6f786589391410b41defbd02a4b6303ca372542": {
     summary:
       "A permissionlessly mintable ERC-721 this fixture deploys itself — Base Sepolia has no " +
       "collection with an open mint, so there was nothing third-party to point at. No allowlist " +
@@ -185,32 +173,6 @@ const BASE_SEPOLIA: GuidesByCampaign = {
     kpis: [
       {action: "Mint at least one token. One unit per token minted.", kpiIndex: 0},
       {action: "The same mints, measured by spend. One unit per 0.001 ETH paid.", kpiIndex: 1},
-    ],
-  },
-  // id 3 — "WETH". `_weth`: one `Deposit` event read as volume and as a count, plus the unwrap.
-  "0x5c42acdaff94b3d15d48ebf76c9a48e3a55888a3": {
-    summary:
-      "The canonical Base WETH predeploy, read three ways. The same Deposit event backs both a " +
-      "volume KPI and a count KPI, which is the clearest demonstration that the amount mode — not " +
-      "the event — decides the unit.",
-    kpis: [
-      {action: "Wrap ETH into WETH, measured by size. One unit per 0.001 ETH.", kpiIndex: 0},
-      {action: "The same wraps, counted. One unit per transaction, any size.", kpiIndex: 1},
-      {action: "Unwrap WETH back into ETH. One unit per 0.001 ETH.", kpiIndex: 2},
-    ],
-  },
-  // id 4 — "Uniswap". `_uniswap`: gated swap count off the pool, then USDC received at `WHOLE_USDC`.
-  "0xabc517769c86a2122bce19422b7863296c8bcf90": {
-    summary:
-      "Swap WETH into USDC through the 0.3% pool. Progress is read off the USDC you receive rather " +
-      "than the WETH you send: SwapRouter02 holds stranded ETH on Base Sepolia and wraps its own to " +
-      "pay the pool, so the swapper's WETH never moves and a KPI on that leg would credit nothing.",
-    kpis: [
-      {action: "Swap through the 0.3% WETH/USDC pool. One unit per swap you receive.", kpiIndex: 0},
-      {
-        action: "The same swaps, by USDC received. One unit per whole USDC — six decimals, not 18.",
-        kpiIndex: 1,
-      },
     ],
   },
 };
