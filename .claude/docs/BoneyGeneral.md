@@ -263,3 +263,12 @@ A `boney-indexer` subgraph is live on Studio for Base Sepolia; its query endpoin
 It is version-pinned — `NEXT_PUBLIC_SUBGRAPH_URL` names `v0.5.0`, which is the first version indexing
 `0x3e0a2fc4…`, so a redeploy means a new version label *and* an env bump. `pnpm deploy` in `subgraph/`
 runs pnpm's own builtin; the script is `pnpm run deploy --version-label vX.Y.Z`.
+
+### A redeploy silently empties the guide catalog
+
+`web/src/lib/campaignGuide.ts`'s `CATALOG` is keyed by **campaign address**, and the registry mints
+each campaign with `new Campaign` — so a fresh registry produces fresh addresses and every key in the
+catalog becomes one nothing looks up. Nothing breaks loudly: the old campaigns still hold code, the
+lookup just misses and each campaign page renders one section fewer. Re-key it in the same change that
+regenerates `lib/deployments.ts`, alongside the subgraph version bump. `SeedFive`'s five entries
+survived `SeedTwo` this way and described nothing on the live registry for two days.

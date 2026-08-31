@@ -17,8 +17,10 @@ import {
   type GuideDraft,
 } from "./campaignGuide";
 
-/** The live Base Sepolia fixture's Aave campaign — `CampaignRegistry.campaignAt(1)`. */
-const AAVE = "0x014e8499Da2F401F9F0FC4785952c141b1eA6be4";
+/** The live Base Sepolia fixture's Sdy Labs campaign — `CampaignRegistry.campaignAt(1)`. */
+const SDY = "0xF6f786589391410B41dEfBd02a4B6303Ca372542";
+/** Its Venus campaign — `campaignAt(0)`. */
+const VENUS = "0x16FE7197F7Df62D86CD7606FA6F72dBF30A23491";
 const UNSEEDED = "0x1111111111111111111111111111111111111111";
 const BASE_SEPOLIA = 84532;
 
@@ -80,28 +82,22 @@ describe("linkLabel", () => {
 
 describe("catalogGuide", () => {
   it("is chain-scoped and case-insensitive on the address", () => {
-    expect(catalogGuide(BASE_SEPOLIA, AAVE)?.summary).toContain("Aave V3");
-    expect(catalogGuide(BASE_SEPOLIA, AAVE.toLowerCase())?.summary).toContain("Aave V3");
+    expect(catalogGuide(BASE_SEPOLIA, SDY)?.summary).toContain("ERC-721");
+    expect(catalogGuide(BASE_SEPOLIA, SDY.toLowerCase())?.summary).toContain("ERC-721");
     // The same address on another chain holds different code, so it inherits nothing.
-    expect(catalogGuide(11155111, AAVE)).toBeUndefined();
-    expect(catalogGuide(undefined, AAVE)).toBeUndefined();
+    expect(catalogGuide(11155111, SDY)).toBeUndefined();
+    expect(catalogGuide(undefined, SDY)).toBeUndefined();
     expect(catalogGuide(BASE_SEPOLIA, undefined)).toBeUndefined();
     expect(catalogGuide(BASE_SEPOLIA, UNSEEDED)).toBeUndefined();
   });
 
   /*
     The reason this file exists rather than a `url` per entry: a wrong outbound link is worse than a
-    wrong label. Aave's and Uniswap's testnet interfaces were never verified from this repo the way
-    their contract addresses were, so the catalog carries prose and lets the explorer link stand.
+    wrong label. Neither watched contract's interface was verified from this repo the way its address
+    was, so the catalog carries prose and lets the explorer link stand.
   */
   it("carries no URLs at all", () => {
-    for (const address of [
-      "0x938E0c2Ef6E3ED250D1D004050091f0A26076fEC",
-      AAVE,
-      "0x6dC20396480557E001ea986BD765D81A7279DeD5",
-      "0x5C42acDAff94B3d15D48Ebf76c9a48e3A55888a3",
-      "0xaBC517769c86a2122bCe19422b7863296c8BCF90",
-    ]) {
+    for (const address of [VENUS, SDY]) {
       const guide = catalogGuide(BASE_SEPOLIA, address);
       expect(guide, address).toBeDefined();
       expect(guide?.siteUrl, address).toBeUndefined();
@@ -117,13 +113,7 @@ describe("catalogGuide", () => {
     so an over-long line would ship as a sentence cut mid-word.
   */
   it("indexes every fixture KPI contiguously from zero, within the panel's caps", () => {
-    const counts: Record<string, number> = {
-      "0x5C42acDAff94B3d15D48Ebf76c9a48e3A55888a3": 3,
-      "0x6dC20396480557E001ea986BD765D81A7279DeD5": 2,
-      "0x938E0c2Ef6E3ED250D1D004050091f0A26076fEC": 2,
-      "0xaBC517769c86a2122bCe19422b7863296c8BCF90": 2,
-      [AAVE]: 2,
-    };
+    const counts: Record<string, number> = {[VENUS]: 2, [SDY]: 2};
 
     for (const [address, count] of Object.entries(counts)) {
       const guide = catalogGuide(BASE_SEPOLIA, address);
@@ -141,7 +131,7 @@ describe("catalogGuide", () => {
 describe("resolveCampaignGuide", () => {
   it("prefers a stored guide over the catalog, wholesale", () => {
     const resolved = resolveCampaignGuide({
-      campaign: AAVE,
+      campaign: SDY,
       chainId: BASE_SEPOLIA,
       stored: {summary: "Ours, not the catalog's."},
     });
@@ -153,14 +143,14 @@ describe("resolveCampaignGuide", () => {
 
   it("falls back to the catalog when nothing is stored", () => {
     for (const stored of [undefined, null, {}, {summary: "   "}]) {
-      const resolved = resolveCampaignGuide({campaign: AAVE, chainId: BASE_SEPOLIA, stored});
+      const resolved = resolveCampaignGuide({campaign: SDY, chainId: BASE_SEPOLIA, stored});
       expect(resolved?.provenance).toBe("catalog");
     }
   });
 
   it("returns null when neither source has anything", () => {
     expect(resolveCampaignGuide({campaign: UNSEEDED, chainId: BASE_SEPOLIA})).toBeNull();
-    expect(resolveCampaignGuide({campaign: AAVE, chainId: 31337})).toBeNull();
+    expect(resolveCampaignGuide({campaign: SDY, chainId: 31337})).toBeNull();
     expect(resolveCampaignGuide({campaign: undefined, chainId: undefined})).toBeNull();
   });
 
@@ -170,17 +160,17 @@ describe("resolveCampaignGuide", () => {
   */
   it("sanitizes a stored guide on the way out", () => {
     const resolved = resolveCampaignGuide({
-      campaign: AAVE,
+      campaign: SDY,
       chainId: BASE_SEPOLIA,
       stored: {
-        kpis: [{action: "Supply.", kpiIndex: 0, url: "javascript:alert(1)"}],
+        kpis: [{action: "Mint.", kpiIndex: 0, url: "javascript:alert(1)"}],
         siteUrl: "javascript:alert(1)",
         summary: "Fine.",
       },
     });
 
     expect(resolved?.siteUrl).toBeUndefined();
-    expect(resolved?.kpis?.[0]).toEqual({action: "Supply.", kpiIndex: 0});
+    expect(resolved?.kpis?.[0]).toEqual({action: "Mint.", kpiIndex: 0});
   });
 
   /*
@@ -189,7 +179,7 @@ describe("resolveCampaignGuide", () => {
   */
   it("does not let an all-dropped stored guide beat the catalog", () => {
     const resolved = resolveCampaignGuide({
-      campaign: AAVE,
+      campaign: SDY,
       chainId: BASE_SEPOLIA,
       stored: {siteUrl: "http://example.com", summary: ""},
     });
@@ -321,7 +311,7 @@ describe("guideDraftFrom", () => {
 
     expect(guideFromDraft(guideDraftFrom(guide, 2))).toEqual(guide);
     // And for the catalog, which a project takes over by editing.
-    const catalog = catalogGuide(BASE_SEPOLIA, AAVE)!;
+    const catalog = catalogGuide(BASE_SEPOLIA, SDY)!;
     expect(guideFromDraft(guideDraftFrom(catalog, 2))).toEqual(catalog);
   });
 });
@@ -393,8 +383,8 @@ describe("canonicalGuideMessage", () => {
       siteUrl: "https://example.com/",
     };
 
-    expect(canonicalGuideMessage({campaign: AAVE, chainId: BASE_SEPOLIA, guide: reordered})).toBe(
-      canonicalGuideMessage({campaign: AAVE, chainId: BASE_SEPOLIA, guide}),
+    expect(canonicalGuideMessage({campaign: SDY, chainId: BASE_SEPOLIA, guide: reordered})).toBe(
+      canonicalGuideMessage({campaign: SDY, chainId: BASE_SEPOLIA, guide}),
     );
   });
 
@@ -402,7 +392,7 @@ describe("canonicalGuideMessage", () => {
     // The dropped URL must not appear in the signed bytes, or the project would be signing for
     // something the store never holds.
     const message = canonicalGuideMessage({
-      campaign: AAVE,
+      campaign: SDY,
       chainId: BASE_SEPOLIA,
       guide: {siteUrl: "javascript:alert(1)", summary: "  A campaign.  "},
     });
@@ -416,13 +406,13 @@ describe("canonicalGuideMessage", () => {
     on another chain, or onto a different campaign entirely.
   */
   it("binds the chain and the campaign, case-insensitively", () => {
-    const base = canonicalGuideMessage({campaign: AAVE, chainId: BASE_SEPOLIA, guide});
+    const base = canonicalGuideMessage({campaign: SDY, chainId: BASE_SEPOLIA, guide});
 
-    expect(base).toContain(`campaign: ${AAVE.toLowerCase()}`);
+    expect(base).toContain(`campaign: ${SDY.toLowerCase()}`);
     expect(base).toBe(
-      canonicalGuideMessage({campaign: AAVE.toLowerCase(), chainId: BASE_SEPOLIA, guide}),
+      canonicalGuideMessage({campaign: SDY.toLowerCase(), chainId: BASE_SEPOLIA, guide}),
     );
-    expect(base).not.toBe(canonicalGuideMessage({campaign: AAVE, chainId: 11155111, guide}));
+    expect(base).not.toBe(canonicalGuideMessage({campaign: SDY, chainId: 11155111, guide}));
     expect(base).not.toBe(canonicalGuideMessage({campaign: UNSEEDED, chainId: BASE_SEPOLIA, guide}));
   });
 });
