@@ -105,6 +105,13 @@ export const KNOWN_EVENTS = [
   "Swap(address,address,int256,int256,uint160,uint128,int24)",
   /** Sygma bridge. `SeedRealKpi.SYGMA_DEPOSIT_TOPIC`, matched against the deployed bytecode. */
   "Deposit(uint8,bytes32,uint64,address,bytes,bytes)",
+  /**
+   * Gyndore's `GyndStaking`. `SeedGyndore.STAKED_TOPIC`, matched against live Base Sepolia logs.
+   *
+   * `topics[1]` is the staker and `topics[2]` the staked token, which is what lets one KPI pin the
+   * token while crediting the user. The amount is the single `data` word.
+   */
+  "Staked(address,address,uint256)",
 ] as const;
 
 /**
