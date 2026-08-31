@@ -57,11 +57,19 @@ const BLOB_KEY = "guides";
 /**
  * Whether to persist through Netlify Blobs rather than the filesystem.
  *
- * `NETLIFY` is set in their build and function runtimes and nowhere else. An explicit
- * `BONEY_GUIDE_STORE` wins over it, so a test names a temp file and gets a temp file.
+ * The signal is the Blobs context, which is what `getStore` itself reads — Netlify injects it into the
+ * function runtime, either as `NETLIFY_BLOBS_CONTEXT` or as the global. `NETLIFY` cannot be used here:
+ * it is a *build* variable, and Netlify's serverless runtime provides only `URL`, `SITE_NAME` and
+ * `SITE_ID`, so gating on it sent every deployed write to the filesystem, where the function's
+ * read-only disk failed it and the route answered `store_unwritable`.
+ *
+ * An explicit `BONEY_GUIDE_STORE` wins over it, so a test names a temp file and gets a temp file.
  */
 function blobsBacked(): boolean {
-  return Boolean(process.env.NETLIFY) && !process.env.BONEY_GUIDE_STORE;
+  if (process.env.BONEY_GUIDE_STORE) return false;
+
+  const injected = (globalThis as {netlifyBlobsContext?: unknown}).netlifyBlobsContext;
+  return Boolean(process.env.NETLIFY_BLOBS_CONTEXT || injected);
 }
 
 /**

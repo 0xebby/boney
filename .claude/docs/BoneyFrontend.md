@@ -184,3 +184,19 @@ accept only the project key as reporter.
 
 An `export` in a terminal only reaches processes that terminal starts; putting a key in the repo-root
 `.env` is what makes it survive. `dev-up.sh` reads dotenv files without sourcing them, deliberately.
+
+### On Netlify, build env ≠ function env
+
+`netlify.toml` (repo root, `base = "web"`) builds the app; the Next runtime turns every route handler
+into a serverless function. Two traps:
+
+- **`NETLIFY` is a build-only variable.** The Functions runtime injects only `URL`, `SITE_NAME` and
+  `SITE_ID` — nothing declared in `netlify.toml` reaches a function either. Gating runtime behaviour on
+  `process.env.NETLIFY` therefore always takes the *local* branch in production. That is what made
+  `guideStore.blobsBacked()` write to the function's read-only disk and answer `store_unwritable` to
+  every guide publish. Detect Netlify Blobs by what `@netlify/blobs` itself reads:
+  `NETLIFY_BLOBS_CONTEXT`, or `globalThis.netlifyBlobsContext`.
+- **`NEXT_PUBLIC_*` is inlined at build time**, so what the site has is whatever was set in the
+  Netlify UI when it built — not what is in `web/.env.local`. `NEXT_PUBLIC_SUBGRAPH_URL` is currently
+  unset there, which is why the deployed BoneyCard shows no attribution history. `command grep` for the
+  value in a downloaded `_next/static` chunk to check what a build actually got.
