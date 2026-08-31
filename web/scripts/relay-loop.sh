@@ -23,9 +23,10 @@ INTERVAL="${1:-120}"
 # campaign:kpiIndex.
 #
 # Only the **gated** KPIs belong here. Relaying an ungated one is pointless: with `verifier == 0x0` the
-# campaign credits the reported figure as-is, so there is no ceiling to raise. Every KPI of the
-# 2026-08-29 two-campaign fixture (Venus, Sdy Labs) is ungated, so the list is empty and each cycle is
-# a no-op. It stays here so a gated KPI has one home the moment one is seeded.
+# campaign credits the reported figure as-is, so there is no ceiling to raise. Venus, Sdy Labs and
+# SuperBridge are ungated throughout and never belong here; Gyndore gates all three of its KPIs, so its
+# three entries are the whole list. The empty-list branch below stays for a fixture reseed, where a
+# stale address must be removed before the new one exists.
 #
 # Addresses change with every `DeployBoney` + reseed, and a stale one is silent: the relayer reports
 # against a dead campaign, credits nothing, and the gated KPI simply stays flat.
@@ -33,11 +34,17 @@ INTERVAL="${1:-120}"
 # Keep any KPI that watches the escrow token *out* of this list. Its `Transfer` events include things
 # that are not user actions — the referral's own self-transfers, tier payouts leaving the EscrowVault,
 # the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
-# observed ceiling, which unlocks the next tier, which pays out again.
-TARGETS=()
+# observed ceiling, which unlocks the next tier, which pays out again. Gyndore pays in GYND and no
+# Gyndore KPI watches GYND's `Transfer`, so its three are safe to list.
+TARGETS=(
+  # Gyndore Testnet, seeded 2026-08-31: swaps, GYND stakes, LP mints.
+  0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:0
+  0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:1
+  0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:2
+)
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
-  printf '[%s] no gated KPIs to relay — every KPI in this fixture is ungated.\n' "$(date -u +%H:%M:%S)"
+  printf '[%s] no gated KPIs to relay — none are listed in TARGETS.\n' "$(date -u +%H:%M:%S)"
   exit 0
 fi
 

@@ -49,6 +49,23 @@ const BASE_SEPOLIA: ContractLabels = {
   "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4": "Uniswap SwapRouter02",
   // Circle's test USDC. It answers `symbol()`, so this entry only saves a round trip.
   "0x036cbd53842c5426634e7929541ec2318f3dcf7e": "USDC",
+  // The five below come from `script/SeedGyndore.s.sol`. Gyndore is a Uniswap V3 fork, so its pool
+  // and position manager have the same reason to be named here as Uniswap's own: neither answers
+  // `name()`, and the fork's addresses are nobody's canonical ones.
+  // `SeedGyndore.POOL_GYND_CBBTC` — the pool carrying the `Swap` logs. The fee tier is part of the
+  // name because it identifies the pool: a pair and a tier together are what the factory keys on.
+  "0x7b47dac59075af44046795ba347ec872d5409263": "Gyndore GYND/cbBTC 1%",
+  // `SeedGyndore.SWAP_ROUTER`, which appears as `sender` on every routed swap — worth naming so a KPI
+  // mistakenly pointed at `topics[1]` shows whose address it is really crediting.
+  "0xc7dbf300b6aea3cfe1730f1c692c606b17b514a6": "Gyndore SwapRouter",
+  // `SeedGyndore.STAKING` — `GyndStaking`, which answers none of the three.
+  "0x5c0e023ce4a353e5cd9a43e28d2879cb9e876865": "Gyndore Staking",
+  // `SeedGyndore.POSITION_MANAGER`. It calls itself `UNI-V3-POS`, which names the fork it came from
+  // and not this deployment, so the entry is what distinguishes it from Uniswap's own manager.
+  "0x76998e42b789d81004f006402b6c62a8bdcafd5b": "Gyndore Positions",
+  // `SeedGyndore.GYND` — the escrow token, and the token KPI 1 pins. It answers `symbol()`; named
+  // here so the KPI's topic filter reads as a token rather than a padded word.
+  "0x0d442ec7bddb06b531dca3dd39abaff554170776": "GYND",
   [WETH_BASE_KEY]: "WETH",
 };
 
