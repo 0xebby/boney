@@ -1,23 +1,7 @@
 import Link from "next/link";
 
-import {
-  ETHOS_WEIGHT,
-  MAX_BONEY_SCORE,
-  MAX_ETHOS,
-  REACH_WEIGHT,
-  ethosLevel,
-  followersForReach,
-  reachFromFollowers,
-  scoreSplit,
-} from "@/lib/boneyscore";
-import {
-  PURE_REACH_CEILING,
-  PURE_TRUST_CEILING,
-  minEthosAtFullReach,
-  rankExamples,
-  rankOf,
-  ranksAscending,
-} from "@/lib/ranks";
+import {ETHOS_WEIGHT, ethosLevel, reachFromFollowers, scoreSplit} from "@/lib/boneyscore";
+import {PURE_REACH_CEILING, PURE_TRUST_CEILING, rankOf, ranksAscending} from "@/lib/ranks";
 import {Notice} from "@/components/ui/Notice";
 
 /**
@@ -89,8 +73,7 @@ export function DocsPage() {
         <p>
           Campaigns may set a minimum <Term>BoneyScore</Term>, which combines two attested signals:
           Ethos credibility, reflecting vouches and reviews from other people, and social reach.
-          They are weighted {ETHOS_WEIGHT}:{REACH_WEIGHT} — followers are purchasable, vouches are
-          not.
+          Credibility counts for the most — followers are purchasable, vouches are not.
         </p>
         <p>
           Verifying reads both figures and records them through the protocol&rsquo;s attestation
@@ -103,31 +86,19 @@ export function DocsPage() {
 
       <Section title="BoneyScore Ranks">
         <p className="text-ink">
-          BoneyScore = Ethos × {ETHOS_WEIGHT} + reach × {REACH_WEIGHT} — a whole number from 0 to{" "}
-          {MAX_BONEY_SCORE.toLocaleString("en-US")}.
+          BoneyScore is powered by the <Term>Ethos</Term> credibility score, read alongside social
+          reach.
         </p>
         <List
           items={[
-            [
-              "Ethos",
-              `0–${MAX_ETHOS.toLocaleString("en-US")}. Attested credibility: vouches and reviews from other people.`,
-            ],
-            [
-              "Reach",
-              `0–${MAX_ETHOS.toLocaleString("en-US")}. Follower count on a log scale — the ceiling takes about ${MAX_FOLLOWERS_MILLIONS} million followers.`,
-            ],
+            ["Ethos", "Attested credibility: vouches and reviews from other people."],
+            ["Reach", "Follower count, on a curve that flattens as an audience grows."],
           ]}
         />
         <p>
-          Every rank floor sits one point above {ETHOS_WEIGHT} × an Ethos band floor, so it clears
-          the score that credibility level reaches with no audience at all. The three columns after
-          the range are one threshold from three directions: the Ethos that reaches it with no
-          followers, the followers that reach it with no Ethos, and the Ethos still required once a
-          maximum audience has contributed everything it can. That last figure is what a gate
-          guarantees — a maximum audience is worth{" "}
-          {PURE_REACH_CEILING.toLocaleString("en-US")} points, which is{" "}
-          {(PURE_REACH_CEILING / ETHOS_WEIGHT).toLocaleString("en-US")} Ethos of credibility a
-          promoter never has to earn.
+          A rank is a band of the score, so read a badge as a statement about score rather than
+          about character: a large audience can carry modest credibility several bands up. The{" "}
+          <Term>reach-only</Term> ranks are the ones an account with no credibility at all can hold.
         </p>
 
         <RankTable />
@@ -137,26 +108,20 @@ export function DocsPage() {
         <p>
           Both accounts hold a claimed Ethos profile, so both scores are ones the protocol would
           issue. Figures were read from Ethos and X in August 2026 and will have moved since — they
-          show the shape of the arithmetic, not a live scoreboard.
+          illustrate rather than track.
         </p>
 
         <ScoreComparison />
 
         <p>
-          <Term>frankdegods</Term> has {COMPARISON_FACTS.followerMultiple}× the audience and scores{" "}
-          {COMPARISON_FACTS.scoreShortfallPct}% lower. The{" "}
-          {COMPARISON_FACTS.followerGap.toLocaleString("en-US")}-follower advantage is worth{" "}
-          {COMPARISON_FACTS.reachAdvantage.toLocaleString("en-US")} points, while the{" "}
-          {COMPARISON_FACTS.ethosGap.toLocaleString("en-US")}-point Ethos gap is worth{" "}
-          {COMPARISON_FACTS.trustAdvantage.toLocaleString("en-US")} — trust outweighs the audience
-          advantage {COMPARISON_FACTS.trustLeverage}×.
+          <Term>frankdegods</Term> has {COMPARISON_FACTS.followerMultiple}× the audience and still
+          scores lower. Vouches outweigh followers, which is the whole point of the gate.
         </p>
         <p>
-          The ranks are the caveat. Trust alone would place frankdegods in{" "}
-          <Term>{COMPARISON_FACTS.trustOnlyRank}</Term>; the audience carries the account{" "}
-          {COMPARISON_FACTS.bandsCarried} bands up, to <Term>{COMPARISON_FACTS.carriedRank}</Term>.
-          That is what the minimum-Ethos column is for, and why a gate meant to filter for trust
-          belongs above {PURE_REACH_CEILING.toLocaleString("en-US")}.
+          The ranks are the caveat. Credibility alone would place the account in{" "}
+          <Term>{COMPARISON_FACTS.trustOnlyRank}</Term>, a reach-only band; its audience carries it
+          up to <Term>{COMPARISON_FACTS.carriedRank}</Term>. Nothing is wrong with the score, but a
+          project reading that rank as exemplary standing has misread it.
         </p>
       </Section>
 
@@ -164,7 +129,7 @@ export function DocsPage() {
         <p>
           The gate is immutable once the campaign is created and cannot be lowered afterwards, so a
           number chosen carelessly is a campaign nobody can join. Two figures bracket the useful
-          range, and both fall out of the {ETHOS_WEIGHT}:{REACH_WEIGHT} weighting:
+          range:
         </p>
         <List
           items={[
@@ -187,10 +152,10 @@ export function DocsPage() {
           number.
         </p>
         <p>
-          One threshold cannot separate trust from audience. An untrusted account with a large
-          following and a neutral account with a small one land within a few hundred points of each
-          other. If credibility is the point, set the gate above{" "}
-          {PURE_REACH_CEILING.toLocaleString("en-US")} and read the composition alongside it.
+          One threshold cannot separate trust from audience: an untrusted account with a large
+          following and a neutral account with a small one can land at the same score. If
+          credibility is the point, set the gate above{" "}
+          {PURE_REACH_CEILING.toLocaleString("en-US")} — clear of every reach-only rank.
         </p>
         <p>
           Scores also expire. An attestation stops counting once it ages past its schema&rsquo;s
@@ -203,9 +168,9 @@ export function DocsPage() {
       <Section title="Referral Attribution">
         <p>
           Each promoter gets a <Term>boney link</Term> carrying the campaign address and their
-          promoter id. A <Term>referral</Term> — someone who arrives through that link — signs an
-          EIP-712 <Term>Touch</Term>: a typed message their wallet displays in full, stating that
-          they were referred by that promoter.
+          promoter id. A <Term>referral</Term> — someone who arrives through that link — signs a{" "}
+          <Term>Touch</Term>: a message their wallet displays in full, stating that they were
+          referred by that promoter.
         </p>
         <p>
           The chain accepts a touch only when the signature recovers to the referral&rsquo;s own
@@ -279,14 +244,6 @@ function Term({children}: {children: React.ReactNode}) {
 }
 
 /**
- * The audience the reach ceiling takes, in millions.
- *
- * Rounded rather than exact: the precise figure is 9,999,999, and "about 10 million" is what that
- * number means in a sentence. Derived so a change to the reach curve moves it.
- */
-const MAX_FOLLOWERS_MILLIONS = Math.round(followersForReach(MAX_ETHOS) / 1_000_000);
-
-/**
  * The rank whose floor is recommended as a default gate: reputable Ethos standing, no audience.
  *
  * Looked up by score rather than named, so the floor and the rank name in the prose both follow a
@@ -298,13 +255,13 @@ const DEFAULT_GATE_RANK = rankOf(ETHOS_WEIGHT * 1800 + 1);
  * Two attested accounts side by side, with every derived figure computed rather than transcribed.
  *
  * Only the four observed inputs are literals — the Ethos scores and follower counts read in August
- * 2026. Reach, the weighted subtotals, the total, and the rank all come from `boneyscore.ts` and
- * `ranks.ts`, so if a weight or a band moves, this table moves with it instead of quietly becoming
- * a lie in the one place a host is most likely to trust it.
+ * 2026. The score and the rank come from `boneyscore.ts` and `ranks.ts`, so if a weight or a band
+ * moves, this table moves with it instead of quietly becoming a lie in the one place a host is most
+ * likely to trust it.
  *
- * The pair was chosen for a specific reason: an account whose score is mostly trust against one
- * whose score is mostly audience, both with claimed profiles. A promoter refused for want of an
- * Ethos profile has no score to show, which is a different lesson and belongs in the section above.
+ * The pair is an account whose score is mostly credibility against one whose score is mostly
+ * audience, both with claimed profiles. A promoter refused for want of an Ethos profile has no score
+ * to show, which is a different lesson and belongs in the section above.
  */
 const COMPARISON: ReadonlyArray<{
   handle: string;
@@ -329,50 +286,29 @@ const COMPARISON: ReadonlyArray<{
 /**
  * Derived facts for the prose after the table.
  *
- * Computed from `COMPARISON` for the same reason the table is: the sentence "trust outweighs the
- * audience advantage 4.4×" is an arithmetic claim about the current weights, and a hardcoded 4.4
+ * Computed from `COMPARISON` for the same reason the table is: a hardcoded multiple or rank name
  * would survive a weight change as a falsehood sitting next to a table that had already corrected
- * itself. `bandsCarried` is counted along the ladder for the same reason — it is how far the
- * audience lifts the account, not a figure anyone should be trusted to keep up to date by hand.
+ * itself.
  */
 const COMPARISON_FACTS = (() => {
-  const [trusted, popular] = COMPARISON.map((c) =>
+  const [, popular] = COMPARISON.map((c) =>
     scoreSplit({ethos: c.ethos, reach: reachFromFollowers(c.followers)}),
   );
   const [trustedRaw, popularRaw] = COMPARISON;
 
-  const reachAdvantage = popular.reachPoints - trusted.reachPoints;
-  const trustAdvantage = trusted.ethosPoints - popular.ethosPoints;
-
-  const ladder = ranksAscending();
-  const rungOf = (score: number) => ladder.findIndex((r) => r.id === rankOf(score).id);
-
   return {
     followerMultiple: (popularRaw.followers / trustedRaw.followers).toFixed(1),
-    scoreShortfallPct: Math.round(((trusted.total - popular.total) / trusted.total) * 100),
-    followerGap: popularRaw.followers - trustedRaw.followers,
-    ethosGap: trustedRaw.ethos - popularRaw.ethos,
-    reachAdvantage,
-    trustAdvantage,
-    trustLeverage: (trustAdvantage / reachAdvantage).toFixed(1),
     trustOnlyRank: rankOf(popular.ethosPoints).name,
     carriedRank: rankOf(popular.total).name,
-    bandsCarried: rungOf(popular.total) - rungOf(popular.ethosPoints),
   };
 })();
 
 function ScoreComparison() {
   const columns = COMPARISON.map((account) => {
-    const reach = reachFromFollowers(account.followers);
-    const parts = {ethos: account.ethos, reach};
-    const {total, ethosPoints, reachPoints, trustPct} = scoreSplit(parts);
+    const {total} = scoreSplit({ethos: account.ethos, reach: reachFromFollowers(account.followers)});
     return {
       ...account,
-      reach,
       total,
-      ethosPoints,
-      reachPoints,
-      trustPct,
       level: ethosLevel(account.ethos),
       rank: rankOf(total),
     };
@@ -381,17 +317,7 @@ function ScoreComparison() {
   const rows: ReadonlyArray<{label: string; render: (c: (typeof columns)[number]) => string}> = [
     {label: "Ethos score", render: (c) => `${c.ethos.toLocaleString("en-US")} (${c.level})`},
     {label: "Followers", render: (c) => c.followers.toLocaleString("en-US")},
-    {label: "Reach (normalised)", render: (c) => c.reach.toLocaleString("en-US")},
-    {
-      label: `Trust points (×${ETHOS_WEIGHT})`,
-      render: (c) => c.ethosPoints.toLocaleString("en-US"),
-    },
-    {
-      label: `Reach points (×${REACH_WEIGHT})`,
-      render: (c) => c.reachPoints.toLocaleString("en-US"),
-    },
     {label: "BoneyScore", render: (c) => c.total.toLocaleString("en-US")},
-    {label: "Trust share", render: (c) => `${c.trustPct}%`},
     {label: "Rank", render: (c) => c.rank.name},
   ];
 
@@ -452,9 +378,8 @@ function ScoreComparison() {
  * A hand-written table would drift the moment a boundary moves, and this one is the reference a
  * campaign owner sets an immutable gate from. Highest rank last so it reads bottom-up as a ladder.
  *
- * The `reachOnly` marker and the `min Ethos at full reach` column are the point of the whole table.
- * The first flags the ranks a promoter reaches on follower count alone; the second says how little
- * credibility every other rank truly requires, which is always less than its name suggests.
+ * The `reachOnly` marker flags the ranks a promoter reaches on follower count alone, which is the
+ * one thing a score range does not say about the rank it belongs to.
  */
 function RankTable() {
   const rows = ranksAscending().reverse();
@@ -463,8 +388,7 @@ function RankTable() {
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-[13px]">
         <caption className="sr-only">
-          BoneyScore ranks, their score ranges, the Ethos or follower count that reaches each
-          threshold, and the minimum Ethos once a maximum audience is counted
+          BoneyScore ranks and the score range each one covers
         </caption>
         <thead>
           <tr className="border-b border-hairline">
@@ -474,78 +398,33 @@ function RankTable() {
             <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-ink-muted">
               BoneyScore
             </th>
-            {/*
-              The two "alone" columns are worked examples of how a threshold is reached; the ladder
-              itself and the minimum-Ethos figure are the reference. On a phone the examples yield so
-              the reference stays readable without a sideways swipe.
-            */}
-            <th
-              scope="col"
-              className="hidden px-2 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
-            >
-              Ethos alone
-            </th>
-            <th
-              scope="col"
-              className="hidden px-2 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
-            >
-              Followers alone
-            </th>
-            <th scope="col" className="px-2 py-2 text-right text-xs font-medium text-ink-muted">
-              Min Ethos at full reach
-            </th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((rank) => {
-            const {ethosAlone, followersAlone} = rankExamples(rank);
-            const minEthos = minEthosAtFullReach(rank);
-            return (
-              <tr key={rank.id} className="border-b border-hairline align-top last:border-0">
-                <td className="px-2 py-2.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-ink">{rank.name}</span>
-                    {rank.reachOnly ? (
-                      <span
-                        title="Reachable on follower count alone — no Ethos credibility required"
-                        className="rounded border border-brand-dim/50 px-1 text-[10px] text-brand"
-                      >
-                        reach-only
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="mt-0.5 max-w-md text-xs leading-relaxed text-ink-muted">
-                    {rank.blurb}
-                  </p>
-                </td>
-                <td className="tnum whitespace-nowrap px-2 py-2.5 text-right text-ink-secondary">
-                  {rank.min.toLocaleString("en-US")}
-                  {rank.max > rank.min ? `–${rank.max.toLocaleString("en-US")}` : ""}
-                </td>
-                <td className="tnum hidden px-2 py-2.5 text-right text-ink-secondary md:table-cell">
-                  {rank.min === 0 ? "—" : ethosAlone.toLocaleString("en-US")}
-                </td>
-                <td className="tnum hidden px-2 py-2.5 text-right text-ink-secondary md:table-cell">
-                  {rank.min === 0 ? (
-                    "—"
-                  ) : followersAlone === null ? (
-                    <span className="text-ink-muted">impossible</span>
-                  ) : (
-                    followersAlone.toLocaleString("en-US")
-                  )}
-                </td>
-                <td className="tnum px-2 py-2.5 text-right text-ink-secondary">
-                  {rank.min === 0 ? (
-                    "—"
-                  ) : minEthos === 0 ? (
-                    <span className="text-brand">none</span>
-                  ) : (
-                    minEthos.toLocaleString("en-US")
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+          {rows.map((rank) => (
+            <tr key={rank.id} className="border-b border-hairline align-top last:border-0">
+              <td className="px-2 py-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium text-ink">{rank.name}</span>
+                  {rank.reachOnly ? (
+                    <span
+                      title="Reachable on follower count alone — no Ethos credibility required"
+                      className="rounded border border-brand-dim/50 px-1 text-[10px] text-brand"
+                    >
+                      reach-only
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-0.5 max-w-md text-xs leading-relaxed text-ink-muted">
+                  {rank.blurb}
+                </p>
+              </td>
+              <td className="tnum whitespace-nowrap px-2 py-2.5 text-right text-ink-secondary">
+                {rank.min.toLocaleString("en-US")}
+                {rank.max > rank.min ? `–${rank.max.toLocaleString("en-US")}` : ""}
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

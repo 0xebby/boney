@@ -10,8 +10,8 @@ import type {CampaignGuide} from "./campaignGuide";
  *
  * Every test redirects `BONEY_GUIDE_STORE` first: the default path is `.data/campaign-guides.json`
  * beside the running app, and a test that wrote there would change which guides the dev server serves.
- * That override also pins the backend — it wins over `NETLIFY`, which is what keeps these tests on the
- * filesystem when they run in CI on Netlify.
+ * That override also pins the backend — it wins over the Netlify Blobs context, which is what keeps
+ * these tests on the filesystem when they run in CI on Netlify.
  *
  * The cases worth pinning are the ones where being wrong is invisible: a stored guide surviving a
  * re-read under a differently-cased address (otherwise a project publishes and the page shows the
@@ -34,9 +34,17 @@ const GUIDE: CampaignGuide = {
   kpis: [{action: "Bridge at least 0.01 ETH", kpiIndex: 0, url: "https://example.org/bridge"}],
 };
 
+/**
+ * A Blobs context that parses but names no site or token, which is what `getStore` refuses.
+ *
+ * Enough to select the Blobs backend without reaching one: the point of the tests below is which
+ * backend gets picked, not whether a real store answers.
+ */
+const BLOBS_CONTEXT = Buffer.from("{}").toString("base64");
+
 const originalEnv = {
   BONEY_GUIDE_STORE: process.env.BONEY_GUIDE_STORE,
-  NETLIFY: process.env.NETLIFY,
+  NETLIFY_BLOBS_CONTEXT: process.env.NETLIFY_BLOBS_CONTEXT,
 };
 
 let dir: string;
@@ -46,7 +54,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "boney-guide-store-"));
   storeFile = join(dir, "campaign-guides.json");
   process.env.BONEY_GUIDE_STORE = storeFile;
-  delete process.env.NETLIFY;
+  delete process.env.NETLIFY_BLOBS_CONTEXT;
 });
 
 afterEach(() => {
@@ -135,14 +143,19 @@ describe("the file backend", () => {
 });
 
 describe("backend selection", () => {
-  it("keeps using the file when NETLIFY is set but a store path is named", async () => {
-    process.env.NETLIFY = "true";
+  /*
+    The Blobs context is the signal, not `NETLIFY`. `NETLIFY` is a build variable — Netlify's
+    serverless runtime provides only `URL`, `SITE_NAME` and `SITE_ID` — so gating on it put every
+    deployed write on the function's read-only disk and answered `store_unwritable` to the project.
+  */
+  it("keeps using the file when a Blobs context is present but a store path is named", async () => {
+    process.env.NETLIFY_BLOBS_CONTEXT = BLOBS_CONTEXT;
     expect(await writeGuide(CHAIN, CAMPAIGN, GUIDE)).toBe(true);
     expect(await readGuide(CHAIN, CAMPAIGN)).toEqual(GUIDE);
   });
 
   it("reports unwritable rather than throwing when Blobs has no credentials", async () => {
-    process.env.NETLIFY = "true";
+    process.env.NETLIFY_BLOBS_CONTEXT = BLOBS_CONTEXT;
     delete process.env.BONEY_GUIDE_STORE;
     expect(await readGuide(CHAIN, CAMPAIGN)).toBeNull();
     expect(await writeGuide(CHAIN, CAMPAIGN, GUIDE)).toBe(false);
