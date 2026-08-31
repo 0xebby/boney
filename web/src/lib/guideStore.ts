@@ -24,9 +24,13 @@ import {sanitizeGuide, isEmptyGuide, type CampaignGuide} from "./campaignGuide";
  * Both hold the same `Store` object under one key, so the local file can be pasted into the blob (or
  * the reverse) with no transformation.
  *
- * Reads never throw. A missing file, an empty store and an outage all mean "nothing stored", which
- * lets the catalog respond. A campaign page failing because a convenience store was absent would be a
- * worse trade than a page that shows one section fewer.
+ * Reads never throw. A missing store and an unusable one both mean "nothing stored", which lets the
+ * catalog respond — a campaign page failing because a convenience store was absent would be a worse
+ * trade than a page that shows one section fewer.
+ *
+ * A read that *failed* is held apart from a store that is empty, because `writeGuide` merges into what
+ * it read. Treating an outage as `{}` would persist a store holding only the guide being written, drop
+ * every other one, and report success doing it.
  *
  * ## Consistency
  *
@@ -84,21 +88,48 @@ function blobStore(): ReturnType<typeof getStore> {
 }
 
 /**
+ * A read attempt: the store, or the fact that it could not be read.
+ *
+ * Absent and unreadable are different answers. Absent is the ordinary first-run state and a write
+ * proceeds from `{}`; unreadable is a state a write must not merge into.
+ */
+type ReadResult = {ok: true; store: Store} | {ok: false};
+
+/** Whether a filesystem error means the store has simply never been written. */
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
+}
+
+/**
  * Reads the whole store from whichever backend this deployment uses.
  *
- * @returns The parsed store, or an empty one when it is absent, unreadable or not an object.
+ * Never throws. A store that has never been written reads as an empty one; anything else that goes
+ * wrong — an outage, a truncated file, a JSON value that is not an object — reports failure, so the
+ * write path can refuse rather than overwrite what it could not read.
+ *
+ * @returns The parsed store, an empty one when it is absent, or a failure.
  */
-async function readStore(): Promise<Store> {
+async function readStore(): Promise<ReadResult> {
+  let parsed: unknown;
+
   try {
-    // A hand-edited file and a hand-written blob can both hold anything; anything that is not an
-    // object is treated as empty rather than crashing every campaign page until someone notices.
-    const parsed = blobsBacked()
-      ? await blobStore().get(BLOB_KEY, {type: "json"})
-      : JSON.parse(readFileSync(storePath(), "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Store) : {};
-  } catch {
-    return {};
+    if (blobsBacked()) {
+      // Netlify Blobs answers `null` for a key that was never set, and throws for everything else.
+      const blob = await blobStore().get(BLOB_KEY, {type: "json"});
+      if (blob === null) return {ok: true, store: {}};
+      parsed = blob;
+    } else {
+      parsed = JSON.parse(readFileSync(storePath(), "utf8"));
+    }
+  } catch (error) {
+    return isMissing(error) ? {ok: true, store: {}} : {ok: false};
   }
+
+  // A hand-edited file and a hand-written blob can both hold anything. Something that parsed but is
+  // not a store is reported as unreadable rather than silently replaced by the next write.
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {ok: false};
+
+  return {ok: true, store: parsed as Store};
 }
 
 /**
@@ -113,7 +144,10 @@ async function readStore(): Promise<Store> {
  * @returns The sanitized guide, or `null` when nothing usable is stored.
  */
 export async function readGuide(chainId: number, campaign: string): Promise<CampaignGuide | null> {
-  const stored = (await readStore())[String(chainId)]?.[campaign.toLowerCase()];
+  const read = await readStore();
+  if (!read.ok) return null;
+
+  const stored = read.store[String(chainId)]?.[campaign.toLowerCase()];
   if (!stored) return null;
 
   const guide = sanitizeGuide(stored);
@@ -127,6 +161,9 @@ export async function readGuide(chainId: number, campaign: string): Promise<Camp
  * route reports to the project along with the JSON to commit — not an error to surface as a 500. With
  * Blobs in place that is no longer Netlify's steady state, but it still covers a read-only host, a
  * missing store and a blob write that is rejected.
+ *
+ * A store that could not be read is refused rather than merged into. This writes back the whole store,
+ * so proceeding from a failed read would drop every guide it did not see.
  *
  * An empty guide is stored as a deletion. Otherwise a project that cleared every field would leave the
  * old copy in place with no way to withdraw it, which for a set of outbound links is the wrong default.
@@ -142,7 +179,10 @@ export async function writeGuide(
   guide: CampaignGuide,
 ): Promise<boolean> {
   const clean = sanitizeGuide(guide);
-  const store = await readStore();
+  const read = await readStore();
+  if (!read.ok) return false;
+
+  const store = read.store;
   const key = String(chainId);
   const address = campaign.toLowerCase();
 
