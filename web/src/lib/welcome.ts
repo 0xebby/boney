@@ -4,8 +4,7 @@
  * Pure: what makes the dialog open, and which of the marketplace's own numbers it leads with.
  */
 
-import type {TokenMeta} from "@/lib/token";
-import {formatTokenAmount} from "@/lib/format";
+import {formatUsd} from "@/lib/format";
 
 /** Storage key holding the welcome version a visitor has dismissed. */
 export const WELCOME_SEEN_KEY = "boney:welcome-seen";
@@ -40,28 +39,25 @@ export type WelcomeFigure = {label: string; value: string; unit: string};
 /**
  * The marketplace's headline figure.
  *
- * Escrowed value leads when every visible campaign is denominated in one unit, because a total
- * across unlike tokens is not a number. Otherwise the count of live campaigns stands in.
+ * Escrowed value leads whenever anything is escrowed; otherwise the count of live campaigns
+ * stands in.
  *
- * @param pool Total reward pool across the visible campaigns, in base units.
- * @param token The single unit those campaigns escrow, or undefined when they use several.
+ * @param pool Total reward pool across the visible campaigns, in dollars.
  * @param activeCount How many of them are active.
  * @returns The label, value and unit to render.
  */
 export function welcomeFigure({
   pool,
-  token,
   activeCount,
 }: {
-  pool: bigint;
-  token?: TokenMeta;
+  pool: number;
   activeCount: number;
 }): WelcomeFigure {
-  if (token && pool > BigInt(0)) {
+  if (pool > 0) {
     return {
       label: "Escrowed right now",
-      value: formatTokenAmount(pool, token.decimals, {maxFractionDigits: 0}),
-      unit: `${token.symbol} in reward pools`,
+      value: formatUsd(pool),
+      unit: "in reward pools",
     };
   }
 

@@ -5,7 +5,8 @@ import Link from "next/link";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
 import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
 import {useCampaignGuides} from "@/hooks/useCampaignGuides";
-import {denominations, type TokenMeta} from "@/lib/token";
+import {type TokenMeta} from "@/lib/token";
+import {poolValue} from "@/lib/poolValue";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
@@ -28,7 +29,7 @@ import {utilization} from "@/lib/campaign";
 import {summarizeKinds} from "@/lib/kpiSummary";
 import {projectName, hasProjectName} from "@/lib/projects";
 import type {ResolvedGuide} from "@/lib/campaignGuide";
-import {formatTokenAmount, formatPercent, formatTimeUntil} from "@/lib/format";
+import {formatTokenAmount, formatPercent, formatTimeUntil, formatUsd} from "@/lib/format";
 import type {CampaignView, KpiSpec} from "@/lib/types";
 
 /**
@@ -97,29 +98,21 @@ export function CampaignsPage() {
   );
   const summary = useMemo(() => summarize(visible), [visible]);
 
-  // The summary tiles read in whatever token the campaigns escrow. Mixed tokens would make a
-  // single total meaningless, so the tiles show a count of units instead in that case — see
-  // `denominations` for what makes two token contracts one unit.
+  // Reward pools are stablecoin-denominated, so the summary tiles read in dollars and campaigns
+  // escrowing different tokens still share one total — see `poolValue`.
   //
-  // Derived from `visible`, not `campaigns`, because `summary` is: filtering down to a
-  // single-token slice should denominate the totals that filter produced, rather than leave the
-  // row reporting a mix the table below no longer shows.
-  const units = useMemo(() => denominations(visible, tokens), [visible, tokens]);
-  const singleToken = units.length === 1 ? units[0] : undefined;
-
-  // Only reached with zero or 2+ units, so there is no singular case to spell. Nothing visible
-  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
-  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
+  // Derived from `visible`, not `campaigns`, because `summary` is: filtering the list should
+  // retotal what the filter produced rather than leave the row reporting rows it no longer shows.
+  const value = useMemo(() => poolValue(visible, tokens), [visible, tokens]);
 
   // The welcome dialog's headline number, from the same totals the tiles below read.
   const welcome = useMemo(
     () =>
       welcomeFigure({
-        pool: summary.totalPool,
-        token: singleToken,
+        pool: value.pool,
         activeCount: summary.activeCount,
       }),
-    [summary.totalPool, summary.activeCount, singleToken],
+    [value.pool, summary.activeCount],
   );
 
   const columns = useMemo(
@@ -187,22 +180,12 @@ export function CampaignsPage() {
           />
           <StatTile
             label="Total Reward Pool"
-            value={
-              singleToken
-                ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
-                : mixedLabel
-            }
-            unit={singleToken?.symbol}
+            value={formatUsd(value.pool, {compact: true})}
             //accent="var(--series-1)"
           />
           <StatTile
             label="Rewards Earned"
-            value={
-              singleToken
-                ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
-                : "—"
-            }
-            unit={singleToken?.symbol}
+            value={formatUsd(value.paidOut, {compact: true})}
             //accent="var(--series-3)"
           />
           {/*
@@ -210,11 +193,7 @@ export function CampaignsPage() {
           */}
           <StatTile
             label="Pool Utilization"
-            value={
-              singleToken
-                ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
-                : "—"
-            }
+            value={formatPercent(value.paidOut, value.pool)}
             //hint="across all campaigns"
           />
         </StatRow>

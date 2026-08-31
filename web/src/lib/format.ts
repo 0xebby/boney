@@ -89,6 +89,22 @@ export function toAmountInput(raw: bigint, decimals: number): string {
   return `${negative ? "-" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
 }
 
+/**
+ * Dollar figure: 9,500 → "$9,500"; 34,500 → "$34.5K" when compact.
+ *
+ * @param value Amount in dollars.
+ * @param opts.compact Abbreviate at or above 10,000, as `compactNumber` does.
+ * @returns The formatted figure, or "—" when the value is not finite.
+ */
+export function formatUsd(value: number, opts: {compact?: boolean} = {}): string {
+  if (!Number.isFinite(value)) return "—";
+
+  // Rounded to whole dollars: cents are noise at the size these are displayed at.
+  const whole = Math.round(value);
+
+  return `$${opts.compact ? compactNumber(whole) : whole.toLocaleString("en-US")}`;
+}
+
 /** Percentage with one decimal: 0.4567 → "45.7%". Guards divide-by-zero. */
 export function formatPercent(value: number, total: number): string {
   if (total === 0) return "0%";

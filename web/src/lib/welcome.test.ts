@@ -6,9 +6,6 @@ import {
   type WelcomeFigure,
 } from "@/lib/welcome";
 
-const BUSD = {symbol: "bUSD", decimals: 18};
-const units = (whole: number) => BigInt(whole) * BigInt(10) ** BigInt(18);
-
 describe("shouldOpenWelcome", () => {
   it("opens for a visitor who has stored nothing", () => {
     expect(shouldOpenWelcome({stored: null, search: ""})).toBe(true);
@@ -35,30 +32,25 @@ describe("shouldOpenWelcome", () => {
 });
 
 describe("welcomeFigure", () => {
-  it("leads with the escrowed total when the campaigns share one unit", () => {
-    expect(welcomeFigure({pool: units(12_500), token: BUSD, activeCount: 2})).toEqual({
+  it("leads with the escrowed total in dollars", () => {
+    expect(welcomeFigure({pool: 12_500, activeCount: 2})).toEqual({
       label: "Escrowed right now",
-      value: "12,500",
-      unit: "bUSD in reward pools",
+      value: "$12,500",
+      unit: "in reward pools",
     } satisfies WelcomeFigure);
   });
 
-  it("drops the fraction rather than showing cents at display size", () => {
-    expect(welcomeFigure({pool: units(1_000) + BigInt(4e17), token: BUSD, activeCount: 1}).value).toBe(
-      "1,000",
-    );
+  it("totals campaigns escrowing different tokens into one figure", () => {
+    // 24,500 bUSD across the fixture campaigns plus Gyndore's 10,000 GYND.
+    expect(welcomeFigure({pool: 34_500, activeCount: 4}).value).toBe("$34,500");
   });
 
-  it("falls back to the campaign count across mixed units", () => {
-    expect(welcomeFigure({pool: units(12_500), activeCount: 3})).toEqual({
-      label: "Live right now",
-      value: "3",
-      unit: "campaigns paying for results",
-    } satisfies WelcomeFigure);
+  it("drops the cents rather than showing them at display size", () => {
+    expect(welcomeFigure({pool: 1_000.4, activeCount: 1}).value).toBe("$1,000");
   });
 
   it("falls back when nothing is escrowed, and reads singular at one campaign", () => {
-    expect(welcomeFigure({pool: BigInt(0), token: BUSD, activeCount: 1})).toEqual({
+    expect(welcomeFigure({pool: 0, activeCount: 1})).toEqual({
       label: "Live right now",
       value: "1",
       unit: "campaign paying for results",
@@ -66,7 +58,7 @@ describe("welcomeFigure", () => {
   });
 
   it("says nothing is live rather than showing a dash", () => {
-    expect(welcomeFigure({pool: BigInt(0), activeCount: 0})).toEqual({
+    expect(welcomeFigure({pool: 0, activeCount: 0})).toEqual({
       label: "Live right now",
       value: "0",
       unit: "campaigns paying for results",

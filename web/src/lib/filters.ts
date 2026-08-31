@@ -83,7 +83,12 @@ export function filterCampaigns(
   });
 }
 
-/** Aggregates for the summary stat row, computed over whatever slice is currently shown. */
+/**
+ * Aggregates for the summary stat row, computed over whatever slice is currently shown.
+ *
+ * The token totals are raw base units, valid only within one token. Dollar figures across a mixed
+ * list come from `poolValue`, which reads each campaign at its own token's decimals.
+ */
 export type CampaignSummary = {
   count: number;
   activeCount: number;
