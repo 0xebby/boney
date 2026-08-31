@@ -4,7 +4,8 @@ import {useMemo} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
 import {useCampaigns} from "@/hooks/useCampaigns";
-import {denominations, type TokenMeta} from "@/lib/token";
+import {type TokenMeta} from "@/lib/token";
+import {poolValue} from "@/lib/poolValue";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
@@ -15,7 +16,13 @@ import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {ReferredCampaigns} from "@/components/ReferredCampaigns";
 import {utilization} from "@/lib/campaign";
 import {projectName, hasProjectName} from "@/lib/projects";
-import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
+import {
+  formatTokenAmount,
+  formatPercent,
+  formatTimeUntil,
+  formatUsd,
+  shortAddress,
+} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
 /**
@@ -40,25 +47,14 @@ export function MyCampaignsPage() {
     return campaigns.filter((c) => c.project.toLowerCase() === address.toLowerCase());
   }, [campaigns, address]);
 
-  const totals = useMemo(() => {
-    return mine.reduce(
-      (acc, c) => ({
-        pool: acc.pool + c.rewardPool,
-        paidOut: acc.paidOut + c.paidOut,
-        active: acc.active + (c.status === "Active" ? 1 : 0),
-      }),
-      {pool: BigInt(0), paidOut: BigInt(0), active: 0},
-    );
-  }, [mine]);
+  const activeCount = useMemo(
+    () => mine.filter((c) => c.status === "Active").length,
+    [mine],
+  );
 
-  // Mixed-token totals do not add up to anything meaningful, so the tiles fall back to a count
-  // of units — see `denominations` for what makes two token contracts one unit.
-  const units = useMemo(() => denominations(mine, tokens), [mine, tokens]);
-  const singleToken = units.length === 1 ? units[0] : undefined;
-
-  // Only reached with zero or 2+ units, so there is no singular case to spell. No campaigns
-  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
-  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
+  // Reward pools are stablecoin-denominated, so the tiles read in dollars and campaigns escrowing
+  // different tokens still share one total — see `poolValue`.
+  const value = useMemo(() => poolValue(mine, tokens), [mine, tokens]);
 
   const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
 
@@ -95,37 +91,21 @@ export function MyCampaignsPage() {
         <StatTile
           label="Your campaigns"
           value={mine.length.toLocaleString("en-US")}
-          hint={`${totals.active} active`}
+          hint={`${activeCount} active`}
         />
         <StatTile
           label="Total escrowed"
-          value={
-            singleToken
-              ? formatTokenAmount(totals.pool, singleToken.decimals, {compact: true})
-              : mixedLabel
-          }
-          unit={singleToken?.symbol}
+          value={formatUsd(value.pool, {compact: true})}
           //accent="var(--series-1)"
         />
         <StatTile
           label="Paid to promoters"
-          value={
-            singleToken
-              ? formatTokenAmount(totals.paidOut, singleToken.decimals, {compact: true})
-              : "—"
-          }
-          unit={singleToken?.symbol}
+          value={formatUsd(value.paidOut, {compact: true})}
           //accent="var(--series-3)"
         />
-        {/*
-          Gated on a single unit like the two tiles beside it: the percentage looks unitless, but
-          it divides one sum of token amounts by another, so a mixed list makes it as meaningless
-          as the totals above — and quieter about it, since a bare "15.7%" gives no hint that two
-          different tokens went into it.
-        */}
         <StatTile
           label="Pool utilization"
-          value={singleToken ? formatPercent(Number(totals.paidOut), Number(totals.pool)) : "—"}
+          value={formatPercent(value.paidOut, value.pool)}
           hint="across your campaigns"
         />
       </StatRow>
