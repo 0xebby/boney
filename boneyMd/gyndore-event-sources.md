@@ -87,6 +87,71 @@ because the sampled `tokenId` (`0x21A85`) is small enough to have zero high byte
 20-byte address. A large `tokenId` would fail the same test. The probe's `ok` is evidence, not proof —
 read the event's own parameter types before trusting an actor topic.
 
+## The Boneyard listing
+
+`script/SeedGyndore.s.sol` creates one campaign, **Gyndore**, escrowed in **GYND** rather than the mock
+bUSD every other fixture campaign uses. Open to anyone (`minReputation: 0`), 30-day duration and
+attribution window, three KPIs, all three gated through `GuardedKpiVerifier`.
+
+| # | Kind | Action | Source | actor | amount | filter | Tiers |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | `Swap` | Swap on GYND/cbBTC | pool `0x7B47daC5…9263` | T2 | `count` | T1 = router | 5 / 25 / 100 |
+| 1 | `Stake` | Stake GYND | staking `0x5c0E023C…6865` | T1 | `count` | T2 = GYND | 3 / 15 / 50 |
+| 2 | `Mint` | Provide liquidity | NFPM `0x76998e42…fD5b` | T2 | `count` | T1 = `0x0` | 1 / 5 / 20 |
+
+Rungs pay 1% / 2% / 4% of the pool. Re-probed on **2026-08-31**: 3739/3739, 4106/4106 and 4608/4608
+matching logs respectively — all three sources are live and busy.
+
+The faucet is deliberately not a KPI. `AssetsMinted` probes `warn` (idle), and a faucet claim is one
+click that demonstrates no product usage.
+
+### KPI 1 counts instead of summing, unlike the table above
+
+The `Stake GYND` row above reads `dataWord0 / 1e18`. The listing uses `count`, because **GYND is the
+reward**. A volume reading on the escrow token makes the payout an input to the metric that funds it: a
+promoter routes their tier reward to a wallet holding a touch attributed to them, stakes it, and buys
+the next threshold. The 2026-08-31 probe read **231.99 GYND** off the last `Staked` log — against a
+250 GYND pool, one stake of that size would cross every rung on the ladder.
+
+Count mode does not make this farm-proof; on a testnet the input to every KPI is free, so repetition
+still farms. What it removes is the reward → progress → larger reward channel. The bound that remains is
+that tiers are one-time threshold crossings against a finite pool.
+
+The GYND filter on topic 2 is kept regardless, so the KPI reads Gyndore's own token and not bGYND.
+
+### What the guard sees
+
+`EventMetricKpiVerifier.KpiConfig` has no topic-filter field, so the relayer's ceiling is observed
+**unfiltered** while `KpiSpec.params` reads filtered. The ceiling therefore sits at or above the claim,
+which is the direction the guard tolerates — an adapter may discount, never inflate. In practice the two
+coincide: every recent log on all three sources matched its filter.
+
+`userParamIndex` is 0-based **declaration** order, not topic index — 1, 0 and 1 for the three KPIs
+above. All three are `COUNT`, so `valueParamIndex` is ignored, which is what keeps the swap's signed
+`int256` amounts away from `validateParamIndexes`.
+
+### The guide, ready to paste
+
+`campaignGuide.CATALOG` is keyed by campaign address, so this entry can only be added once the seed has
+been broadcast. Per that file's own rule it carries prose and a `siteUrl`, and **no per-KPI `url`** —
+deep links into Gyndore's app cannot be verified from this repo, and a guide URL is an outbound link a
+referral was invited to click.
+
+```ts
+// id N — "Gyndore". `SeedGyndore`: swap count, GYND stake count, LP positions minted.
+"0x…": {
+  summary:
+    "Trade, stake and provide liquidity on Gyndore's Base Sepolia testnet — a Uniswap V3 fork " +
+    "with its own staking and bonding. Rewards are paid in GYND, the token the campaign is about.",
+  siteUrl: "https://testnet.gyndore.com/",
+  kpis: [
+    {action: "Swap through the GYND/cbBTC pool. One unit per swap you receive.", kpiIndex: 0},
+    {action: "Stake GYND. One unit per stake, whatever the size.", kpiIndex: 1},
+    {action: "Open a liquidity position. One unit per position minted.", kpiIndex: 2},
+  ],
+},
+```
+
 ## Encoded `KpiSpec.params`
 
 The create form builds these from the KPI editor — this appendix exists so a value can be checked or
