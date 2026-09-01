@@ -29,6 +29,7 @@ testing.md
 # be staged. Drop the spec/ rule when the spec is ready to publish.
 boneyMd/findings.md
 boneyMd/spec/
+boneyMd
 
 # One-off HTML explainers written to the repo root while working something out. The version of any
 # of this that ships is prose in boneyMd/ or a page in the app.

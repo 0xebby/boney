@@ -317,7 +317,7 @@ function PromoterTable({
                 className="hidden px-3 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
               >
                 Trust / Reach
-                <span className="ml-1 font-normal text-ink-muted/70">now</span>
+                <span className="sm-1 font-normal text-ink-muted/70">now</span>
               </th>
               <th
                 scope="col"
@@ -449,7 +449,7 @@ function VisitLink({campaign, promoterId}: {campaign: `0x${string}`; promoterId:
       href={`/r?${params.toString()}`}
       className="rounded border border-hairline-strong px-2 py-1 text-xs font-medium text-ink transition-colors hover:bg-surface-hover"
     >
-      Visit
+      attribute to promoter
     </Link>
   );
 }
