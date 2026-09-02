@@ -81,6 +81,44 @@ export function buildAttributionWindows(
 }
 
 /**
+ * Folds `extra` windows into `base`, keeping every distinct spell from both.
+ *
+ * A window `base` already carries — same touch block and promoter for the same referral — is not
+ * repeated.
+ *
+ * @param base Windows from the primary source.
+ * @param extra Windows to add wherever `base` does not already carry them.
+ * @returns A new map holding both sets, per referral oldest first.
+ */
+export function mergeAttributionWindows(
+  base: AttributionWindows,
+  extra: AttributionWindows,
+): Map<string, AttributionWindow[]> {
+  const out = new Map<string, AttributionWindow[]>();
+  for (const [key, list] of base) out.set(key, list.slice());
+
+  for (const [key, list] of extra) {
+    const merged = out.get(key) ?? [];
+    const seen = new Set(merged.map((w) => `${w.fromBlock}:${w.promoterId.toLowerCase()}`));
+
+    for (const window of list) {
+      const id = `${window.fromBlock}:${window.promoterId.toLowerCase()}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      merged.push(window);
+    }
+
+    out.set(key, merged);
+  }
+
+  for (const list of out.values()) {
+    list.sort((a, b) => (a.fromBlock === b.fromBlock ? 0 : a.fromBlock < b.fromBlock ? -1 : 1));
+  }
+
+  return out;
+}
+
+/**
  * Lowest block whose activity any of these windows can credit.
  *
  * A window covers actions strictly after the block its touch landed in, so nothing at or before the

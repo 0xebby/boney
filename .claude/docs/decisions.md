@@ -579,6 +579,44 @@ by `Campaign.join`, so the same wallet holds a different id on each campaign it 
 
 ---
 
+## `web/src/hooks/useCampaignTouches.ts`
+
+### The report panel reads two sources at once, because neither answers the whole question
+
+`ReportPanel` disabled every promoter in its KOL dropdown once a campaign was about a day old. The
+touch scan was log-only, so `planWindows`' ~45,600-block floor passed the campaign's touches,
+`buildKolTargets` saw no referrals, and each option rendered `no attribution touch: revert with
+NoAttribution` — for touches `touchOf` still returns and `reportUserAction` would still accept.
+Measured on 2026-09-02: 29 of the 30 touches on the Base Sepolia fixture were live with 27–29 days
+left and below the floor, and three of the four campaigns showed none at all.
+
+The list of live attributions now comes from the subgraph, the same `Touch` entity and the same
+fall-through rule as `useCampaignAttributions`. The log scan still runs, because the two sources
+answer different questions and only one of them can answer each:
+
+- `touches` needs the touch the registry currently holds per referral. `Touch` is keyed
+  `<campaign>-<user>` and overwritten by a newer `signedAt`, so a subgraph row *is* that answer, with
+  no block floor.
+- `windows` needs the superseded touches as well, since credit follows whoever held the referral at
+  each action's own block. The subgraph overwrote those; only the logs still carry them.
+
+`mergeAttributionWindows` therefore folds the subgraph's live touch under whatever history the scan
+reached, deduplicated on `(fromBlock, promoterId)`. A referral whose touch predates the floor gains
+one window instead of none, which is what `useObservedActions` needs — it drops a referral with no
+window entirely.
+
+**Why not just widen the budget.** `MAX_WINDOWS` buys hours per extra request against a rate-limited
+public endpoint and never stops being a floor; the campaign only has to get older. An append-only
+touch-event entity in the subgraph would retire the log scan altogether and is still the eventual
+fix — this is the version that needs no redeploy.
+
+**What is still floor-bound.** `useObservedActions`' own event scan, so an *action* older than the
+floor remains uncounted and the panel says so separately. `scannedFrom` no longer means "touches are
+missing" on the graph path, so `ReportPanel` renders that admission only when the touch list itself
+came from logs.
+
+---
+
 ## `web/src/lib/campaignGuide.ts`
 
 ### Publishing is the primary action after creation, because nothing carries the draft
