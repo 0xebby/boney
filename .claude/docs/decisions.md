@@ -667,6 +667,52 @@ same no-consumer caveat as above.
 
 ---
 
+## `web/scripts/relay-kpi-metric.ts`
+
+### Block timestamps come off the logs, not from one `eth_getBlockByNumber` per block
+
+Attribution resolves at each action's own block, so every decoded log needs its block's timestamp.
+Reading them a block at a time is what *broke* the relayer rather than merely slowing it. Measured
+2026-09-02 on Base Sepolia: KPI 0 of the Gyndore fixture had 53,344 blocks pending carrying 88,316
+matching `Swap` logs over 41,981 distinct blocks, and KPI 1 another 95,425 `Staked` logs over 42,769 —
+84,750 individual `eth_getBlockByNumber` calls for one pass across the three KPIs. Twelve in flight
+answered ~42 blocks/s, so a pass wanted ~34 minutes; publicnode's limiter cut it off after ~2m20s with
+`Rate limit exceeded`, the run exited non-zero, and the checkpoint never moved. It had sat at
+46,223,149 for ~30 hours.
+
+`eth_getLogs` already answers the question. Geth-family nodes put `blockTimestamp` on every log, and
+viem passes it through as a bigint even though it is absent from viem's `Log` type. Over 904 blocks the
+log-carried value equalled `eth_getBlockByNumber().timestamp` on every one, so harvesting it is not an
+approximation: `aggregateDeltas` receives the same map it always did, which is what keeps the
+attribution result identical. Both large passes now report `0 timestamp read(s) needed` and finish in
+about a minute, spent almost entirely in `eth_getLogs`.
+
+The block read stays as the fallback for nodes that omit the field — anvil among them — deduplicated
+against the cache, packed 100 calls to a JSON-RPC request and dispatched 300 blocks at a time. On the
+same endpoint that fallback runs at ~319 blocks/s against ~42 for one request per call: the limiter
+counts requests, not calls.
+
+### The timestamp cache outlives the process, because each KPI is its own invocation
+
+`relay-loop.sh` runs `pnpm relay` once per gated KPI, so a cache held only in memory is discarded
+between the Swap pass and the Staked pass even though their ranges almost entirely overlap — 41,981 and
+42,769 distinct blocks, 50,333 in the union. It is written to
+`web/.cache/relay-block-timestamps-<chainId>.json` and read back by the next pass; the Staked pass now
+opens holding the 42,207 blocks the Swap pass gathered.
+
+A cached timestamp is wrong only if the block it names was reorged out. The relayer already stops
+`CONFIRMATIONS = 5` short of the head and writes a monotonic on-chain checkpoint on that same
+assumption, so persisting timestamps bets nothing new. The file is keyed by chain id, capped at 150,000
+entries with the lowest blocks dropped first, and written before the totals reads so a failure in the
+reporting half does not discard what the scan paid for.
+
+### `eth_getHeaderByNumber` was measured and left alone
+
+publicnode answers it, and at 1,733 bytes against 4,678 for `eth_getBlockByNumber` it would cut the
+fallback's bandwidth 2.7× — a full block's response is mostly the transaction-hash array, which nothing
+here reads. It is not a standard method, viem has no action for it, and the fallback is now rarely
+taken, so the indirection buys nothing today.
+
 ## `web/scripts/relay-loop.sh`
 
 ### An empty `TARGETS` list is a state, not a misconfiguration
@@ -677,3 +723,14 @@ reported figure as-is, so relaying it would cost a transaction and change nothin
 
 `dev-up.sh` greps for that line rather than starting the background loop. Starting it anyway would leave
 a pid in `PIDS` that has already exited, which `cleanup` then signals into a dead process group.
+
+### The pass output goes through `tee`, not command substitution
+
+`out=$(pnpm relay …)` buffers the whole pass and prints nothing until it exits. A pass now spends about
+a minute inside `eth_getLogs` per KPI, so that made a working relayer indistinguishable from a hung one
+— and when the rate limiter was killing passes, the failure was invisible for its whole duration. The
+summary below still needs the full text to find `credited` lines, so the output is teed to a temp file
+and read back rather than captured.
+
+The scan lines are written with `\r` only when stdout is a TTY. Under `dev-up.sh`, which pipes the
+first pass to `tee`, they fall back to one line every two seconds so the log stays readable.
