@@ -304,11 +304,18 @@ export function ReportPanel({
             ) : null}
           </div>
 
-          {touchScan.scannedFrom !== undefined ? (
+          {touchScan.source === "logs" && touchScan.scannedFrom !== undefined ? (
             <p className="text-xs text-ink-muted">
               Attribution history was scanned from block{" "}
               {touchScan.scannedFrom.toLocaleString("en-US")} only, touches signed before that
               block will not appear here.
+            </p>
+          ) : null}
+
+          {touchScan.truncated ? (
+            <p className="text-xs text-ink-muted">
+              More referrals are attributed than one read returns, so some are missing from the KOL
+              list.
             </p>
           ) : null}
 

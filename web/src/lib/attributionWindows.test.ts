@@ -4,6 +4,7 @@ import {
   attributionLookup,
   buildAttributionWindows,
   earliestAttributedBlock,
+  mergeAttributionWindows,
   type TouchLog,
 } from "./attributionWindows";
 
@@ -73,6 +74,78 @@ describe("buildAttributionWindows", () => {
       touchLog(BOB, BigInt(11), FOREVER),
     ]);
     expect(windows.size).toBe(2);
+  });
+});
+
+/**
+ * The subgraph holds only a referral's live touch, so it is merged under whatever superseded history
+ * the log scan reached. Losing a spell here credits the wrong promoter for work already done.
+ */
+describe("mergeAttributionWindows", () => {
+  it("adds a referral the base map never saw", () => {
+    const merged = mergeAttributionWindows(
+      buildAttributionWindows([touchLog(ALICE, BigInt(10), FOREVER)]),
+      buildAttributionWindows([touchLog(BOB, BigInt(20), FOREVER)]),
+    );
+
+    expect(merged.size).toBe(2);
+    expect(merged.get(BOB.toLowerCase())!.map((w) => w.fromBlock)).toEqual([BigInt(20)]);
+  });
+
+  it("does not repeat a spell both sources carry", () => {
+    const both = [touchLog(ALICE, BigInt(10), FOREVER, ID_A)];
+    const merged = mergeAttributionWindows(
+      buildAttributionWindows(both),
+      buildAttributionWindows(both),
+    );
+
+    expect(merged.get(ALICE.toLowerCase())).toHaveLength(1);
+  });
+
+  it("keeps a second promoter holding the referral in the same block", () => {
+    const merged = mergeAttributionWindows(
+      buildAttributionWindows([touchLog(ALICE, BigInt(10), FOREVER, ID_A)]),
+      buildAttributionWindows([touchLog(ALICE, BigInt(10), FOREVER, ID_B)]),
+    );
+
+    expect(merged.get(ALICE.toLowerCase())).toHaveLength(2);
+  });
+
+  it("orders the union oldest first", () => {
+    const merged = mergeAttributionWindows(
+      buildAttributionWindows([touchLog(ALICE, BigInt(30), FOREVER, ID_A)]),
+      buildAttributionWindows([
+        touchLog(ALICE, BigInt(10), FOREVER, ID_B),
+        touchLog(ALICE, BigInt(20), FOREVER, ID_B),
+      ]),
+    );
+
+    expect(merged.get(ALICE.toLowerCase())!.map((w) => w.fromBlock)).toEqual([
+      BigInt(10),
+      BigInt(20),
+      BigInt(30),
+    ]);
+  });
+
+  it("leaves the inputs untouched", () => {
+    const base = buildAttributionWindows([touchLog(ALICE, BigInt(10), FOREVER, ID_A)]);
+    const extra = buildAttributionWindows([touchLog(ALICE, BigInt(20), FOREVER, ID_B)]);
+    mergeAttributionWindows(base, extra);
+
+    expect(base.get(ALICE.toLowerCase())).toHaveLength(1);
+    expect(extra.get(ALICE.toLowerCase())).toHaveLength(1);
+  });
+
+  it("resolves a live touch the log scan aged out of", () => {
+    // The reported bug: the touch is below the log floor, so the log scan returns nothing and the
+    // referral resolves to no promoter at all.
+    const logs = buildAttributionWindows([]);
+    const graph = buildAttributionWindows([touchLog(ALICE, BigInt(10), FOREVER, ID_A)]);
+
+    expect(attributionLookup(logs, BigInt(0)).at(ALICE, BigInt(11), T)).toBeNull();
+    expect(
+      attributionLookup(mergeAttributionWindows(logs, graph), BigInt(0)).at(ALICE, BigInt(11), T),
+    ).toBe(ID_A);
   });
 });
 
