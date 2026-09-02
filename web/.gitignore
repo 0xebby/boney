@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# relayer block-timestamp cache, rebuilt from the chain on demand
+/.cache/
+
 # production
 /build
 
