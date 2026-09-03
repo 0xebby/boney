@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:up": "./scripts/dev-up.sh",
+    "dev:down": "./scripts/dev-up.sh --down",
     "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "next start",
     "lint": "eslint",
@@ -22,12 +23,16 @@
     "seed": "tsx scripts/seed-local.ts",
     "index": "tsx scripts/indexer.ts",
     "relay": "tsx scripts/relay-kpi-metric.ts",
+    "fund:test": "tsx scripts/fund-test-wallets.ts",
+    "weth:deposit": "tsx scripts/drive-weth-kpi.ts --action deposit",
+    "weth:withdraw": "tsx scripts/drive-weth-kpi.ts --action withdraw",
     "sygma:deposit": "tsx scripts/sygma-deposit.ts",
     "demo:seed": "tsx scripts/demo-seed.ts",
     "swap:weth-usdc": "tsx scripts/uniswap-swap.ts",
     "report-window": "tsx scripts/compute-report-window.ts"
   },
   "dependencies": {
+    "@netlify/blobs": "11.0.2",
     "@tanstack/react-query": "^5.101.4",
     "next": "16.2.12",
     "react": "19.2.4",

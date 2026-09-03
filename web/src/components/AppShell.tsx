@@ -4,8 +4,10 @@ import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {useEffect, useState, type ReactNode} from "react";
 import {useAccount, useConnect, useDisconnect, useWalletClient} from "wagmi";
+import {BoneField, BoneyB} from "@/components/ui/Bone";
 import {RankBadge} from "@/components/ui/RankBadge";
 import {NavDrawer} from "@/components/ui/NavDrawer";
+import {EthosMark} from "@/components/ui/EthosMark";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useIsPromoter} from "@/hooks/useIsPromoter";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
@@ -13,22 +15,33 @@ import {isActiveNav, navItems} from "@/lib/nav";
 import {rankOf} from "@/lib/ranks";
 import {describeTxError} from "@/lib/txErrors";
 import {DEV_STUB_WALLET, canonicalStubAllowlistMessage} from "@/lib/stubWallets";
+import {useConfirmSignature} from "@/components/SignatureGate";
+import {stubAllowlistIntent} from "@/lib/writeIntents";
 
 /**
  * AppShell — a persistent top bar over a single full-width content column.
  * The bar is a product directory, not a settings menu: Campaigns (the list), My Campaigns,
  * Promoters, Docs — plus the Create call to action.
  *
- * **The nav has two presentations, one list.** From `sm` up it is a row of links in the bar. Below
- * `sm` it moves into `NavDrawer`, because at phone widths the bar cannot hold the brand mark, five
- * links and the wallet cluster at once — the previous single-bar layout resolved that by letting the
- * nav scroll horizontally, which hides destinations behind a gesture nothing advertises. Which items
- * appear, in what order, and which one is current all come from `lib/nav.ts` so the two
- * presentations cannot drift apart.
+ * **The nav has two presentations, one list.** From `sm` up it is a row of links on its own line
+ * below the brand row; below `sm` it moves into `NavDrawer`. Which items appear, in what order, and
+ * which one is current all come from `lib/nav.ts` so the two presentations cannot drift apart.
  *
- * Create is deliberately not in that list. It is the primary action of the whole product, so it
- * stays in the bar's right-hand cluster as a filled button at every width rather than reading as one
- * more peer link — and staying in the bar means it is reachable on a phone without opening anything.
+ * **Nothing in the header scrolls sideways.** The links used to share the brand row inside an
+ * `overflow-x-auto` strip, which hides destinations behind a gesture nothing advertises — and with a
+ * connected promoter wallet the list is six items, so it overflowed at every width including
+ * desktop: brand, six links, Create, rank and wallet do not fit in `max-w-6xl` at once. Its own row
+ * fits them at `sm` and wraps to a second line rather than clipping if it ever cannot.
+ *
+ * The brand row has the same rule applied the other way. Every item in it was `shrink-0`, so at
+ * 375px the row measured wider than the viewport and the whole page scrolled horizontally; the
+ * wallet cluster may now shrink, the wallet label is shortened below `sm`, and the wordmark drops
+ * below 360px leaving the mark alone.
+ *
+ * Create is deliberately not in the nav list. It is the primary action of the whole product, so it
+ * stays in the brand row's right-hand cluster as a filled button at every width rather than reading
+ * as one more peer link — and staying there means it is reachable on a phone without opening
+ * anything.
  */
 
 /**
@@ -52,17 +65,30 @@ function WalletButton() {
   const note = !isConnected && !injected ? "No browser wallet detected." : null;
 
   return (
-    <div className="relative">
+    // `min-w-0` so this is the part of the bar that gives when the row runs out of room: the button
+    // truncates rather than pushing the header wider than the viewport.
+    <div className="relative min-w-0">
       <button
         type="button"
         onClick={() => (isConnected ? disconnect() : injected && connect({connector: injected}))}
         disabled={isPending || (!isConnected && !injected)}
         // `truncate` needs a width constraint to have anything to truncate against; in the bar
         // that is a max-width, so a long address ellipses instead of squeezing the nav.
-        className="max-w-[11rem] truncate rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50"
+        className="min-h-11 max-w-[11rem] truncate rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 sm:min-h-0"
         title={isConnected ? `${address} — click to disconnect` : "Connect an injected wallet"}
       >
-        {isPending ? "Connecting…" : isConnected ? short : "Connect wallet"}
+        {/* "Connect wallet" is 40px of a 375px bar that has none to spare, and the shorter label
+            says the same thing. */}
+        {isPending ? (
+          "Connecting…"
+        ) : isConnected ? (
+          short
+        ) : (
+          <>
+            <span className="sm:hidden">Connect</span>
+            <span className="hidden sm:inline">Connect wallet</span>
+          </>
+        )}
       </button>
 
       {/*
@@ -143,6 +169,7 @@ function DevStubWalletManager() {
   // `chains[0]` — anvil — and a signature bound to the wrong chain fails verification.
   const chainId = useBoneyChainId();
   const {data: walletClient} = useWalletClient();
+  const confirmSignature = useConfirmSignature();
   const [wallet, setWallet] = useState("");
   const [wallets, setWallets] = useState<string[]>([]);
   const [persisted, setPersisted] = useState(true);
@@ -174,6 +201,8 @@ function DevStubWalletManager() {
       setError("Connect the admin wallet to sign.");
       return;
     }
+
+    if (!(await confirmSignature(stubAllowlistIntent(trimmed.toLowerCase(), action)))) return;
 
     setBusy(true);
     setError(null);
@@ -219,8 +248,9 @@ function DevStubWalletManager() {
         Dev stub allowlist
       </p>
       <p className="mt-1 text-[10px] text-ink-muted">
-        These wallets get a fabricated BoneyScore instead of a real Ethos lookup. Every other wallet
-        is scored by the live APIs. Each change takes a signature from this wallet.
+        These wallets get a fabricated BoneyScore of 20,500 or more — enough to clear every gate in
+        the fixture — instead of a real Ethos lookup. Every other wallet is scored by the live APIs.
+        Each change takes a signature from this wallet.
       </p>
 
       <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -283,22 +313,28 @@ export function AppShell({children}: {children: ReactNode}) {
   const {isPromoter} = useIsPromoter();
   const nav = navItems({isConnected, isPromoter});
 
-  const navLink = ({href, label, icon}: {href: string; label: string; icon: string}) => {
+  /**
+   * One nav destination as it appears in the top bar.
+   *
+   * Label only, at `text-xs`: the six-item list a connected promoter sees is what used to overflow
+   * the bar, and the glyphs cost width while naming nothing a reader could act on.
+   *
+   * @param item The destination's href and label.
+   * @returns The link element, keyed by href.
+   */
+  const navLink = ({href, label}: {href: string; label: string}) => {
     const active = isActiveNav(pathname, href);
     return (
       <Link
         key={href}
         href={href}
         aria-current={active ? "page" : undefined}
-        className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
+        className={`shrink-0 rounded-md px-2 py-1 text-xs transition-colors ${
           active
             ? "bg-surface-2 font-semibold text-brand"
             : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
         }`}
       >
-        <span aria-hidden className="text-xs opacity-70">
-          {icon}
-        </span>
         {label}
       </Link>
     );
@@ -306,6 +342,9 @@ export function AppShell({children}: {children: ReactNode}) {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/* The bone wallpaper, behind every page. Decoration only — nothing above it moves for it. */}
+      <BoneField />
+
       {/* Keyboard users should not have to tab the whole nav to reach content. */}
       <a
         href="#content"
@@ -315,34 +354,38 @@ export function AppShell({children}: {children: ReactNode}) {
       </a>
 
       {/*
-        One bar at every width, but the nav inside it changes form. From `sm` up the links sit in the
-        bar; below `sm` they move into the drawer and only its trigger remains, which is what keeps
-        the brand mark, Create and the wallet button all reachable at 375px without a scrolling nav.
+        One row: brand, nav, wallet cluster. Below `sm` the nav's items live in the drawer instead, so
+        a phone keeps the mark, Create and the wallet button on a line that fits.
       */}
       <header className="sticky top-0 z-40 border-b border-hairline bg-surface-1">
         <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2.5 sm:gap-4 sm:px-6 lg:px-8">
           <NavDrawer items={nav} />
 
-          <Link href="/" className="shrink-0">
-            <span className="font-display text-xl lowercase leading-none text-brand sm:text-2xl">
+          {/* The mark leads the wordmark at the same colour and height, so the pair reads as one
+              lockup rather than an icon parked beside a word. Under 360px the word goes and the mark
+              carries the identity alone — the drawer's own header spells it out again on open. */}
+          <Link href="/" className="flex shrink-0 items-center gap-1.5 text-brand">
+            <BoneyB className="h-5 w-auto shrink-0 sm:h-6" />
+            <span className="font-display text-xl lowercase leading-none max-[359px]:hidden sm:text-2xl">
               boneyard
             </span>
           </Link>
 
+          {/*
+            `flex-wrap` rather than the `overflow-x-auto` this used to be: a horizontal scroller hides
+            destinations behind a gesture nothing advertises, so if the list ever outgrows the row it
+            takes a second line and every destination stays visible.
+          */}
           <nav
             aria-label="Main"
-            className="-mx-1 hidden min-w-0 flex-1 gap-0.5 overflow-x-auto px-1 sm:flex"
+            className="-mx-1 hidden min-w-0 flex-1 flex-wrap gap-0.5 px-1 sm:flex"
           >
             {nav.map(navLink)}
           </nav>
 
-          {/*
-            Below `sm` the nav is gone from the bar, so nothing is left to absorb the free space and
-            push the wallet cluster right. This does that job at phone widths only.
-          */}
-          <div className="flex-1 sm:hidden" />
-
-          <div className="flex shrink-0 items-center gap-2 sm:gap-2.5">
+          {/* `ml-auto` rather than a spacer element, and `min-w-0` so the cluster is what compresses
+              when the row is tight. */}
+          <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-2.5">
             <span className="animate-blink hidden text-[10px] font-bold uppercase tracking-wider text-brand xl:inline">
               beta
             </span>
@@ -371,12 +414,40 @@ export function AppShell({children}: {children: ReactNode}) {
           </div>
         </div>
 
-        <div className="mx-auto w-full max-w-6xl px-4 pb-3 sm:px-6 lg:px-8">
+        {/* `empty:hidden` because this renders for one wallet and nothing for everyone else: without
+            it the row's padding still adds a strip of dead header height on every other session. */}
+        <div className="mx-auto w-full max-w-6xl px-4 pb-3 empty:hidden sm:px-6 lg:px-8">
           <DevStubWalletManager />
         </div>
       </header>
 
       <main id="content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        {/*
+          Where every BoneyScore in the app comes from, in the page's top-right corner rather than in
+          the bar above it. The bar is navigation and wallet state; an attribution is neither, and at
+          `text-[10px]` in that row it was competing for width with controls that need it.
+
+          `--brand-ethos` on the mark and the name, so the credit reads as another party's rather than
+          as Boney's own copy. Right-aligned above the page's own first element, so it never overlaps
+          one.
+        */}
+        <div className="-mt-2 mb-3 flex justify-end">
+          {/* Wraps below `sm`. Held on one line it measured wider than a narrow phone's content
+              column, and in a `justify-end` row the overflow runs off the *leading* edge — so the
+              whole credit sat outside the viewport with nothing to scroll to it. */}
+          <span
+            className="inline-flex flex-wrap items-center justify-end gap-x-1 text-right text-[11px] text-ink-muted sm:whitespace-nowrap"
+            title="A BoneyScore is composed from an Ethos credibility score and X reach."
+          >
+            BoneyScore is powered by
+            <span className="inline-flex items-center gap-1 font-semibold text-brand-ethos">
+              <EthosMark className="h-3 w-3" />
+              Ethos
+            </span>
+            credibility score
+          </span>
+        </div>
+
         {children}
       </main>
 

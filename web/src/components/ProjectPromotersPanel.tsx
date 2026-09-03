@@ -1,6 +1,7 @@
 "use client";
 
 import {useMemo} from "react";
+import Link from "next/link";
 import {useCampaignPromoters} from "@/hooks/useCampaignPromoters";
 import {useCampaignSettlements} from "@/hooks/useCampaignSettlements";
 import {Card, CardHeader} from "@/components/ui/Card";
@@ -15,6 +16,7 @@ import {
   type PromoterRow,
 } from "@/lib/settlements";
 import {explorerAddressUrl} from "@/lib/chains";
+import {cardLink} from "@/lib/publicCard";
 import {formatTokenAmount, formatPercent, shortAddress} from "@/lib/format";
 import type {CampaignDetail} from "@/lib/campaignDetail";
 import type {CampaignView} from "@/lib/types";
@@ -44,7 +46,7 @@ export function ProjectPromotersPanel({
   view: CampaignView;
   detail: CampaignDetail;
   token: {symbol: string; decimals: number};
-  /** Resolves the block explorer for a promoter address; absent on local chains. */
+  /** Resolves each promoter's destination — their BoneyCard, or the block explorer. */
   chainId?: number;
 }) {
   const directory = useCampaignPromoters([view]);
@@ -99,7 +101,7 @@ export function ProjectPromotersPanel({
         <div className="p-4 pb-0">
           <CardHeader
             title="Payouts by promoter"
-            subtitle="Amounts released by crossed tiers, read from the campaign's own settlement events"
+            subtitle="Amounts released by crossed tiers"
           />
         </div>
 
@@ -132,6 +134,7 @@ export function ProjectPromotersPanel({
 
       <ScanNotes
         scannedFrom={directory.scannedFrom ?? settlements.scannedFrom}
+        truncated={directory.truncated}
         unaccounted={unaccounted}
         orphans={orphans}
         decimals={token.decimals}
@@ -151,7 +154,23 @@ function buildColumns(
       key: "promoter",
       header: "Promoter",
       sortValue: (r) => r.promoter.toLowerCase(),
+      /*
+        The wallet's own BoneyCard where there is one, and the block explorer otherwise.
+
+        The card is the better destination for a project reading this table: it answers "who is this
+        promoter" with their cumulative Boneyard history rather than with a token balance, and it carries
+        the explorer link onward for anyone who wanted that instead. `cardLink` returns undefined off the
+        chain the card serves — see `lib/publicCard` — which is when the explorer is all there is.
+      */
       render: (r) => {
+        const card = cardLink(r.promoter, chainId);
+        if (card) {
+          return (
+            <Link href={card} className="font-mono text-ink hover:underline">
+              {shortAddress(r.promoter)}
+            </Link>
+          );
+        }
         const href = chainId === undefined ? undefined : explorerAddressUrl(chainId, r.promoter);
         return href ? (
           <a
@@ -222,27 +241,32 @@ function buildColumns(
 }
 
 /**
- * What the scan could not see.
+ * What the read could not see.
  *
- * Three separate admissions rather than one, because they have different fixes: a floor means look
- * further back, a shortfall means the total below is not the campaign's total, and an orphan payout
- * means a promoter row is missing entirely. Renders nothing when the scan was complete, which is the
- * normal case on a fixture younger than the window budget.
+ * Four separate admissions rather than one, because they have different fixes: a floor means look
+ * further back, a truncated list means some members were never returned, a shortfall means the total
+ * below is not the campaign's total, and an orphan payout means a promoter row is missing entirely.
+ * Renders nothing when the read was complete, which is the normal case on a fixture younger than the
+ * window budget.
  */
 function ScanNotes({
   scannedFrom,
+  truncated,
   unaccounted,
   orphans,
   decimals,
   symbol,
 }: {
   scannedFrom?: bigint;
+  truncated: boolean;
   unaccounted: bigint;
   orphans: number;
   decimals: number;
   symbol: string;
 }) {
-  if (scannedFrom === undefined && unaccounted === BigInt(0) && orphans === 0) return null;
+  if (scannedFrom === undefined && !truncated && unaccounted === BigInt(0) && orphans === 0) {
+    return null;
+  }
 
   return (
     <div className="space-y-1 text-xs">
@@ -253,8 +277,15 @@ function ScanNotes({
         </p>
       ) : null}
 
+      {truncated ? (
+        <p className="text-ink-muted">
+          More promoters joined than one read returns, so some memberships are missing from the rows
+          above.
+        </p>
+      ) : null}
+
       {unaccounted > BigInt(0) ? (
-        <p className="text-warning">
+        <p className="text-brand">
           The campaign reports {formatTokenAmount(unaccounted, decimals, {compact: true})} {symbol}{" "}
           paid outside the scanned range, so the amounts below are a floor rather than the full
           total.
@@ -262,7 +293,7 @@ function ScanNotes({
       ) : null}
 
       {orphans > 0 ? (
-        <p className="text-warning">
+        <p className="text-brand">
           {orphans} paid wallet{orphans === 1 ? "" : "s"} did not appear in the join scan, so
           {orphans === 1 ? " its" : " their"} payouts are missing from the rows above.
         </p>

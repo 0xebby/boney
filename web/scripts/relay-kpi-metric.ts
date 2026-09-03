@@ -38,10 +38,30 @@ import {
   type PublicClient,
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
-import {CampaignAbi, AttributionRegistryAbi, EventMetricKpiVerifierAbi} from "../src/lib/abis";
+import {CampaignAbi, EventMetricKpiVerifierAbi, AttributionRegistryAbi} from "../src/lib/abis";
 import {getDeployment} from "../src/lib/chains";
-import {decodeEventSource} from "../src/lib/kpiSource";
+import {
+  decodeEventSource,
+  matchesTopicFilter,
+  topicFilterArray,
+  type EventSource,
+} from "../src/lib/kpiSource";
 import {blockChunks} from "../src/lib/indexerCore";
+import {
+  attributionLookup,
+  buildAttributionWindows,
+  type TouchLog,
+} from "../src/lib/attributionWindows";
+import {blockAtTimestamp, earliestCoveringTouch} from "../src/lib/blockSearch";
+import {
+  harvestLogTimestamps,
+  missingTimestamps,
+  timestampBatches,
+  type BlockTimestamps,
+} from "../src/lib/blockTimestamps";
+import {TOUCH_STORED} from "../src/lib/events";
+import {progress, progressDone} from "./progress";
+import {loadTimestampCache, saveTimestampCache} from "./timestampCache";
 import {
   aggregateDeltas,
   decodeUserEvents,
@@ -51,11 +71,11 @@ import {
   planReportBatches,
   resolveScanRange,
   uniqueBlocks,
-  uniqueUsers,
   validateParamIndexes,
   type KpiConfig,
   type RelayLog,
 } from "../src/lib/relayCore";
+import {readStartBlock} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(here, "../..");
@@ -77,6 +97,21 @@ const CONFIRMATIONS = BigInt(5);
 
 /** Users per `reportBatch` transaction. Bounded by block gas, not by anything on chain. */
 const BATCH_SIZE = 200;
+
+/**
+ * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
+ * pass costs the limiter this many times less than one request per call would.
+ */
+const RPC_BATCH_SIZE = 100;
+
+/**
+ * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests. Wide
+ * enough to keep a few requests in flight, narrow enough that a public endpoint answers them.
+ */
+const READ_CONCURRENCY = 300;
+
+/** Per-request ceiling. A loaded public endpoint answers a batch of block reads in a few seconds. */
+const RPC_TIMEOUT = 60_000;
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -101,32 +136,52 @@ function reporterKey(): Hex | undefined {
   return (value || undefined) as Hex | undefined;
 }
 
-/** Fetches matching logs across a range the RPC will actually accept. */
+/**
+ * Fetches matching logs across a range the RPC will actually accept.
+ *
+ * @param client Chain to read from.
+ * @param address Contract whose logs are scanned.
+ * @param topic0 Event signature hash to match.
+ * @param source Event source from the KPI's params, or null when it could not be decoded.
+ * @param fromBlock First block to scan.
+ * @param toBlock Last block to scan.
+ * @param timestamps Cache the logs' own `blockTimestamp` fields are collected into.
+ * @returns Every matching log in the range.
+ */
 async function fetchLogs(
   client: PublicClient,
   address: `0x${string}`,
   topic0: Hex,
+  source: EventSource | null,
   fromBlock: bigint,
   toBlock: bigint,
+  timestamps: BlockTimestamps,
 ): Promise<RelayLog[]> {
   const out: RelayLog[] = [];
   const chunks = blockChunks(fromBlock, toBlock, MAX_LOG_RANGE);
 
   for (const [i, chunk] of chunks.entries()) {
-    process.stdout.write(`\r    scanning ${i + 1}/${chunks.length} chunks…`);
+    progress(`scanning ${i + 1}/${chunks.length} chunks`);
     const logs = await client.getLogs({
       address,
       fromBlock: chunk.from,
       toBlock: chunk.to,
+      topics: [
+        topic0.toLowerCase() as Hex,
+        ...(source ? topicFilterArray(source) : []),
+      ],
     });
+
+    harvestLogTimestamps(logs, timestamps);
 
     for (const log of logs) {
       if (log.topics[0]?.toLowerCase() !== topic0.toLowerCase()) continue;
+      if (source && !matchesTopicFilter(log, source)) continue;
       if (log.blockNumber === null) continue;
       out.push({topics: log.topics, data: log.data, blockNumber: log.blockNumber});
     }
   }
-  if (chunks.length > 0) process.stdout.write("\r\x1b[K");
+  if (chunks.length > 0) progressDone();
 
   return out;
 }
@@ -141,7 +196,12 @@ async function main(): Promise<void> {
 
   const kpiIndex = BigInt(arg("--kpi") ?? "0");
 
-  const client = createPublicClient({transport: http(rpcUrl)}) as PublicClient;
+  const client = createPublicClient({
+    transport: http(rpcUrl, {
+      timeout: RPC_TIMEOUT,
+      batch: {batchSize: RPC_BATCH_SIZE, wait: 8},
+    }),
+  }) as PublicClient;
   const chainId = await client.getChainId();
 
   const verifierArg = arg("--verifier") ?? getDeployment(chainId)?.eventMetricKpiVerifier;
@@ -261,7 +321,20 @@ async function main(): Promise<void> {
 
   // ── scan and decode ────────────────────────────────────────────
 
-  const logs = await fetchLogs(client, config.targetContract, topic0, range.fromBlock, range.toBlock);
+  // One cache for every timestamp this pass needs, shared by the touch search, the touch scan and
+  // the KPI logs, and carried over from earlier passes on this chain.
+  const blockTimestamps = loadTimestampCache(chainId);
+  const cachedOnEntry = blockTimestamps.size;
+
+  const logs = await fetchLogs(
+    client,
+    config.targetContract,
+    topic0,
+    indexerSource,
+    range.fromBlock,
+    range.toBlock,
+    blockTimestamps,
+  );
   const {decoded, undecodable} = decodeUserEvents(logs, event, config);
 
   console.log(`\n  ${logs.length} matching log(s), ${decoded.length} decoded`);
@@ -276,43 +349,84 @@ async function main(): Promise<void> {
   let unattributed: string[] = [];
 
   if (decoded.length > 0) {
-    const registry = await client.readContract({
-      address: campaign,
-      abi: CampaignAbi,
-      functionName: "attributionRegistry",
-    });
+    const [registry, startTime] = await Promise.all([
+      client.readContract({
+        address: campaign,
+        abi: CampaignAbi,
+        functionName: "attributionRegistry",
+      }),
+      client.readContract({address: campaign, abi: CampaignAbi, functionName: "startTime"}),
+    ]);
 
-    // One read per distinct user and per distinct block, not per log. A busy range shares blocks
-    // heavily, and a user usually appears more than once.
-    const users = uniqueUsers(decoded);
-    const blocks = uniqueBlocks(decoded);
+    const maxDuration = (await client.readContract({
+      address: registry,
+      abi: AttributionRegistryAbi,
+      functionName: "effectiveMaxDuration",
+      args: [campaign],
+    })) as bigint;
 
-    const attributedAt = new Map<string, bigint>();
-    await Promise.all(
-      users.map(async (user) => {
-        const touch = await client.readContract({
-          address: registry,
-          abi: AttributionRegistryAbi,
-          functionName: "touchOf",
-          args: [campaign, getAddress(user)],
+    // Every touch that could still cover creditable work, scanned from before the activity range: a
+    // touch can predate the actions it covers, and a window this cannot see would drop activity the
+    // chain would credit. A touch older than `startTime - effectiveMaxDuration` has already lapsed by
+    // the campaign's own start, so it covers nothing. The floor comes from the broadcast receipt rather
+    // than `lib/deployments.ts`, which can lag a redeploy.
+    const touchFloor = await blockAtTimestamp(
+      async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
+      earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
+      BigInt(readStartBlock(chainId)),
+      range.toBlock,
+      blockTimestamps,
+    );
+    const touches: TouchLog[] = [];
+    for (const chunk of blockChunks(touchFloor, range.toBlock, MAX_LOG_RANGE)) {
+      const touchLogs = await client.getLogs({
+        address: registry,
+        event: TOUCH_STORED,
+        args: {campaign},
+        fromBlock: chunk.from,
+        toBlock: chunk.to,
+      });
+      harvestLogTimestamps(touchLogs, blockTimestamps);
+      for (const log of touchLogs) {
+        if (!log.args.user || !log.args.promoterId) continue;
+        touches.push({
+          user: getAddress(log.args.user),
+          promoterId: log.args.promoterId,
+          signedAt: log.args.signedAt ?? BigInt(0),
+          expiresAt: log.args.expiresAt ?? BigInt(0),
+          blockNumber: log.blockNumber ?? BigInt(0),
         });
-        attributedAt.set(user, BigInt(touch.signedAt));
-      }),
+      }
+    }
+    const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
+
+    // One read per distinct block, and only for the blocks nothing has supplied yet: the logs
+    // carried their own timestamps, and earlier passes on this chain carried the rest.
+    const wanted = uniqueBlocks(decoded);
+    const missing = missingTimestamps(wanted, blockTimestamps);
+    let readSoFar = 0;
+    for (const batch of timestampBatches(missing, READ_CONCURRENCY)) {
+      readSoFar += batch.length;
+      progress(`reading ${readSoFar}/${missing.length} block timestamps`);
+      const read = await Promise.all(batch.map((blockNumber) => client.getBlock({blockNumber})));
+      read.forEach((block, j) => blockTimestamps.set(batch[j], block.timestamp));
+    }
+    if (missing.length > 0) progressDone();
+
+    console.log(
+      `  ${wanted.length} distinct block(s), ${missing.length} timestamp read(s) needed` +
+        ` (${cachedOnEntry} cached from earlier passes)`,
     );
 
-    const blockTimestamps = new Map<bigint, bigint>();
-    await Promise.all(
-      blocks.map(async (blockNumber) => {
-        const block = await client.getBlock({blockNumber});
-        blockTimestamps.set(blockNumber, block.timestamp);
-      }),
-    );
-
-    const result = aggregateDeltas({decoded, attributedAt, blockTimestamps});
+    const result = aggregateDeltas({decoded, attribution, blockTimestamps});
     for (const [user, delta] of result.deltas) deltas.set(user, delta);
     excludedPreAttribution = result.excludedPreAttribution;
     unattributed = result.unattributed;
   }
+
+  // Stored before the totals reads and the transactions, so a failure past this point still leaves
+  // the next pass the timestamps this one paid for.
+  saveTimestampCache(chainId, blockTimestamps);
 
   if (unattributed.length > 0) {
     console.log(
@@ -321,24 +435,28 @@ async function main(): Promise<void> {
     );
   }
   if (excludedPreAttribution > 0) {
-    console.log(`  ${excludedPreAttribution} log(s) excluded as pre-attribution activity`);
+    console.log(`  ${excludedPreAttribution} log(s) excluded as unattributed activity`);
   }
   console.log(`  creditable activity for ${deltas.size} user(s)`);
 
   // ── totals ─────────────────────────────────────────────────────
 
   const current = new Map<string, bigint>();
-  await Promise.all(
-    [...deltas.keys()].map(async (user) => {
-      const total = await client.readContract({
-        address: verifier,
-        abi: EventMetricKpiVerifierAbi,
-        functionName: "verifiedTotalOf",
-        args: [campaign, kpiIndex, getAddress(user)],
-      });
-      current.set(user, total);
-    }),
-  );
+  const credited = [...deltas.keys()];
+  for (let i = 0; i < credited.length; i += READ_CONCURRENCY) {
+    const batch = credited.slice(i, i + READ_CONCURRENCY);
+    const totals = await Promise.all(
+      batch.map((user) =>
+        client.readContract({
+          address: verifier,
+          abi: EventMetricKpiVerifierAbi,
+          functionName: "verifiedTotalOf",
+          args: [campaign, kpiIndex, getAddress(user)],
+        }),
+      ),
+    );
+    totals.forEach((total, j) => current.set(batch[j], total));
+  }
 
   const {users, totals} = nextTotals(deltas, current);
   for (const [i, user] of users.entries()) {

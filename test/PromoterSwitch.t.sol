@@ -10,6 +10,7 @@ import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
 import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
+import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {Types} from "../src/libraries/Types.sol";
 
 contract MockToken is ERC20 {
@@ -31,15 +32,14 @@ contract MockToken is ERC20 {
 ///             slot — so B overwrites A outright. `attributionWindow` / `expiresAt` govern how long
 ///             a touch keeps crediting *absent a replacement*; they do not reserve the user.
 ///
-///          2. **What happens to actions A already drove but nobody reported yet?** They follow B.
-///             `reportUserAction` resolves the payee when the report *lands*, and the chain cannot
-///             see when an action happened, so on a KPI with no verifier the whole un-reported
-///             delta goes to whoever holds the touch at report time. This is the reporting-cadence
-///             gap `TouchWindowVerifier` exists to close — and it can only *deny* B the slice, never
-///             award it to A (`test_CreditsOnlyTheQualifyingSubset`).
+///          2. **What happens to actions A already drove but nobody reported yet?** They stay with
+///             A. The registry keeps every superseded touch, so `reportUserAction` can ask who held
+///             the user at each action's block and split one report across promoters. A report
+///             carrying no per-action evidence has nothing to split, so it is only accepted while one
+///             promoter held the user for the whole span since the last report.
 ///
-///         The practical consequence: reporting cadence is an attribution parameter, not just an
-///         ops detail. The longer the gap between reports, the more of A's work a later B can take.
+///         So reporting cadence is an ops detail again rather than an attribution parameter — as long
+///         as the reporter sends evidence.
 contract PromoterSwitchTest is Test {
     uint256 internal constant POOL = 10_000 ether;
     uint64 internal constant MAX_TOUCH = 30 days;
@@ -102,10 +102,36 @@ contract PromoterSwitchTest is Test {
         assertEq(attribution.activePromoter(address(campaign), user), idB, "B holds attribution now");
     }
 
-    /// @dev Q2, the expensive half. A drives 50 units, nobody reports, B takes over, and the first
-    ///      report credits **all 50 to B** — including everything that happened before B existed in
-    ///      the picture. A is paid nothing.
-    function test_UnreportedWorkFollowsTheNewPromoter() public {
+    /// @dev Q2. A drives 30 units, nobody reports, B takes over and drives 20 more. One report
+    ///      carrying both actions pays each promoter for their own.
+    function test_UnreportedWorkStaysWithTheOriginalPromoter() public {
+        bytes32 idA = _join(promoterA);
+        bytes32 idB = _join(promoterB);
+
+        Types.Action[] memory actions = new Types.Action[](2);
+
+        _touch(idA, 7 days);
+        _advance(1 hours);
+        actions[0] = _act(30);
+
+        _advance(1 days);
+        _touch(idB, 7 days);
+        _advance(1 hours);
+        actions[1] = _act(20);
+
+        _report(50, _evidence(actions));
+
+        assertEq(campaign.progressOf(promoterA, 0), 30, "A keeps what A drove");
+        assertEq(campaign.progressOf(promoterB, 0), 20, "B receives only their own");
+        assertEq(campaign.creditedToOf(user, 0, idA), 30);
+        assertEq(campaign.creditedToOf(user, 0, idB), 20);
+        assertEq(token.balanceOf(promoterA), TIER_REWARD, "A is paid");
+        assertEq(token.balanceOf(promoterB), TIER_REWARD, "and so is B");
+    }
+
+    /// @dev With no per-action evidence there is nothing to split the delta by, and a switch inside
+    ///      the unreported span means the work's own promoter is unknowable. Refused, not guessed.
+    function test_EmptyEvidenceAfterASwitchIsRejected() public {
         bytes32 idA = _join(promoterA);
         bytes32 idB = _join(promoterB);
 
@@ -116,16 +142,217 @@ contract PromoterSwitchTest is Test {
         _touch(idB, 7 days);
 
         vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
         campaign.reportUserAction(0, user, 50, "");
 
-        assertEq(campaign.progressOf(promoterA, 0), 0, "A gets nothing for work they drove");
-        assertEq(campaign.progressOf(promoterB, 0), 50, "B is credited for all of it");
-        assertEq(token.balanceOf(promoterB), TIER_REWARD, "and paid");
+        assertEq(campaign.progressOf(promoterA, 0), 0, "nothing moves either way");
+        assertEq(campaign.progressOf(promoterB, 0), 0);
     }
 
-    /// @dev The mitigation available today with no new contract code: report before the switch.
-    ///      Credit already banked is A's permanently, and cumulative `newTotal` means B only ever
-    ///      receives the delta after that point.
+    /// @dev The fallback itself is unchanged: one promoter across the span has nothing to confuse, so
+    ///      an evidence-free report still credits the touch holder.
+    function test_EmptyEvidenceWithOnePromoterStillCredits() public {
+        bytes32 idA = _join(promoterA);
+        _join(promoterB);
+
+        _touch(idA, 7 days);
+        _advance(1 hours);
+
+        vm.prank(project);
+        campaign.reportUserAction(0, user, 50, "");
+
+        assertEq(campaign.progressOf(promoterA, 0), 50, "A held the whole span");
+        assertEq(campaign.progressOf(promoterB, 0), 0);
+        assertEq(token.balanceOf(promoterA), TIER_REWARD, "and is paid");
+    }
+
+    /// @dev A promoter re-signing the same user is not a switch, so the span stays unambiguous.
+    function test_EmptyEvidenceSurvivesARetouchByTheSamePromoter() public {
+        bytes32 idA = _join(promoterA);
+
+        _touch(idA, 1 days);
+        skip(2 days); // lapses, which is what lets the same promoter touch again
+        _advance(1 hours);
+        _touch(idA, 7 days);
+        _advance(1 hours);
+
+        vm.prank(project);
+        campaign.reportUserAction(0, user, 50, "");
+
+        assertEq(campaign.progressOf(promoterA, 0), 50, "two touches, one promoter");
+    }
+
+    /// @dev The span starts at the last report, not at the campaign, so a switch already accounted
+    ///      for does not block evidence-free reports forever.
+    function test_EmptyEvidenceIsAcceptedOnceTheSwitchIsBehindTheLastReport() public {
+        bytes32 idA = _join(promoterA);
+        bytes32 idB = _join(promoterB);
+
+        _touch(idA, 7 days);
+        _advance(1 hours);
+        Types.Action[] memory actions = new Types.Action[](1);
+        actions[0] = _act(10);
+
+        _advance(1 hours);
+        _touch(idB, 7 days);
+        _advance(1 hours);
+        _report(10, _evidence(actions));
+
+        assertEq(campaign.progressOf(promoterA, 0), 10, "A's action is A's");
+        assertEq(campaign.lastReportBlockOf(user, 0), uint64(block.number), "the span is closed here");
+
+        _advance(1 hours);
+        vm.prank(project);
+        campaign.reportUserAction(0, user, 40, "");
+
+        assertEq(campaign.progressOf(promoterB, 0), 30, "and the rest is B's alone to take");
+    }
+
+    // ── boundaries of the split ──────────────────────────────────
+
+    /// @dev A touch stored in the action's own block does not capture it: the registry takes the
+    ///      newest touch already on chain *before* that block, so ties go to the older promoter.
+    function test_TouchSharingAnActionsBlockCreditsTheOlderPromoter() public {
+        bytes32 idA = _join(promoterA);
+        bytes32 idB = _join(promoterB);
+
+        _touch(idA, 7 days);
+        _advance(1 hours);
+
+        // B's touch and the action land in the same block.
+        _touch(idB, 7 days);
+        Types.Action[] memory actions = new Types.Action[](1);
+        actions[0] = _act(10);
+
+        _advance(1 hours);
+        _report(10, _evidence(actions));
+
+        assertEq(campaign.progressOf(promoterA, 0), 10, "the block A still held is A's");
+        assertEq(campaign.progressOf(promoterB, 0), 0);
+        assertEq(token.balanceOf(promoterA), TIER_REWARD);
+    }
+
+    /// @dev A report the verifier's ceiling cut short finishes on the next one without moving credit
+    ///      off its promoter. The oldest work is covered first, so B's slice is deferred, not lost.
+    function test_CeilingLimitedReportCompletesOnTheRightPromoter() public {
+        bytes32 idA = _join(promoterA);
+        bytes32 idB = _join(promoterB);
+
+        Types.Action[] memory actions = new Types.Action[](2);
+
+        _touch(idA, 7 days);
+        _advance(1 hours);
+        actions[0] = _act(30);
+
+        _advance(1 days);
+        _touch(idB, 7 days);
+        _advance(1 hours);
+        actions[1] = _act(20);
+
+        // The evidence covers both actions, but the reported total has only caught up to A's.
+        _report(30, _evidence(actions));
+        assertEq(campaign.progressOf(promoterA, 0), 30);
+        assertEq(campaign.progressOf(promoterB, 0), 0, "B's slice is deferred");
+
+        _report(50, _evidence(actions));
+        assertEq(campaign.progressOf(promoterA, 0), 30, "A is not credited twice");
+        assertEq(campaign.progressOf(promoterB, 0), 20, "the remainder lands on the promoter who drove it");
+        assertEq(campaign.userCreditedOf(user, 0), 50);
+    }
+
+    /// @dev An action performed after a touch lapsed with no successor credits nobody, rather than
+    ///      falling to whoever appears next. The report writes nothing, so it stays reportable.
+    function test_ActionInAnAttributionGapCreditsNobody() public {
+        bytes32 idA = _join(promoterA);
+        _join(promoterB);
+
+        _touch(idA, 1 days);
+        _advance(2 days);
+
+        Types.Action[] memory actions = new Types.Action[](1);
+        actions[0] = _act(10);
+
+        _advance(1 hours);
+        _report(10, _evidence(actions));
+
+        assertEq(campaign.progressOf(promoterA, 0), 0, "an expired touch credits nothing");
+        assertEq(campaign.progressOf(promoterB, 0), 0, "and it does not fall to the next promoter");
+        assertEq(campaign.userCreditedOf(user, 0), 0, "nothing was written off");
+    }
+
+    /// @dev Two spells for the same promoter are one tally, and the per-promoter ledger always sums
+    ///      back to the user's watermark.
+    function test_SplitReportKeepsTheLedgerConsistent() public {
+        bytes32 idA = _join(promoterA);
+        bytes32 idB = _join(promoterB);
+
+        Types.Action[] memory actions = new Types.Action[](4);
+
+        _touch(idA, 7 days);
+        _advance(1 hours);
+        actions[0] = _act(5);
+
+        _advance(1 hours);
+        _touch(idB, 7 days);
+        _advance(1 hours);
+        actions[1] = _act(7);
+
+        _advance(1 hours);
+        _touch(idA, 7 days);
+        _advance(1 hours);
+        actions[2] = _act(3);
+        _advance(1 hours);
+        actions[3] = _act(4);
+
+        _report(19, _evidence(actions));
+
+        assertEq(campaign.progressOf(promoterA, 0), 12, "A's two spells are one tally");
+        assertEq(campaign.progressOf(promoterB, 0), 7);
+        assertEq(campaign.totalProgress(0), 19, "the campaign total is the sum of the parts");
+        assertEq(
+            campaign.creditedToOf(user, 0, idA) + campaign.creditedToOf(user, 0, idB),
+            campaign.userCreditedOf(user, 0),
+            "the per-promoter ledger sums to the watermark"
+        );
+    }
+
+    /// @dev The oldest-first walk relies on block order, so evidence that goes backwards is rejected
+    ///      rather than mis-split.
+    function test_OutOfOrderEvidenceIsRejected() public {
+        bytes32 idA = _join(promoterA);
+        _touch(idA, 7 days);
+
+        Types.Action[] memory actions = new Types.Action[](2);
+        _advance(1 hours);
+        actions[1] = _act(5);
+        _advance(1 hours);
+        actions[0] = _act(5);
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.UnorderedEvidence.selector, 1));
+        campaign.reportUserAction(0, user, 10, _evidence(actions));
+    }
+
+    /// @dev The walk is bounded, so one report cannot be made arbitrarily expensive.
+    function test_TooManyActionsIsRejected() public {
+        bytes32 idA = _join(promoterA);
+        _touch(idA, 7 days);
+        _advance(1 hours);
+
+        uint256 max = campaign.MAX_EVIDENCE_ACTIONS();
+        Types.Action[] memory actions = new Types.Action[](max + 1);
+        for (uint256 i; i < actions.length; ++i) {
+            actions[i] = _act(1);
+        }
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TooManyActions.selector, max + 1, max));
+        campaign.reportUserAction(0, user, max + 1, _evidence(actions));
+    }
+
+    /// @dev What still works on the no-evidence path: report before the switch. Credit already banked
+    ///      is A's permanently, and cumulative `newTotal` means B only ever receives the delta after
+    ///      that point.
     function test_ReportingBeforeTheSwitchBanksItForA() public {
         bytes32 idA = _join(promoterA);
         bytes32 idB = _join(promoterB);
@@ -288,5 +515,29 @@ contract PromoterSwitchTest is Test {
     function _touch(bytes32 promoterId, uint64 ttl) internal {
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _sign(promoterId, ttl);
         attribution.storeTouch(user, t, sig, address(this));
+    }
+
+    /// @dev Foundry's `skip` only moves the clock. The block has to be rolled too, or evidence shares
+    ///      a block with its own touch and resolves to the promoter before it.
+    function _advance(uint256 seconds_) internal {
+        skip(seconds_);
+        vm.roll(block.number + 1);
+    }
+
+    function _act(uint256 amount) internal view returns (Types.Action memory) {
+        return Types.Action({
+            blockNumber: uint64(block.number),
+            timestamp: uint64(block.timestamp),
+            amount: amount
+        });
+    }
+
+    function _evidence(Types.Action[] memory actions) internal pure returns (bytes memory) {
+        return abi.encode(actions);
+    }
+
+    function _report(uint256 newTotal, bytes memory evidence) internal {
+        vm.prank(project);
+        campaign.reportUserAction(0, user, newTotal, evidence);
     }
 }

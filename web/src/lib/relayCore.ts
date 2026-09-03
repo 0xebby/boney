@@ -1,29 +1,23 @@
 import {decodeEventLog, parseAbiItem, getAddress, toEventSelector, type AbiEvent, type Hex} from "viem";
 import {AMOUNT_MODE, type AmountMode} from "./kpiSource";
+import type {AttributionLookup} from "./attributionWindows";
 
 /**
  * Turning raw event logs into the `reportBatch` calls `EventMetricKpiVerifier` will accept.
  *
  * The relayer's half of KPI verification. Where `indexerCore.ts` decides what a *project* may claim,
  * this decides what Boney will independently vouch for — and since a claim is capped at that number,
- * a bug here silently under- or over-credits every promoter on a campaign. So the same split applies:
- * `scripts/relay-kpi-metric.ts` is I/O (RPC pagination, key handling, transactions) and everything
- * that can be *wrong* lives here, where a fixture log can prove it.
- *
- * Pure and React-free (decision F6), like `indexerCore.ts` and `kpiSource.ts`.
+ * a bug here silently under- or over-credits every promoter on a campaign.
  *
  * Two things here are not obvious and are the reason this is not just a `getLogs` loop:
  *
  *  - **Decoding is delegated to a real ABI decoder.** The config stores a full human-readable event
  *    signature, so `parseAbiItem` builds a real `AbiEvent` and viem decodes any shape — any param
- *    count, any mix of indexed and non-indexed, any uint width. The alternative, reading a fixed
- *    32-byte word out of `log.data`, breaks silently the moment a project's event layout differs from
- *    the one it was written against.
+ *    count, any mix of indexed and non-indexed, any uint width.
  *
- *  - **Activity before a user was attributed must not count.** A promoter did not cause activity that
- *    predates their touch, so each log is checked against its own user's `signedAt` before it is
- *    folded in. This is the same rule `TouchWindowVerifier` enforces on chain, applied here so the
- *    cap itself already excludes it.
+ *  - **Activity nobody was attributed for must not count.** A promoter did not cause activity that
+ *    predates their touch, so each log is resolved against the attribution windows in
+ *    `attributionWindows.ts`.
  */
 
 /** How matching events fold into a total. Mirrors `EventMetricKpiVerifier.Aggregation`. */
@@ -72,7 +66,7 @@ export type DecodedEvent = {
   blockNumber: bigint;
 };
 
-// ── the event ────────────────────────────────────────────────────
+// ── event handling ───────────────────────────────────────────────
 
 /**
  * Builds a real ABI event from the stored human-readable signature.
@@ -127,7 +121,7 @@ export function validateParamIndexes(event: AbiEvent, config: KpiConfig): void {
         `(${event.inputs.length} params).`,
     );
   }
-  if (!valueParam.type.startsWith("uint")) {
+  if (!valueParam.type.startsWith("uint")) { 
     throw new Error(
       `valueParamIndex ${config.valueParamIndex} points at a "${valueParam.type}" param, ` +
         `which cannot be summed.`,
@@ -161,14 +155,13 @@ export type ScanRange =
  *
  * **Resumes at `checkpoint + 1`.** The checkpoint is the last block the relayer has confirmed it fully
  * incorporated, and it is persisted on chain (`lastScannedBlock`, advanced inside the same transaction
- * that writes the totals), so it is exactly the watermark a resume needs — no local state file, and
- * nothing to lose.
+ * that writes the totals).
  *
  * This has to match `nextTotals`, which adds this run's deltas onto the figure already stored. A full
- * rescan combined with an additive write counts the same activity once per cycle: with one deposit in
- * the window and a loop running every two minutes, the observed ceiling climbed 1 → 13 while the real
- * count stayed 1. Measured on the 08-21 fixture, not theorised. The two halves have to agree on
- * whether a scan produces a delta or a total, and the delta reading is the one that keeps a credited
+ * rescan combined with an additive write counts the same activity once per cycle. 
+ * 
+ * The two halves have to agree on whether a scan produces a delta or a total, 
+ * and the delta reading is the one that keeps a credited
  * range from being credited again.
  *
  * Scanning only new blocks also makes RPC spend flat per cycle rather than growing with campaign age.
@@ -185,11 +178,7 @@ export type ScanRange =
  * Also stays `confirmations` behind the head, so a reorg cannot strand a checkpoint on a block that
  * no longer exists — the checkpoint is monotonic on chain and cannot be walked back.
  *
- * The retry story this gives up, and why that is fine: an absolute total could be re-pushed freely,
- * because pushing the same number twice is a no-op. A delta cannot. What replaces it is atomicity —
- * `reportBatch` writes the totals and advances the checkpoint in one transaction, so a failed run
- * moves neither and a retry recomputes the identical delta over the identical range. The one case that
- * needs care is a run split across several transactions; see `planReportBatches`.
+ * The one case that needs care is a run split across several transactions; see `planReportBatches`.
  */
 export function resolveScanRange(input: {
   checkpoint: bigint;
@@ -244,8 +233,7 @@ export function resolveScanRange(input: {
  * that turn out not to be creditable.
  *
  * A log that will not decode is skipped and counted rather than thrown on. Topic-0 filtering should
- * make it impossible, so a nonzero count is a signal worth surfacing, not a reason to abandon a run
- * that is otherwise correct.
+ * make it impossible.
  */
 export function decodeUserEvents(
   logs: readonly RelayLog[],
@@ -298,11 +286,6 @@ export function decodeUserEvents(
   return {decoded, undecodable};
 }
 
-/** Every distinct user touched this run — one attribution read each, not one per log. */
-export function uniqueUsers(decoded: readonly DecodedEvent[]): string[] {
-  return [...new Set(decoded.map((d) => d.user))];
-}
-
 /** Every distinct block touched this run — one timestamp read each; many logs share a block. */
 export function uniqueBlocks(decoded: readonly DecodedEvent[]): bigint[] {
   return [...new Set(decoded.map((d) => d.blockNumber))];
@@ -313,7 +296,7 @@ export function uniqueBlocks(decoded: readonly DecodedEvent[]): bigint[] {
 export type AggregateResult = {
   /** Lowercased user => creditable delta from this run's logs. */
   deltas: Map<string, bigint>;
-  /** Logs dropped because they predate their user's attribution. */
+  /** Logs dropped because nobody held attribution when they happened. */
   excludedPreAttribution: number;
   /** Users skipped entirely for having no touch at all. */
   unattributed: string[];
@@ -322,38 +305,43 @@ export type AggregateResult = {
 /**
  * Folds decoded logs into per-user deltas, keeping only what a promoter actually earned.
  *
- * Two exclusions, both of which would otherwise credit a promoter for activity they did not cause:
+ * Two exclusions, both of which would otherwise raise the ceiling above what any promoter can be
+ * credited:
  *
- *  - **No attribution at all** (`signedAt == 0`) — the activity belongs to no promoter. `Campaign`
- *    reverts `NoAttribution` for these users anyway, so reporting them would raise a cap nothing can
- *    ever draw against.
- *  - **Activity before the user's own `signedAt`** — the user acted before they were ever attributed
- *    to the promoter who now holds them.
+ *  - **No touch at all** — the activity belongs to no promoter and never will.
+ *  - **No promoter held the user at that action's block** — the action predates their first touch,
+ *    or falls in a gap after one lapsed. `Campaign` skips exactly these actions when it segments a
+ *    report, so a ceiling that included them could never be drawn against.
  *
- * A block with no known timestamp is treated as unresolved and excluded, because the alternative is
- * assuming it cleared the floor.
+ * Attribution is resolved per action rather than against the live touch, so work done under a
+ * superseded touch still counts — that work is retroactively creditable on chain, and flooring on
+ * the current `signedAt` would starve it.
+ *
+ * A block with no known timestamp is treated as unresolved and excluded.
  */
 export function aggregateDeltas(input: {
   decoded: readonly DecodedEvent[];
-  /** Lowercased user => `touchOf(campaign, user).signedAt`, 0 when never attributed. */
-  attributedAt: Map<string, bigint>;
+  /** Attribution as the chain would resolve it, from `attributionLookup`. */
+  attribution: AttributionLookup;
   blockTimestamps: Map<bigint, bigint>;
 }): AggregateResult {
-  const {decoded, attributedAt, blockTimestamps} = input;
+  const {decoded, attribution, blockTimestamps} = input;
 
   const deltas = new Map<string, bigint>();
   const unattributed = new Set<string>();
   let excludedPreAttribution = 0;
 
   for (const {user, value, blockNumber} of decoded) {
-    const signedAt = attributedAt.get(user);
-    if (signedAt === undefined || signedAt === BigInt(0)) {
+    if (!attribution.known(getAddress(user))) {
       unattributed.add(user);
       continue;
     }
 
     const eventTimestamp = blockTimestamps.get(blockNumber);
-    if (eventTimestamp === undefined || eventTimestamp < signedAt) {
+    if (
+      eventTimestamp === undefined ||
+      !attribution.at(getAddress(user), blockNumber, eventTimestamp)
+    ) {
       excludedPreAttribution++;
       continue;
     }
@@ -400,14 +388,14 @@ export type ReportBatch = {
  *
  * This is the part that makes a partially failed run safe to retry. If every transaction carried the
  * new checkpoint, a run that died halfway would leave the checkpoint claiming a range whose later
- * totals were never stored, and the monotonic guard on chain means it can never be walked back — the
- * gap would be permanent. Holding the old checkpoint until the final transaction means a failure
+ * totals were never stored, and the monotonic guard on chain means it can never be walked back. 
+ * 
+ * Holding the old checkpoint until the final transaction means a failure
  * leaves it untouched, and re-running recomputes the identical delta over the identical range.
  *
  * ## Why splitting is refused rather than performed
- *
- * That retry story only holds while a run is a *single* transaction. Totals are additive
- * (`nextTotals` = stored + delta), so re-reporting a batch is not a no-op the way re-pushing an
+ * 
+ *Totals are additive(`nextTotals` = stored + delta), so re-reporting a batch is not a no-op the way re-pushing an
  * absolute total was. With more than one transaction there is no safe checkpoint to carry:
  *
  *  - old checkpoint on the non-final batches — batch 1 commits, batch 2 fails, the retry rescans the
@@ -415,13 +403,10 @@ export type ReportBatch = {
  *    inflates the very ceiling the guarded verifier exists to enforce.
  *  - new checkpoint on every batch — batch 1 commits and moves the watermark past a range whose
  *    remaining users were never reported. Their activity is unreachable for the rest of the epoch.
- *
- * Both are silent. So a run that will not fit in one transaction throws instead, which is recoverable
- * (narrow the range and re-run) where the alternatives are not. The correct shape when this becomes
- * real is to split by **block sub-range** rather than by user: each transaction then covers a range it
+ * 
+ *The correct shape when this becomes real is to split by **block sub-range** rather than by user: each transaction then covers a range it
  * fully incorporated and carries that range's own end as its checkpoint, which is self-consistent and
- * retry-safe at any width. `size` is 200 and the live fixtures report one or two users, so this is a
- * guard against a future run, not a limitation anyone is hitting.
+ * retry-safe at any width. `size` is 200 and the live fixtures report one or two users.
  */
 export function planReportBatches(input: {
   users: readonly `0x${string}`[];
@@ -486,8 +471,9 @@ export function actorTopicToParamIndex(event: AbiEvent, actorTopic: number): num
  * Whether the verifier's config and the indexer's event-source blob describe the same event.
  *
  * The two halves read their configuration from different places — the relayer from
- * `EventMetricKpiVerifier.kpiConfigs`, the indexer from `KpiSpec.params` — so they can drift. The
- * failure mode is quiet and expensive: the project claims progress from one event while Boney
+ * `EventMetricKpiVerifier.kpiConfigs`, the indexer from `KpiSpec.params` — so they can drift. 
+ * 
+ * The failure mode is quiet and expensive: the project claims progress from one event while Boney
  * verifies a different one, so the cap sits at 0 and every report is a silent no-op. Checked at
  * startup instead, where it is one comparison.
  *
@@ -528,10 +514,14 @@ export function describeConfigDrift(input: {
   }
 
   // The actor is the worst of these to get wrong, because both halves keep working and simply credit
-  // *different wallets*. A `Transfer` KPI pointed at `to` on one side and `from` on the other means
+  // *different wallets*. 
+  // 
+  // A `Transfer` KPI pointed at `to` on one side and `from` on the other means
   // the project claims for recipients while Boney only ever observed senders, so `min(claim,
   // observed)` is 0 for every user and nothing is ever credited — no revert, no error, just progress
-  // that never moves. It is also the one field that cannot be repaired after the fact: `actorTopic`
+  // that never moves. 
+
+  // It is also the one field that cannot be repaired after the fact: `actorTopic`
   // lives in the immutable `KpiSpec.params`, so a mismatch means recreating the campaign.
   if (indexerActorTopic !== undefined) {
     const indexerParamIndex = actorTopicToParamIndex(event, indexerActorTopic);
@@ -559,9 +549,13 @@ export function describeConfigDrift(input: {
 
   // Aggregation is the disagreement that changes the *unit* rather than the magnitude: a count of
   // events and a sum of token values are not the same quantity, so neither number means what the
-  // other half thinks it does. Checked because it actually happened — `SeedDemo` encoded `count` in
+  // other half thinks it does. 
+
+  // Checked because it actually happened — `SeedDemo` encoded `count` in
   // `params` while configuring the verifier for `SUM`, and the two other comparisons here both
-  // passed. The indexer then folded 1 per log, divided by the 1e18 token scale, floored every
+  // passed. 
+  
+  // The indexer then folded 1 per log, divided by the 1e18 token scale, floored every
   // referral to zero, and reported nothing at all, while Boney observed real volume. Silent on both
   // sides: no revert, just progress bars that never moved.
   if (indexerAmountMode !== undefined) {

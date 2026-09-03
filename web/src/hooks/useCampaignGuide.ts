@@ -9,9 +9,9 @@ import {resolveCampaignGuide, type CampaignGuide, type ResolvedGuide} from "@/li
  * catalog's.
  *
  * The catalog is already in the bundle, so `resolveCampaignGuide` runs synchronously on the first
- * paint and the fetch only ever *upgrades* the answer. That ordering is deliberate: the five live
- * fixture campaigns render their guide immediately, and a campaign created through the form fills in a
- * moment later. Nothing waits on the network to show something it already knows.
+ * paint and the fetch only ever *upgrades* the answer. That ordering is deliberate: the seeded fixture
+ * campaigns render their guide immediately, and a campaign created through the form fills in a moment
+ * later. Nothing waits on the network to show something it already knows.
  *
  * A failed fetch is not an error state. `retry: false` and no error surface: if `/api/campaign-guide`
  * is unreachable the catalog still answers, and a campaign page should not grow an error banner

@@ -4,25 +4,38 @@ import {useMemo} from "react";
 import Link from "next/link";
 import {useAccount} from "wagmi";
 import {useCampaigns} from "@/hooks/useCampaigns";
-import {denominations, type TokenMeta} from "@/lib/token";
+import {type TokenMeta} from "@/lib/token";
+import {poolValue} from "@/lib/poolValue";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatTile, StatRow} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {Meter} from "@/components/ui/Meter";
-import {Card} from "@/components/ui/Card";
+import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
+import {ReferredCampaigns} from "@/components/ReferredCampaigns";
 import {utilization} from "@/lib/campaign";
 import {projectName, hasProjectName} from "@/lib/projects";
-import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
+import {
+  formatTokenAmount,
+  formatPercent,
+  formatTimeUntil,
+  formatUsd,
+  shortAddress,
+} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
 /**
- * `/my` — campaigns the connected wallet created.
+ * `/my` — the connected wallet's own positions: campaigns it created, and campaigns it was
+ * referred to.
  *
  * Ownership is `CampaignView.project`, which the marketplace already fetches, so this is a filter
  * over the same query rather than a second read path. That also means it shares the cache: a
  * campaign created on `/create` shows up here without an extra round trip.
+ *
+ * The referrals card is the same `ReferredCampaigns` the promoter dashboard renders. It lives here
+ * too because `/my` is the one personal tab every connected wallet gets, and a wallet that only
+ * ever signed somebody's boneylink is a referral with no membership and no campaign of its own.
  */
 export function MyCampaignsPage() {
   const {address, isConnected} = useAccount();
@@ -34,25 +47,14 @@ export function MyCampaignsPage() {
     return campaigns.filter((c) => c.project.toLowerCase() === address.toLowerCase());
   }, [campaigns, address]);
 
-  const totals = useMemo(() => {
-    return mine.reduce(
-      (acc, c) => ({
-        pool: acc.pool + c.rewardPool,
-        paidOut: acc.paidOut + c.paidOut,
-        active: acc.active + (c.status === "Active" ? 1 : 0),
-      }),
-      {pool: BigInt(0), paidOut: BigInt(0), active: 0},
-    );
-  }, [mine]);
+  const activeCount = useMemo(
+    () => mine.filter((c) => c.status === "Active").length,
+    [mine],
+  );
 
-  // Mixed-token totals do not add up to anything meaningful, so the tiles fall back to a count
-  // of units — see `denominations` for what makes two token contracts one unit.
-  const units = useMemo(() => denominations(mine, tokens), [mine, tokens]);
-  const singleToken = units.length === 1 ? units[0] : undefined;
-
-  // Only reached with zero or 2+ units, so there is no singular case to spell. No campaigns
-  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
-  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
+  // Reward pools are stablecoin-denominated, so the tiles read in dollars and campaigns escrowing
+  // different tokens still share one total — see `poolValue`.
+  const value = useMemo(() => poolValue(mine, tokens), [mine, tokens]);
 
   const columns = useMemo(() => buildColumns(tokens, now), [tokens, now]);
 
@@ -89,42 +91,34 @@ export function MyCampaignsPage() {
         <StatTile
           label="Your campaigns"
           value={mine.length.toLocaleString("en-US")}
-          hint={`${totals.active} active`}
+          hint={`${activeCount} active`}
         />
         <StatTile
           label="Total escrowed"
-          value={
-            singleToken
-              ? formatTokenAmount(totals.pool, singleToken.decimals, {compact: true})
-              : mixedLabel
-          }
-          unit={singleToken?.symbol}
+          value={formatUsd(value.pool, {compact: true})}
           //accent="var(--series-1)"
         />
         <StatTile
           label="Paid to promoters"
-          value={
-            singleToken
-              ? formatTokenAmount(totals.paidOut, singleToken.decimals, {compact: true})
-              : "—"
-          }
-          unit={singleToken?.symbol}
+          value={formatUsd(value.paidOut, {compact: true})}
           //accent="var(--series-3)"
         />
-        {/*
-          Gated on a single unit like the two tiles beside it: the percentage looks unitless, but
-          it divides one sum of token amounts by another, so a mixed list makes it as meaningless
-          as the totals above — and quieter about it, since a bare "15.7%" gives no hint that two
-          different tokens went into it.
-        */}
         <StatTile
           label="Pool utilization"
-          value={singleToken ? formatPercent(Number(totals.paidOut), Number(totals.pool)) : "—"}
+          value={formatPercent(value.paidOut, value.pool)}
           hint="across your campaigns"
         />
       </StatRow>
 
       <Card padded={false}>
+        {/* `Card` drops its padding so the table can run edge to edge; the header puts its own
+            back, matching the referrals card below it. */}
+        <div className="px-4 pt-4">
+          <CardHeader
+            title="Campaigns you created"
+            subtitle="Campaigns this wallet owns, and what each has paid out"
+          />
+        </div>
         {isLoading ? (
           <SkeletonRows rows={3} cols={7} />
         ) : error ? (
@@ -134,7 +128,7 @@ export function MyCampaignsPage() {
             rows={mine}
             columns={columns}
             rowKey={(c) => c.campaign}
-            initialSort={{key: "id", dir: "asc"}}
+            initialSort={{key: "name", dir: "asc"}}
             isRefreshing={isRefreshing}
             emptyState={
               <EmptyState
@@ -159,6 +153,8 @@ export function MyCampaignsPage() {
           />
         )}
       </Card>
+
+      <ReferredCampaigns campaigns={campaigns} isLoading={isLoading} />
     </div>
   );
 }
@@ -168,7 +164,8 @@ function Header() {
     <header>
       <h1 className="font-display text-2xl text-ink">My Campaigns</h1>
       <p className="mt-0.5 text-xs text-ink-muted">
-        Campaigns you created. Click one to <b>Fund, Activate, Pause, End, or Reclaim Unspent Escrow</b> funds.
+        Campaigns you created. Click one to <b>Fund, Activate, Pause, End, or Reclaim Unspent Escrow</b>{" "}
+        funds. Campaigns a promoter referred you to are listed below them.
       </p>
     </header>
   );
@@ -179,29 +176,31 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
 
   return [
     {
-      key: "id",
+      key: "name",
       header: "Campaign",
-      sortValue: (c) => c.campaignId,
+      // Sorts on the displayed title. Unnamed rows sort together under "Campaign #".
+      sortValue: (c) => (hasProjectName(c) ? projectName(c) : `Campaign #${c.campaignId}`),
       render: (c) => (
-        <Link href={`/campaign/${c.campaignId}`} className="font-medium text-ink hover:underline">
-          #{c.campaignId.toString()}
-          <span className="ml-2 font-normal text-ink-muted">{shortAddress(c.campaign)}</span>
-        </Link>
+        <span className="inline-flex items-center gap-2">
+          <Link href={`/campaign/${c.campaignId}`} className="font-medium text-ink hover:underline">
+            {hasProjectName(c) ? projectName(c) : `Campaign #${c.campaignId.toString()}`}
+          </Link>
+          {/* The owner's own operations page, where the id is the handle every script and
+              explorer link uses — so it is shown rather than revealed. */}
+          {hasProjectName(c) ? (
+            <span className="tnum text-xs text-ink-muted">#{c.campaignId.toString()}</span>
+          ) : null}
+        </span>
       ),
     },
     {
       key: "project",
       header: "Project",
-      // On this page every row is the connected wallet's own campaign, so the project column repeats
-      // one value down the table. First to go on a phone.
+      // Every row is the connected wallet's own campaign, so this repeats one address down the
+      // table. First to go on a phone.
       hideOnMobile: true,
-      sortValue: (c) => projectName(c),
-      render: (c) =>
-        hasProjectName(c) ? (
-          <span className="text-ink-secondary">{projectName(c)}</span>
-        ) : (
-          <span className="font-normal text-ink-muted">{shortAddress(c.project)}</span>
-        ),
+      sortValue: (c) => c.project.toLowerCase(),
+      render: (c) => <span className="text-ink-muted">{shortAddress(c.project)}</span>,
     },
     {
       key: "status",

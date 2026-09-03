@@ -92,11 +92,26 @@ export function hashKey(input: string): number {
 }
 
 /**
+ * The bands a derived profile draws its Ethos score and follower count from.
+ *
+ * `7*ethos + 3*reach` over these ranges composes to a BoneyScore between 20,550 and 26,464: clear of
+ * any `minReputation` the fixture gates on, and short of the 28,000 ceiling. The follower band spans
+ * 10^4 to ~10^6.6, which keeps reach a real point on the log curve rather than the 2800 clamp.
+ */
+const DERIVED_ETHOS_FLOOR = 2250;
+const DERIVED_ETHOS_SPREAD = 401;
+const DERIVED_FOLLOWER_FLOOR_EXP = 4;
+const DERIVED_FOLLOWER_EXP_SPREAD = 2.6;
+
+/**
  * Pseudo-profile for an unpinned key.
  *
- * Spread across the whole rank ladder rather than clustered, so a directory of derived wallets
- * exercises the reach curve instead of collapsing to one point. The exponent gives follower counts
- * from ~100 to ~50M.
+ * Banded high rather than spread across the whole rank ladder. A key reaches this function because its
+ * wallet is on the stub allowlist, and an allowlisted wallet that still lands under a campaign's gate
+ * is indistinguishable from a bypass that did not take effect — so the weakest derived profile clears
+ * the gate. Figures still vary per key within the band, so a directory of derived wallets exercises
+ * the reach curve instead of collapsing to one point; a wallet that has to read *low*, to test a
+ * refusal, is what `BONEY_STUB_PINS` is for.
  */
 export function derivedProfile(key: string): {
   score: number;
@@ -105,10 +120,11 @@ export function derivedProfile(key: string): {
   profileId: number;
 } {
   const h = hashKey(key.toLowerCase());
-  const exponent = 2 + (((h >>> 11) % 1000) / 1000) * 4.7;
+  const exponent =
+    DERIVED_FOLLOWER_FLOOR_EXP + (((h >>> 11) % 1000) / 1000) * DERIVED_FOLLOWER_EXP_SPREAD;
   const followers = Math.round(10 ** exponent);
   return {
-    score: 600 + (h % 2051),
+    score: DERIVED_ETHOS_FLOOR + (h % DERIVED_ETHOS_SPREAD),
     followers,
     smartFollowers: Math.floor(followers * (0.001 + ((h >>> 21) % 40) / 10_000)),
     profileId: 10_000 + (h % 90_000),

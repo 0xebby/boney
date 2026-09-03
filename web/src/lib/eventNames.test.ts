@@ -22,6 +22,9 @@ const SYGMA_DEPOSIT_TOPIC =
 /** WETH9's, pinned the same way in `kpiSource.test.ts`. */
 const WETH_DEPOSIT_TOPIC =
   "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c" as const;
+/** Gyndore's staking event, from `script/SeedGyndore.s.sol` — matched against live Base Sepolia logs. */
+const GYNDORE_STAKED_TOPIC =
+  "0x5dac0c1b1112564a045ba943c9d50270893e8e826c49be8e7073adc713ab7bd7" as const;
 
 const AAVE_POOL = "0x8bAB6d1b75f19e9eD9fCe8b9BD338844fF79aE27" as const;
 const BUSD = "0x2755a4A19B9B4d3B1e9Bd1cDe3B5DB2A0f9AdCc2" as const;
@@ -86,6 +89,10 @@ describe("catalogSignature", () => {
     expect(catalogSignature(SYGMA_DEPOSIT_TOPIC)).toBe(
       "Deposit(uint8,bytes32,uint64,address,bytes,bytes)",
     );
+  });
+
+  it("names Gyndore's staking event, whose topic was matched against live logs", () => {
+    expect(catalogSignature(GYNDORE_STAKED_TOPIC)).toBe("Staked(address,address,uint256)");
   });
 
   it("names the ERC-20 transfer every seeded demo campaign watches", () => {

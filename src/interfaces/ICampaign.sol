@@ -21,6 +21,7 @@ interface ICampaign {
     error AggregateKpi(uint256 kpiIndex);
     error NotAggregateKpi(uint256 kpiIndex);
     error NoAttribution(address user);
+    error AmbiguousAttribution(address user, uint256 kpiIndex);
     error NonMonotonic(uint256 current, uint256 provided);
     error VerifierOvercredit(uint256 credited, uint256 max);
     error OutsideWindow(uint64 startTime, uint64 endTime);
@@ -38,6 +39,8 @@ interface ICampaign {
     error CustomKpiNeedsVerifier(uint256 kpiIndex);
     error TooManyKpis(uint256 provided, uint256 max);
     error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
+    error TooManyActions(uint256 provided, uint256 max);
+    error UnorderedEvidence(uint256 index);
 
     // ── events ───────────────────────────────────────────────────
 
@@ -119,11 +122,16 @@ interface ICampaign {
     /// @notice Credit an attributed end-user action toward the promoter who owns that user.
     /// @dev Callable by the project or the oracle coordinator. Runs the KPI's verifier adapter
     ///      when one is configured, then settles any newly crossed tiers.
+    ///
+    ///      With per-action `evidence` the credited amount is split across the promoters who held the
+    ///      user when each action happened, one `ProgressCredited` each. With empty `evidence` it all
+    ///      goes to whoever holds attribution now.
     /// @param kpiIndex Index of the KPI being reported against.
     /// @param user The end user whose action is credited.
     /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta. Only
     ///        `newTotal` minus what was already credited is applied, so replays are no-ops.
-    /// @param evidence Report-specific proof data forwarded to the KPI's verifier.
+    /// @param evidence Report-specific proof data forwarded to the KPI's verifier. An abi-encoded
+    ///        `Types.Action[]`, ascending by `blockNumber`, or empty.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external;
 

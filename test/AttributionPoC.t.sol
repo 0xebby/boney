@@ -242,9 +242,14 @@ contract AttributionPoCTest is Test {
 
         assertEq(attribution.activePromoter(address(campaign), user), kol2Id, "attribution held");
 
-        // 4. The user's activity pays kol2, as intended.
+        // 4. The user's activity, driven after the switch, pays kol2 as intended.
+        vm.roll(block.number + 1);
+        Types.Action[] memory actions = new Types.Action[](1);
+        actions[0] =
+            Types.Action({blockNumber: uint64(block.number), timestamp: uint64(block.timestamp), amount: 10});
+
         vm.prank(project);
-        campaign.reportUserAction(0, user, 10, "");
+        campaign.reportUserAction(0, user, 10, abi.encode(actions));
 
         assertEq(campaign.progressOf(kol2, 0), 10, "kol2 credited");
         assertEq(campaign.progressOf(kol, 0), 0, "kol gets nothing");

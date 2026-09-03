@@ -4,7 +4,9 @@ import {useMemo, useState} from "react";
 import Link from "next/link";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
 import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
-import {denominations, type TokenMeta} from "@/lib/token";
+import {useCampaignGuides} from "@/hooks/useCampaignGuides";
+import {type TokenMeta} from "@/lib/token";
+import {poolValue} from "@/lib/poolValue";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
@@ -14,6 +16,8 @@ import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
+import {WelcomeDialog} from "@/components/WelcomeDialog";
+import {welcomeFigure} from "@/lib/welcome";
 import {
   filterCampaigns,
   summarize,
@@ -23,8 +27,9 @@ import {
 } from "@/lib/filters";
 import {utilization} from "@/lib/campaign";
 import {summarizeKinds} from "@/lib/kpiSummary";
-import { projectName, hasProjectName } from "@/lib/projects";
-import {formatTokenAmount, formatPercent, formatTimeUntil, shortAddress} from "@/lib/format";
+import {projectName, hasProjectName} from "@/lib/projects";
+import type {ResolvedGuide} from "@/lib/campaignGuide";
+import {formatTokenAmount, formatPercent, formatTimeUntil, formatUsd} from "@/lib/format";
 import type {CampaignView, KpiSpec} from "@/lib/types";
 
 /**
@@ -60,6 +65,13 @@ export function CampaignsPage() {
   const {specs: kpiSpecs, dropped: kpiSpecsDropped} = useCampaignKpiSpecs(campaigns);
 
   /*
+    What each campaign is *for*, in the project's own words. The committed catalog is in the bundle,
+    so a row that has an entry reads immediately; a project-published guide arrives a moment later
+    and lands in the same cache the campaign page reads.
+  */
+  const guides = useCampaignGuides(useMemo(() => campaigns.map((c) => c.campaign), [campaigns]));
+
+  /*
     Which of these the connected wallet has already joined.
 
     Costs nothing extra here: `AppShell` runs this exact query on every route through
@@ -86,23 +98,26 @@ export function CampaignsPage() {
   );
   const summary = useMemo(() => summarize(visible), [visible]);
 
-  // The summary tiles read in whatever token the campaigns escrow. Mixed tokens would make a
-  // single total meaningless, so the tiles show a count of units instead in that case — see
-  // `denominations` for what makes two token contracts one unit.
+  // Reward pools are stablecoin-denominated, so the summary tiles read in dollars and campaigns
+  // escrowing different tokens still share one total — see `poolValue`.
   //
-  // Derived from `visible`, not `campaigns`, because `summary` is: filtering down to a
-  // single-token slice should denominate the totals that filter produced, rather than leave the
-  // row reporting a mix the table below no longer shows.
-  const units = useMemo(() => denominations(visible, tokens), [visible, tokens]);
-  const singleToken = units.length === 1 ? units[0] : undefined;
+  // Derived from `visible`, not `campaigns`, because `summary` is: filtering the list should
+  // retotal what the filter produced rather than leave the row reporting rows it no longer shows.
+  const value = useMemo(() => poolValue(visible, tokens), [visible, tokens]);
 
-  // Only reached with zero or 2+ units, so there is no singular case to spell. Nothing visible
-  // means there is no total to explain, and "0 tokens" reads as a balance rather than an absence.
-  const mixedLabel = units.length === 0 ? "—" : `${units.length} tokens`;
+  // The welcome dialog's headline number, from the same totals the tiles below read.
+  const welcome = useMemo(
+    () =>
+      welcomeFigure({
+        pool: value.pool,
+        activeCount: summary.activeCount,
+      }),
+    [value.pool, summary.activeCount],
+  );
 
   const columns = useMemo(
-    () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, chainId),
-    [tokens, now, joinedAddresses, kpiSpecs, chainId],
+    () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, guides, chainId),
+    [tokens, now, joinedAddresses, kpiSpecs, guides, chainId],
   );
 
   if (!deployed) {
@@ -117,179 +132,198 @@ export function CampaignsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      {/*
-        The list page doubles as the landing page, so the name gets hero treatment here rather
-        than the small page-title treatment every other route uses. Lowercase to match the brand
-        mark in the top bar.
-      */}
-      <header className="py-8 text-center sm:py-12">
-        <h1 className="font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-          Boneyard
-        </h1>
-        <p className="mx-auto mt-4 max-w-lg text-balance text-sm text-brand sm:text-base">
-          The Marketplace for Verifiable Web3 Growth.
-        </p>
+    <>
+      {/* Outside the column below, not the first child of it: `space-y-5` would give the overlay a
+          top margin, and an `inset-0` box shifts for one. */}
+      <WelcomeDialog figure={welcome} ready={!isLoading && !error} />
 
+      <div className="space-y-5">
         {/*
-          Search is promoted out of the filter row and into the hero: on a marketplace landing
-          page it is the primary way in, not one control among several. The status and
-          "joinable" filters stay below, where they scope the table they sit above.
+          The list page doubles as the landing page, so the name gets hero treatment here rather
+          than the small page-title treatment every other route uses. Lowercase to match the brand
+          mark in the top bar.
         */}
-        <div className="mx-auto mt-6 max-w-lg">
-          <label className="sr-only" htmlFor="campaign-search">
-            Search campaigns, project names, or campaign IDs
-          </label>
-          <input
-            id="campaign-search"
-            type="search"
-            value={filters.search}
-            onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
-            placeholder="Search campaigns, projects, or campaign IDs…"
-            className="h-11 w-full rounded-lg border border-hairline-strong bg-surface-1 px-4 text-sm text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand"
+        <header className="py-6 text-center sm:py-12">
+          {/*
+            The wordmark and both lines are one lockup, inside a `w-fit` box.
+
+            That box is as wide as its widest child, so no line can run wider than the name it sits
+            under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
+            it. Centring them against the page instead let the blocks meet at a shared midpoint while
+            their edges disagreed, which is what read as misaligned — and capping only the first line
+            left the second free to set the box's width, so the first one wrapped early inside a box
+            wider than the wordmark.
+          */}
+          <div className="mx-auto w-fit">
+            <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
+              Boneyard
+            </h1>
+            <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
+              The Marketplace for Verifiable Web3 Growth.
+            </p>
+
+            {/*
+              Capped to the same measure as the line above it. Left unbounded it was the widest child,
+              so it — not the wordmark — decided how wide the box was.
+            */}
+            <p className="animate-rise-in mx-auto mt-4 max-w-[15rem] text-balance text-xs leading-snug text-ink-secondary [animation-delay:120ms] sm:mt-5 sm:max-w-none">
+              Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
+            </p>
+          </div>
+        </header>
+
+        <StatRow>
+          <StatTile
+            label="Active campaigns"
+            value={summary.activeCount.toLocaleString("en-US")}
+            qualifier={`of ${summary.count.toLocaleString("en-US")}`}
           />
+          <StatTile
+            label="Total Reward Pool"
+            value={formatUsd(value.pool, {compact: true})}
+            //accent="var(--series-1)"
+          />
+          <StatTile
+            label="Rewards Earned"
+            value={formatUsd(value.paidOut, {compact: true})}
+            //accent="var(--series-3)"
+          />
+          {/*
+
+          */}
+          <StatTile
+            label="Pool Utilization"
+            value={formatPercent(value.paidOut, value.pool)}
+            //hint="across all campaigns"
+          />
+        </StatRow>
+
+        {/* One filter row above everything it scopes — never per-card filters. Search leads it, on the
+            same line as the status and eligibility controls it narrows with: it is one control among
+            them rather than a hero field, and sharing their row is what keeps the three baselines
+            aligned. The controls sit at the trailing edge, above the table's own right-aligned
+            columns; what the row *says* stays at the left.
+
+            Only from `sm` up, though. Below it the field takes the whole line and the rest wraps, and a
+            trailing edge there leaves each wrapped group at its own offset — which is the ragged column
+            the row exists to prevent. On a phone they stack against the left edge instead. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
+          {/* `flex-1` so the field runs from the left edge to whatever sits next in the row, rather than
+              stopping at a fixed width and leaving a gap the eye reads as a missing control. `min-w-56`
+              keeps a project name legible once the row is crowded. */}
+          <div className="w-full sm:min-w-56 sm:flex-1">
+            <label className="sr-only" htmlFor="campaign-search">
+              Search campaigns, project names, or campaign IDs
+            </label>
+            <input
+              id="campaign-search"
+              type="search"
+              value={filters.search}
+              onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
+              placeholder="Search campaigns, projects, or IDs…"
+              className="h-11 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand sm:h-8"
+            />
+          </div>
+
+          {/* No `mr-auto`: the field beside it already absorbs the row's free space, and two elements
+              competing for it split it between them. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
+            {visible.length !== campaigns.length ? (
+              <span className="text-xs text-ink-muted">
+                {visible.length} of {campaigns.length}
+              </span>
+            ) : null}
+
+            {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
+                column that quietly stopped describing the tail of the list would read as "no KPIs
+                here". */}
+            {kpiSpecsDropped > 0 ? (
+              <span className="text-xs text-ink-muted">
+                KPI kinds not loaded for {kpiSpecsDropped} campaign
+                {kpiSpecsDropped === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
+            <input
+              type="checkbox"
+              checked={filters.joinableOnly}
+              onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
+              className="size-3.5 accent-[var(--brand)]"
+            />
+            Joinable by me
+          </label>
+
+          {/* `flex-wrap`: six chips measure wider than a phone's content column, and wrapping inside
+              their own box keeps every status visible — an `overflow-x-auto` strip would put half of
+              them behind a gesture nothing advertises. */}
+          <div className="flex flex-wrap items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
+            {STATUS_OPTIONS.map((option) => {
+              const active = filters.status === option;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setFilters((f) => ({...f, status: option}))}
+                  aria-pressed={active}
+                  className={`rounded px-2 py-1.5 text-xs transition-colors sm:py-1 ${
+                    active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {option === "all" ? "All" : option}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/*
-          The "Create a campaign" button itself lives in the top bar, which has no room for a
-          subtitle — so its supporting line sits here instead, where the landing page can afford
-          to spell out what a project is actually signing up for.
-        */}
-        <p className="mt-5 text-xs text-ink-secondary">
-          Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
-        </p>
+        <Card padded={false}>
+          {isLoading ? (
+            <SkeletonRows rows={4} cols={7} />
+          ) : error ? (
+            <ErrorState message={String(error)} onRetry={() => refetch()} />
+          ) : (
+            <DataTable
+              rows={visible}
+              columns={columns}
+              rowKey={(c) => c.campaign}
+              initialSort={{key: "project", dir: "asc"}}
+              isRefreshing={isRefreshing}
+              emptyState={
+                <EmptyState
+                  title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
+                  description={
+                    campaigns.length === 0
+                      ? "Create the first campaign to start a performance-based collaboration."
+                      : "Try clearing the filters or widening your search."
+                  }
+                  action={
+                    campaigns.length === 0 ? (
+                      <Link
+                        href="/create"
+                        className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
+                      >
+                        Create a campaign
+                      </Link>
+                    ) : null
+                  }
+                />
+              }
+            />
+          )}
+        </Card>
 
-        <p className="mt-2 text-xs text-ink-muted">
+        {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
+            and not found what they came for is the one who wants an explanation, and the hero's job is
+            to get them to the list. */}
+        <p className="text-xs text-ink-muted">
           <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
             See how it works
           </Link>
         </p>
-      </header>
-
-      <StatRow>
-        <StatTile
-          label="Active campaigns"
-          value={summary.activeCount.toLocaleString("en-US")}
-          qualifier={`of ${summary.count.toLocaleString("en-US")}`}
-        />
-        <StatTile
-          label="Total Reward Pool"
-          value={
-            singleToken
-              ? formatTokenAmount(summary.totalPool, singleToken.decimals, {compact: true})
-              : mixedLabel
-          }
-          unit={singleToken?.symbol}
-          //accent="var(--series-1)"
-        />
-        <StatTile
-          label="Rewards Earned"
-          value={
-            singleToken
-              ? formatTokenAmount(summary.totalPaidOut, singleToken.decimals, {compact: true})
-              : "—"
-          }
-          unit={singleToken?.symbol}
-          //accent="var(--series-3)"
-        />
-        {/*
-
-        */}
-        <StatTile
-          label="Pool Utilization across all campaigns"
-          value={
-            singleToken
-              ? formatPercent(Number(summary.totalPaidOut), Number(summary.totalPool))
-              : "—"
-          }
-          //hint="across all campaigns"
-        />
-      </StatRow>
-
-      {/* One filter row above everything it scopes — never per-card filters. Search lives in the
-          hero above, so this row is status and eligibility only. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
-          {STATUS_OPTIONS.map((option) => {
-            const active = filters.status === option;
-            return (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setFilters((f) => ({...f, status: option}))}
-                aria-pressed={active}
-                className={`rounded px-2 py-1 text-xs transition-colors ${
-                  active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
-                }`}
-              >
-                {option === "all" ? "All" : option}
-              </button>
-            );
-          })}
-        </div>
-
-        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
-          <input
-            type="checkbox"
-            checked={filters.joinableOnly}
-            onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
-            className="size-3.5 accent-[var(--brand)]"
-          />
-          Joinable by me
-        </label>
-
-        {visible.length !== campaigns.length ? (
-          <span className="text-xs text-ink-muted">
-            {visible.length} of {campaigns.length}
-          </span>
-        ) : null}
-
-        {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a column
-            that quietly stopped describing the tail of the list would read as "no KPIs here". */}
-        {kpiSpecsDropped > 0 ? (
-          <span className="text-xs text-ink-muted">
-            KPI kinds not loaded for {kpiSpecsDropped} campaign
-            {kpiSpecsDropped === 1 ? "" : "s"}
-          </span>
-        ) : null}
       </div>
-
-      <Card padded={false}>
-        {isLoading ? (
-          <SkeletonRows rows={4} cols={7} />
-        ) : error ? (
-          <ErrorState message={String(error)} onRetry={() => refetch()} />
-        ) : (
-          <DataTable
-            rows={visible}
-            columns={columns}
-            rowKey={(c) => c.campaign}
-                initialSort={{ key: "id", dir: "asc" }}
-            isRefreshing={isRefreshing}
-            emptyState={
-              <EmptyState
-                title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
-                description={
-                  campaigns.length === 0
-                    ? "Create the first campaign to start a performance-based collaboration."
-                    : "Try clearing the filters or widening your search."
-                }
-                action={
-                  campaigns.length === 0 ? (
-                    <Link
-                      href="/create"
-                      className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
-                    >
-                      Create a campaign
-                    </Link>
-                  ) : null
-                }
-              />
-            }
-          />
-        )}
-      </Card>
-    </div>
+    </>
   );
 }
 
@@ -298,6 +332,7 @@ function buildColumns(
   now: number,
   joinedAddresses: ReadonlySet<string>,
   kpiSpecs: Record<string, KpiSpec[]>,
+  guides: Map<string, ResolvedGuide | null>,
   chainId?: number,
 ): Column<CampaignView>[] {
   const meta = (c: CampaignView) => tokens[c.token.toLowerCase()] ?? {symbol: "", decimals: 18};
@@ -321,40 +356,65 @@ function buildColumns(
     });
   };
 
+  /** The project's own line about the campaign, from its guide. */
+  const summaryFor = (c: CampaignView) =>
+    guides.get(c.campaign.toLowerCase())?.summary?.trim() || undefined;
+
   return [
     {
-      key: "id",
-      header: "Campaign",
-      sortValue: (c) => c.campaignId,
+      key: "project",
+      header: "Project",
+      // The campaign's on-chain name, which is what a project puts its own name in. The project
+      // wallet stands in where a campaign was created without one.
+      sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
+      // `min()` rather than a flat 220px: the same declaration is the column's share of a phone's
+      // width and its measure on a desktop, which an inline width cannot express with a breakpoint.
+      width: "min(220px, 42vw)",
+      /*
+        Capped at the column's own width, with the name truncating inside it.
+        `overflow-x-auto` handles the table's total; this line only has to stop one cell from
+        setting it. The table lays out `auto`, so a cell's widest possible content is what sizes
+        its column: an uncapped name — or a `Joined` badge that appears when the wallet connects
+        and vanishes when it disconnects — moved every column to its right. The cap makes this
+        column's measure a constant, so the badge is free to come and go.
+      */
       render: (c) => (
-        <span className="inline-flex items-center gap-2">
+        <span className="flex max-w-[42vw] items-center gap-2 sm:max-w-[220px]">
           <Link
             href={`/campaign/${c.campaignId}`}
-            className="font-medium text-ink hover:underline"
+            title={projectName(c)}
+            className="min-w-0 truncate font-medium text-ink hover:underline"
             onClick={(e) => e.stopPropagation()}
           >
-            #{c.campaignId.toString()}
-            <span className="ml-2 font-normal text-ink-muted">{shortAddress(c.campaign)}</span>
+            {projectName(c)}
           </Link>
           {hasJoined(c) ? <JoinedBadge /> : null}
         </span>
       ),
     },
     {
-      key: "project",
-      header: "Project",
+      key: "why",
+      header: "Campaign",
       hideOnMobile: true,
-      // Sorts on the displayed string, so the column orders the way it reads. Rows falling back
-      // to an address sort among themselves under "0x" rather than being scattered by name.
-      sortValue: (c) => projectName(c),
-      render: (c) =>
-        hasProjectName(c) ? (
-          <span className="text-ink-secondary">{projectName(c)}</span>
-        ) : (
-          // An address here means no name is on file — dimmed so it reads as absent metadata
-          // rather than as a project literally called "0xba95…".
-          <span className="font-normal text-ink-muted">{shortAddress(c.project)}</span>
-        ),
+      width: "320px",
+      // Sorts on the summary, so campaigns that say what they are for group ahead of the ones that
+      // do not. The numeric id is not here at all — it is on the campaign's own page.
+      sortValue: (c) => summaryFor(c) ?? "",
+      render: (c) => {
+        const summary = summaryFor(c);
+
+        // Nothing published yet. Said as an absence rather than filled with the KPI kinds, which
+        // are their own column and describe what is measured rather than what it is for.
+        if (!summary) {
+          return <span className="text-ink-muted">No campaign info yet</span>;
+        }
+
+        return (
+          <span className="line-clamp-2 text-ink-secondary" title={summary}>
+            {summary}
+          </span>
+        );
+      },
     },
     {
       key: "status",

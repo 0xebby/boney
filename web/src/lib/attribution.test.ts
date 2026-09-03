@@ -115,6 +115,8 @@ describe("canStoreTouch", () => {
       touch: fresh(),
       promoterRegistered: true,
       storedSignedAt: BigInt(0),
+      storedPromoterId: `0x${"00".repeat(32)}` as `0x${string}`,
+      storedExpiresAt: BigInt(0),
       now: 1_700_000,
       maxTouchDuration,
       campaignEndTime: BigInt(1_700_000 + 30 * 86_400),
@@ -235,6 +237,41 @@ describe("canStoreTouch", () => {
   it("accepts a touch strictly newer than the stored one", () => {
     const t = fresh(1_700_000);
     expect(canStoreTouch(ctx({touch: t, storedSignedAt: BigInt(1_699_999)}))).toEqual({ok: true});
+  });
+
+  // ── same-promoter re-touch ───────────────────────────────
+
+  it("rejects re-touching the promoter whose stored touch is still live", () => {
+    const r = canStoreTouch(ctx({
+      touch: fresh(1_700_000),
+      storedSignedAt: BigInt(1_699_000),
+      storedPromoterId: promoterId,
+      storedExpiresAt: BigInt(1_700_001),
+    }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/TouchAlreadyActive/);
+  });
+
+  it("accepts re-touching the same promoter once their window has lapsed", () => {
+    expect(
+      canStoreTouch(ctx({
+        touch: fresh(1_700_000),
+        storedSignedAt: BigInt(1_699_000),
+        storedPromoterId: promoterId,
+        storedExpiresAt: BigInt(1_700_000),
+      })),
+    ).toEqual({ok: true});
+  });
+
+  it("accepts a switch to a different promoter while the stored touch is live", () => {
+    expect(
+      canStoreTouch(ctx({
+        touch: fresh(1_700_000),
+        storedSignedAt: BigInt(1_699_000),
+        storedPromoterId: `0x${"cd".repeat(32)}`,
+        storedExpiresAt: BigInt(1_700_001),
+      })),
+    ).toEqual({ok: true});
   });
 
   // ── missing values ───────────────────────────────────────

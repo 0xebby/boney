@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {"noEmit": true, "tsBuildInfoFile": ".tsbuildinfo.card"},
+  "files": [
+    "src/lib/boneycard.ts",
+    "src/lib/boneycard.test.ts",
+    "src/lib/boneyHistory.ts",
+    "src/lib/boneyHistory.test.ts",
+    "src/lib/graph.ts",
+    "src/lib/graph.test.ts",
+    "src/hooks/useBoneyHistory.ts",
+    "src/hooks/useBlockTimes.ts",
+    "scripts/__check-history.ts"
+  ]
+}

@@ -1,4 +1,4 @@
-import {decodeEventSource} from "./kpiSource";
+import {decodeEventSource, describeTopicFilter} from "./kpiSource";
 import {resolveTrackedEvent, shortTopic} from "./eventNames";
 import {KPI_KIND_LABEL, type KpiSpec} from "./types";
 import type {CampaignView} from "./types";
@@ -99,7 +99,8 @@ function describeKpi(spec: KpiSpec, context: SummaryContext): string {
   const event =
     tracked.eventFrom === "kind" ? `unrecognised event ${shortTopic(tracked.topic0)}` : tracked.event;
 
-  return `${kind} — ${event} on ${tracked.protocol}`;
+  const filter = describeTopicFilter(source);
+  return `${kind} — ${event} on ${tracked.protocol}${filter ? `, ${filter}` : ""}`;
 }
 
 /**

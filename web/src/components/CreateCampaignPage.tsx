@@ -5,6 +5,7 @@ import {useRouter} from "next/navigation";
 import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {ErrorState} from "@/components/ui/States";
+import {Notice} from "@/components/ui/Notice";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
 import {usePublishGuide} from "@/hooks/usePublishGuide";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
@@ -91,9 +92,16 @@ export function CreateCampaignPage() {
 
       if (found.length > 0) return;
 
-      await create(draft, tokenDecimals);
+      await create(draft, tokenDecimals, {symbol: token.meta?.symbol, decimals: tokenDecimals});
     },
-    [draft, tokenDecimals, create, nameCheck.isTaken, scoreCeiling.ceiling],
+    [
+      draft,
+      tokenDecimals,
+      token.meta?.symbol,
+      create,
+      nameCheck.isTaken,
+      scoreCeiling.ceiling,
+    ],
   );
 
   const updateField = <K extends keyof CampaignDraft>(key: K, value: CampaignDraft[K]) => {
@@ -203,6 +211,7 @@ export function CreateCampaignPage() {
       <CreatedCard
         campaignAddress={campaignAddress}
         campaignId={campaignId}
+        campaignName={draft.name}
         guide={guide}
         onView={() => router.push(`/campaign/${campaignId.toString()}`)}
         publish={publishGuide}
@@ -577,6 +586,7 @@ export function CreateCampaignPage() {
 function CreatedCard({
   campaignAddress,
   campaignId,
+  campaignName,
   guide,
   onView,
   publish,
@@ -584,6 +594,8 @@ function CreatedCard({
   /** From the `CampaignCreated` log. Absent only if the log could not be decoded. */
   campaignAddress?: `0x${string}`;
   campaignId: bigint;
+  /** The name just written on chain, as typed into the form. */
+  campaignName: string;
   guide: GuideDraft;
   onView: () => void;
   publish: ReturnType<typeof usePublishGuide>;
@@ -592,13 +604,24 @@ function CreatedCard({
   const nothingToPublish = isEmptyGuide(built);
   const {state} = publish;
   const busy = state.status === "signing" || state.status === "saving";
+  const published = state.status === "saved" || state.status === "cleared";
+  /*
+    Campaign info was typed into the form and is not on the store yet. Nothing carries it across the
+    navigation `onView` performs, so leaving now discards it — which is why publishing is the primary
+    action while this holds.
+  */
+  const unpublished = !nothingToPublish && campaignAddress !== undefined && !published;
 
   return (
     <Card>
       <div className="space-y-4">
         <div className="space-y-1 text-center">
           <p className="text-sm text-good">Campaign created successfully!</p>
-          <p className="text-xs text-ink-muted">Campaign #{campaignId.toString()}</p>
+          {/* The name is what the project will look for in the list; the registry index is the
+              fallback for a draft that somehow reached this screen without one. */}
+          <p className="text-xs text-ink-muted">
+            {campaignName.trim() || `Campaign #${campaignId.toString()}`}
+          </p>
         </div>
 
         {/*
@@ -614,16 +637,22 @@ function CreatedCard({
             {campaignAddress === undefined ? (
               // The address comes out of the `CampaignCreated` log; without it there is nothing to key
               // the guide by, and guessing would write it against the wrong campaign.
-              <p className="mt-2 text-xs text-warning">
+              <p className="mt-2 text-xs text-brand">
                 The campaign&rsquo;s address could not be read from the transaction receipt, so the
                 info cannot be published from here.
               </p>
             ) : (
               <>
                 <button
-                  className="mt-2 rounded-md border border-hairline px-3 py-1.5 text-xs font-semibold text-ink hover:bg-surface-hover disabled:opacity-50"
-                  disabled={busy || state.status === "saved" || state.status === "cleared"}
-                  onClick={() => void publish.publish(campaignAddress, built)}
+                  className={`mt-2 rounded-md px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                    unpublished
+                      ? "bg-brand text-plane hover:opacity-90"
+                      : "border border-hairline text-ink hover:bg-surface-hover"
+                  }`}
+                  disabled={busy || published}
+                  onClick={() =>
+                    void publish.publish(campaignAddress, built, {campaignName})
+                  }
                   type="button"
                 >
                   {state.status === "signing"
@@ -641,14 +670,24 @@ function CreatedCard({
           </div>
         ) : null}
 
-        <div className="text-center">
+        <div className="space-y-2 text-center">
           <button
-            className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90"
+            className={`rounded-md px-4 py-2 text-sm font-semibold ${
+              unpublished
+                ? "border border-hairline-strong text-ink hover:bg-surface-hover"
+                : "bg-brand text-plane hover:opacity-90"
+            }`}
             onClick={onView}
             type="button"
           >
             View Campaign
           </button>
+          {unpublished ? (
+            <p className="text-xs text-brand">
+              The summary and links you typed are not saved yet. Leaving this screen discards them —
+              you can still add them from the campaign page afterwards.
+            </p>
+          ) : null}
         </div>
       </div>
     </Card>
@@ -664,7 +703,11 @@ function PublishNote({
   onRetry: () => void;
 }) {
   if (state.status === "saved") {
-    return <p className="mt-2 text-xs text-good">Published. The campaign page shows it now.</p>;
+    return (
+      <Notice tone="good" role="status" title="Published." className="mt-2">
+        The campaign page shows it now.
+      </Notice>
+    );
   }
 
   if (state.status === "cleared") {
@@ -673,20 +716,20 @@ function PublishNote({
 
   if (state.status === "error") {
     return (
-      <p className="mt-2 text-xs text-warning">
-        Not published: {state.message}{" "}
+      <Notice tone="critical" title="Not published" className="mt-2">
+        {state.message}{" "}
         <button className="underline hover:text-ink" onClick={onRetry} type="button">
           Try again
         </button>
         . The campaign itself is unaffected.
-      </p>
+      </Notice>
     );
   }
 
   if (state.status === "unwritable") {
     return (
       <div className="mt-2 space-y-1.5">
-        <p className="text-xs text-warning">{state.message}</p>
+        <Notice tone="warning" title={state.message} />
         {/*
           The entry itself, not a link to documentation. The alternative is telling a project their
           guide is gone and leaving them to retype prose they have already written once.
@@ -720,7 +763,7 @@ function CeilingNote({ceiling}: {ceiling?: bigint}) {
 
   if (ceiling === BigInt(0)) {
     return (
-      <p className="mt-1.5 text-xs text-warning">
+      <p className="mt-1.5 text-xs text-brand">
         On this network no wallet can hold any BoneyScore yet — the reputation registry has no
         weighted schemas, so a gate above 0 would lock out everyone, permanently. Leave this at 0
         until the schemas are registered.
@@ -740,7 +783,7 @@ function CeilingNote({ceiling}: {ceiling?: bigint}) {
   if (ceiling === BigInt(MAX_BONEY_SCORE)) return null;
 
   return (
-    <p className="mt-1.5 text-xs text-warning">
+    <p className="mt-1.5 text-xs text-brand">
       This network&rsquo;s registry caps scores at {ceiling.toLocaleString("en-US")}, not{" "}
       {MAX_BONEY_SCORE.toLocaleString()} — its schema weights differ from the seeded ones. A gate
       above that is rejected on creation.
@@ -788,6 +831,11 @@ function EventSourceFields({
     // address — see `classifyEventSource`.
     amountMode: value?.amountMode === "count" ? AMOUNT_MODE.count : AMOUNT_MODE.dataWord0,
     scale: value?.scale ?? "",
+    // The chosen actor topic, so "topic N is empty" and "topic N is not an address" can be said
+    // about the topic actually picked rather than about the event's shape alone.
+    actorTopic: Number(value?.actorTopic ?? "1"),
+    filterTopic: Number(value?.filterTopic ?? "0"),
+    filterValue: value?.filterValue ?? "",
   });
 
   /** Fills every field from a verified preset, so a project need not assemble a topic by hand. */
@@ -805,6 +853,12 @@ function EventSourceFields({
       actorTopic: String(preset.source.actorTopic),
       amountMode: preset.source.amountMode === AMOUNT_MODE.count ? "count" : "dataWord0",
       scale: preset.source.scale.toString(),
+      filterTopic: String(preset.source.filterTopic ?? 0),
+      // Left for the project the way a zero source address is: a router preset names the shape, not
+      // which router.
+      filterValue: preset.filterValueIsPlaceholder
+        ? (value?.filterValue ?? "")
+        : (preset.source.filterValue ?? ""),
     });
   };
 
@@ -826,27 +880,23 @@ function EventSourceFields({
         </p>
       ) : (
         <div className="mt-3 space-y-3">
-          <div>
-            <label className="mb-1 block text-xs text-ink-muted">Preset</label>
-            <select
-              defaultValue=""
-              onChange={(e) => applyPreset(e.target.value)}
-              className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
-            >
-              <option value="">Custom…</option>
-              {EVENT_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <SelectField
+            label="Preset"
+            defaultValue=""
+            onChange={applyPreset}
+            options={[
+              {value: "", label: "Custom…"},
+              ...EVENT_PRESETS.map((p) => ({value: p.id, label: p.label})),
+            ]}
+            hint="Fills every field below from a shape that is known to decode."
+          />
 
           <Field
             label="Source contract"
             value={value.source}
             onChange={(v) => set({source: v})}
             error={issueFor(`${path}.source`)}
+            hint="The contract whose logs credit this KPI. Only its own events count."
           />
           <Field
             label="Event signature"
@@ -856,46 +906,57 @@ function EventSourceFields({
             hint="Types only, no names or spaces — the topic is the keccak of this exact string."
           />
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="mb-1 block text-xs text-ink-muted">Actor topic</label>
-              <select
-                value={value.actorTopic}
-                onChange={(e) => set({actorTopic: e.target.value})}
-                className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
-              >
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-ink-muted">Amount</label>
-              <select
-                value={value.amountMode}
-                onChange={(e) => set({amountMode: e.target.value})}
-                className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
-              >
-                <option value="count">Count events</option>
-                <option value="dataWord0">First data word</option>
-              </select>
-            </div>
+          <div className="grid grid-cols-3 items-start gap-3">
+            <SelectField
+              label="Actor topic"
+              value={value.actorTopic}
+              onChange={(v) => set({actorTopic: v})}
+              options={TOPIC_OPTIONS}
+              error={issueFor(`${path}.actorTopic`)}
+              hint="Which indexed topic holds the referral’s address. 1 is the event’s first indexed argument."
+            />
+            <SelectField
+              label="Filter topic"
+              value={value.filterTopic ?? "0"}
+              onChange={(v) => set({filterTopic: v})}
+              options={[{value: "0", label: "— none"}, ...TOPIC_OPTIONS]}
+              error={issueFor(`${path}.filterTopic`)}
+              hint="Optional. Narrows this KPI to logs carrying a fixed value at another topic."
+            />
+            <Field
+              label="Filter value"
+              value={value.filterValue ?? ""}
+              onChange={(v) => set({filterValue: v})}
+              error={issueFor(`${path}.filterValue`)}
+              hint="What that topic must equal — the router a swap came through, or zeros for mints only."
+            />
+          </div>
+
+          <div className="grid grid-cols-3 items-start gap-3">
+            <SelectField
+              label="Amount"
+              value={value.amountMode}
+              onChange={(v) => set({amountMode: v})}
+              options={[
+                {value: "count", label: "Count — 1 per event"},
+                {value: "dataWord0", label: "Value — the event’s number"},
+              ]}
+              hint="Count adds 1 per event. Value reads the event’s first number."
+            />
             <Field
               label="Scale"
               value={value.scale}
               onChange={(v) => set({scale: v})}
               error={issueFor(`${path}.scale`)}
+              hint="Divides that amount before crediting, so tier thresholds stay small numbers."
             />
           </div>
 
-          <p className="text-xs text-ink-muted">
-            Which indexed topic holds the referral&rsquo;s address, and how much each event is worth.
-          </p>
-
           {/*
-            What the two fields above actually add up to, restated every keystroke.
+            What the two fields above actually add up to, restated every keystroke. Their own hints
+            state the mechanism; this states the resulting unit.
 
-            The hint they replace explained only the `dataWord0` case — "1e15 makes 0.001 of an
+            The hint this replaced explained only the `dataWord0` case — "1e15 makes 0.001 of an
             18-decimal token one unit" — and said nothing about `count`, where a scale cannot measure
             size and only makes thresholds harder to reach. That omission is how the live lynx
             campaign came to credit 51 deposits as 5. Pure, so it needs no chain read and no debounce;
@@ -940,8 +1001,23 @@ function EventSourceFields({
   );
 }
 
+/** `topics[0]` is the signature, so the selectable topic positions are 1..3. */
+const TOPIC_OPTIONS = [
+  {value: "1", label: "1"},
+  {value: "2", label: "2"},
+  {value: "3", label: "3"},
+] as const;
+
 function emptyEventSource(): EventSourceDraft {
-  return {source: "", signature: "", actorTopic: "1", amountMode: "dataWord0", scale: "1"};
+  return {
+    source: "",
+    signature: "",
+    actorTopic: "1",
+    amountMode: "dataWord0",
+    scale: "1",
+    filterTopic: "0",
+    filterValue: "",
+  };
 }
 
 /**
@@ -1058,7 +1134,7 @@ function DateTimeField({
           {!clockReady ? null : pending ? (
             <>
               {" · "}
-              <span className="text-warning">no reports credited for {delay}</span>
+              <span className="text-brand">no reports credited for {delay}</span>
             </>
           ) : (
             <>{" · opens immediately"}</>
@@ -1180,6 +1256,64 @@ function Field({
           error ? "border-critical" : "border-hairline"
         }`}
       />
+      {error ? (
+        <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
+          {error}
+        </p>
+      ) : null}
+      {hint && !error ? (
+        <p id={`${id}-hint`} className="mt-0.5 text-xs text-ink-muted">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// `Field`'s counterpart for a `<select>`: same label association, same error-or-hint under the
+// control. `value` for a controlled select, `defaultValue` for one that only fires an action.
+function SelectField({
+  label,
+  options,
+  onChange,
+  value,
+  defaultValue,
+  error,
+  hint,
+}: {
+  label: string;
+  options: readonly {value: string; label: string}[];
+  onChange: (v: string) => void;
+  value?: string;
+  defaultValue?: string;
+  error?: string;
+  hint?: string;
+}) {
+  const id = useId();
+  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1 block text-xs text-ink-muted">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        defaultValue={defaultValue}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        className={`w-full rounded border bg-surface-2 px-2 py-1.5 text-xs text-ink ${
+          error ? "border-critical" : "border-hairline"
+        }`}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
       {error ? (
         <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
           {error}

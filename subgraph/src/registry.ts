@@ -79,6 +79,8 @@ export function handleCampaignCreated(event: CampaignCreated): void {
     kpi.actorTopic = source.actorTopic;
     kpi.amountMode = source.amountMode;
     kpi.scale = source.scale;
+    kpi.filterTopic = source.filterTopic;
+    kpi.filterValue = source.filterValue;
     kpi.save();
 
     const template = templateFor(source);

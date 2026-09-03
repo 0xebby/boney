@@ -137,7 +137,7 @@ export function DiscoverPage({
               <option value={ALL_CAMPAIGNS}>All campaigns</option>
               {withPromoters.map((g) => (
                 <option key={g.view.campaign} value={g.view.campaign}>
-                  Campaign #{g.view.campaignId.toString()} · {projectName(g.view)} —{" "}
+                  {projectName(g.view)} · #{g.view.campaignId.toString()} —{" "}
                   {g.promoters.length} promoter
                   {g.promoters.length === 1 ? "" : "s"}
                 </option>
@@ -158,6 +158,13 @@ export function DiscoverPage({
         <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
           Showing joins from block {directory.scannedFrom.toString()} onward. Promoters who joined
           earlier are not listed — this chain&rsquo;s history is longer than one scan can cover.
+        </p>
+      ) : null}
+
+      {directory.truncated ? (
+        <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
+          More memberships exist than one read returns, so this ranking covers a floor rather than
+          every promoter on the network.
         </p>
       ) : null}
 
@@ -310,7 +317,7 @@ function PromoterTable({
                 className="hidden px-3 py-2 text-right text-xs font-medium text-ink-muted md:table-cell"
               >
                 Trust / Reach
-                <span className="ml-1 font-normal text-ink-muted/70">now</span>
+                <span className="sm-1 font-normal text-ink-muted/70">now</span>
               </th>
               <th
                 scope="col"
@@ -419,7 +426,7 @@ function SplitCell({parts, loading}: {parts?: ScoreParts; loading: boolean}) {
   const split = scoreSplit(parts);
   if (split.total === 0) {
     return (
-      <span className="text-xs text-warning" title="No attested values on record for this wallet">
+      <span className="text-xs text-brand" title="No attested values on record for this wallet">
         unattested
       </span>
     );
@@ -442,7 +449,7 @@ function VisitLink({campaign, promoterId}: {campaign: `0x${string}`; promoterId:
       href={`/r?${params.toString()}`}
       className="rounded border border-hairline-strong px-2 py-1 text-xs font-medium text-ink transition-colors hover:bg-surface-hover"
     >
-      Visit
+      attribute to promoter
     </Link>
   );
 }

@@ -1,17 +1,23 @@
 "use client";
 
 import {useEffect, Suspense} from "react";
+import Link from "next/link";
 import {useSearchParams, useRouter} from "next/navigation";
 import {useAccount, usePublicClient} from "wagmi";
 import {useQuery} from "@tanstack/react-query";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState} from "@/components/ui/States";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
+import {Notice} from "@/components/ui/Notice";
 import {useStoreTouch, type TxState} from "@/hooks/useWriteCampaign";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
 import {fetchCampaignDetail} from "@/lib/campaignDetail";
 import {fetchBrowseCampaigns} from "@/lib/contracts";
-import {shortAddress, formatDuration} from "@/lib/format";
+import {AttributionRegistryAbi} from "@/lib/abis";
+import {getDeployment} from "@/lib/chains";
+import {derivePromoterId} from "@/lib/promoter";
+import {classifyTouch, type StoredTouch} from "@/lib/referrals";
+import {shortAddress, formatDuration, formatDateTime} from "@/lib/format";
 import {useNow} from "@/hooks/useNow";
 import type {PublicClient} from "viem";
 
@@ -26,8 +32,10 @@ import type {PublicClient} from "viem";
 function AttributionPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const {isConnected} = useAccount();
-  const client = usePublicClient({chainId: useBoneyChainId()});
+  const {address, isConnected} = useAccount();
+  const chainId = useBoneyChainId();
+  const client = usePublicClient({chainId});
+  const registry = getDeployment(chainId)?.attributionRegistry;
   const now = useNow();
 
   const campaign = (searchParams.get("c") as `0x${string}`) || undefined;
@@ -55,6 +63,37 @@ function AttributionPageContent() {
 
   const detail = data?.detail;
   const campaignId = data?.campaignId;
+
+  /*
+    The touch already on record for this wallet, so the page can answer before asking for a
+    signature. `storeTouch` refuses a second touch naming the promoter who already holds a live one,
+    and without this read the refusal arrives as a reverted transaction the referral paid for.
+  */
+  const stored = useQuery({
+    queryKey: ["storedTouch", chainId, campaign, address],
+    enabled: Boolean(client && registry && campaign && address),
+    staleTime: 15_000,
+    queryFn: async (): Promise<StoredTouch | null> => {
+      if (!client || !registry || !campaign || !address) return null;
+
+      return (await (client as PublicClient).readContract({
+        address: registry,
+        abi: AttributionRegistryAbi,
+        functionName: "touchOf",
+        args: [campaign, address],
+      })) as StoredTouch;
+    },
+  });
+
+  // Only this promoter's own live window blocks a new touch. A different promoter's live touch is a
+  // switch, which the registry allows, and a lapsed one can be re-signed by anybody.
+  const held =
+    stored.data &&
+    promoterId &&
+    stored.data.promoterId.toLowerCase() === promoterId.toLowerCase() &&
+    classifyTouch(stored.data, now) === "live"
+      ? stored.data
+      : undefined;
 
   const storeTouchTx = useStoreTouch();
 
@@ -117,6 +156,13 @@ function AttributionPageContent() {
     : Number(detail.attributionWindow) + now;
   const remaining = expiresAt - now;
 
+  // A promoter id is `keccak256(campaign, promoter)`, so whether this link is the connected
+  // wallet's own is derivable without a read.
+  const isSelf =
+    Boolean(address) &&
+    derivePromoterId(campaign, address as `0x${string}`).toLowerCase() ===
+      promoterId.toLowerCase();
+
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <Card>
@@ -127,37 +173,57 @@ function AttributionPageContent() {
 
         <div className="space-y-4 p-5">
           {!isConnected ? (
-            <p className="text-sm text-muted">
+            <p className="text-sm text-ink-muted">
               Connect a wallet to confirm that you were referred by this promoter. Future actions on
               this campaign will credit them until the attribution expires.
             </p>
           ) : storeTouchTx.state.status === "idle" ? (
+            held ? (
+              <AlreadyAttributed
+                promoterId={promoterId}
+                expiresAt={held.expiresAt}
+                campaignId={campaignId}
+              />
+            ) : (
             <>
-              <p className="text-sm text-muted">
+              {/*
+                Said before the signature, because a wallet cannot see from the link that the
+                promoter behind it is itself.
+              */}
+              {isSelf ? (
+                <Notice tone="warning" title="This is your own promoter link">
+                  Signing attributes <b>you</b> to yourself, so your own actions on this campaign
+                  credit your promoter slot for {formatDuration(Number(detail.attributionWindow))}.
+                  Share the link instead if you meant to attribute somebody else.
+                </Notice>
+              ) : null}
+
+              <p className="text-sm text-ink-muted">
                 You are confirming attribution to promoter{" "}
-                <span className="font-mono text-text">{shortAddress(promoterId)}</span>.
+                <span className="font-mono text-ink">{shortAddress(promoterId)}</span>
+                {isSelf ? " — your own" : ""}.
               </p>
 
               <button
                 onClick={handleConfirm}
-                  className="w-full rounded-md bg-brand px-4 py-2 text-sm font-semibold text-planehover:opacity-90 disabled:opacity-50"
+                className="w-full rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:opacity-50"
               >
                 Confirm attribution
               </button>
-
             </>
+            )
           ) : (
             <>
               <div className="space-y-2">
-                <p className="text-sm text-muted">
+                <p className="text-sm text-ink-muted">
                   You are confirming attribution to promoter{" "}
-                  <span className="font-mono text-text">{shortAddress(promoterId)}</span>.
+                  <span className="font-mono text-ink">{shortAddress(promoterId)}</span>.
                 </p>
 
                 {storeTouchTx.touch && (
-                  <p className="text-xs text-muted">
+                  <p className="text-xs text-ink-muted">
                     Attribution expires in{" "}
-                    <span className="text-text">{formatDuration(remaining)}</span>.
+                    <span className="text-ink">{formatDuration(remaining)}</span>.
                   </p>
                 )}
               </div>
@@ -165,9 +231,9 @@ function AttributionPageContent() {
               <TxFeedback state={storeTouchTx.state} onReset={storeTouchTx.reset} />
 
               {storeTouchTx.state.status === "confirmed" && (
-                <p className="text-sm text-success">
-                  Attribution confirmed. Redirecting to the campaign...
-                </p>
+                <Notice tone="good" title="Attribution confirmed">
+                  Redirecting to the campaign…
+                </Notice>
               )}
             </>
           )}
@@ -185,26 +251,71 @@ export default function AttributionPage() {
   );
 }
 
+/**
+ * The refusal, said before a signature is asked for.
+ *
+ * @param promoterId The promoter this link credits.
+ * @param expiresAt Unix seconds the stored window runs to.
+ * @param campaignId Registry id of the campaign, when it could be resolved.
+ * @returns The panel shown in place of the confirm button.
+ */
+function AlreadyAttributed({
+  promoterId,
+  expiresAt,
+  campaignId,
+}: {
+  promoterId: `0x${string}`;
+  expiresAt: bigint;
+  campaignId?: bigint;
+}) {
+  const now = useNow();
+  const remaining = Number(expiresAt) - now;
+
+  return (
+    <div className="space-y-3">
+      <Notice tone="info" title="You are already attributed to this promoter">
+        Promoter <span className="font-mono text-ink">{shortAddress(promoterId)}</span> is credited
+        for your actions on this campaign until {formatDateTime(expiresAt)}
+        {remaining > 0 ? ` — ${formatDuration(remaining)} left` : ""}. The window cannot be extended
+        by signing again; it runs out on its own.
+      </Notice>
+
+      <p className="text-xs text-ink-muted">
+        A different promoter&rsquo;s link would switch your attribution, and this one works again
+        once the window lapses.
+      </p>
+
+      {campaignId !== undefined ? (
+        <Link
+          href={`/campaign/${campaignId}`}
+          className="block w-full rounded-md border border-hairline-strong px-4 py-2 text-center text-sm font-medium text-ink hover:bg-surface-hover"
+        >
+          Go to the campaign
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
 function TxFeedback({state, onReset}: {state: TxState; onReset: () => void}) {
   if (state.status === "idle") return null;
 
   if (state.status === "error") {
     return (
-      <div className="rounded border border-error/20 bg-error/5 p-3 text-sm">
-        <TxErrorMessage
-          message={state.message}
-          detail={state.detail}
-          onDismiss={onReset}
-          dismissLabel="Try again"
-        />
-      </div>
+      <Notice
+        tone="critical"
+        title={
+          <TxErrorMessage
+            message={state.message}
+            detail={state.detail}
+            onDismiss={onReset}
+            dismissLabel="Try again"
+          />
+        }
+      />
     );
   }
 
   const label = state.status === "preparing" ? "Awaiting signature..." : "Submitting...";
-  return (
-    <div className="rounded border border-accent/20 bg-accent/5 p-3">
-      <p className="text-sm text-accent">{label}</p>
-    </div>
-  );
+  return <Notice tone="info" title={label} />;
 }

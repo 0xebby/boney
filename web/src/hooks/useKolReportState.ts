@@ -18,6 +18,10 @@ import {useBoneyChainId} from "@/hooks/useBoneyChain";
  *  - `userCreditedOf(referral, kpiIndex)` — what each referral already has. `reportUserAction`
  *    takes a *cumulative* total, so a report built without these either reverts `NonMonotonic` or
  *    silently under-credits a referral with prior progress.
+ *  - `creditedToOf(referral, kpiIndex, promoterId)` — what the *selected* KOL already has for that
+ *    referral. The cumulative total above spans every promoter who ever held the referral, so it says
+ *    what the report may claim but not what this KOL gains from it; only this figure does. Without it
+ *    a re-touched referral's panel credits the previous spell's work to whoever holds it now.
  *  - `observedProgressOf(campaign, kpiIndex, referral)` on Boney's `EventMetricKpiVerifier` — the
  *    **ceiling** a claim is trimmed to. Read here rather than in its own hook because it is one of the
  *    figures a report is built from, and splitting it out would give the panel a second loading state
@@ -35,6 +39,7 @@ import {useBoneyChainId} from "@/hooks/useBoneyChain";
 export function useKolReportState({
   campaign,
   promoter,
+  promoterId,
   referrals,
   kpiIndex,
   kpiVerifier,
@@ -42,6 +47,8 @@ export function useKolReportState({
 }: {
   campaign: `0x${string}` | undefined;
   promoter: `0x${string}` | undefined;
+  /** The selected KOL's campaign-bound id, which `creditedToOf` is keyed by. */
+  promoterId: `0x${string}` | undefined;
   referrals: readonly `0x${string}`[];
   kpiIndex: number;
   /** `KpiSpec.verifier`, so the hook can tell whether Boney's ceiling actually applies. */
@@ -70,11 +77,27 @@ export function useKolReportState({
   );
 
   const query = useQuery({
-    queryKey: ["kolReportState", chainId, campaign, promoter, kpiIndex, key, verifier, gated],
-    enabled: enabled && Boolean(client && campaign && promoter),
+    queryKey: [
+      "kolReportState",
+      chainId,
+      campaign,
+      promoter,
+      promoterId,
+      kpiIndex,
+      key,
+      verifier,
+      gated,
+    ],
+    enabled: enabled && Boolean(client && campaign && promoter && promoterId),
     queryFn: async () => {
-      if (!client || !campaign || !promoter) {
-        return {progress: BigInt(0), credited: EMPTY, ceiling: BigInt(0), configured: false};
+      if (!client || !campaign || !promoter || !promoterId) {
+        return {
+          progress: BigInt(0),
+          credited: EMPTY,
+          creditedTo: EMPTY,
+          ceiling: BigInt(0),
+          configured: false,
+        };
       }
 
       const read = (functionName: "progressOf" | "userCreditedOf", who: `0x${string}`) =>
@@ -85,18 +108,31 @@ export function useKolReportState({
           args: [who, BigInt(kpiIndex)],
         }) as Promise<bigint>;
 
-      const [progress, ...totals] = await Promise.all([
+      const readHeld = (who: `0x${string}`) =>
+        (client as PublicClient).readContract({
+          address: campaign,
+          abi: CampaignAbi,
+          functionName: "creditedToOf",
+          args: [who, BigInt(kpiIndex), promoterId],
+        }) as Promise<bigint>;
+
+      const [progress, ...figures] = await Promise.all([
         read("progressOf", promoter),
         ...referrals.map((r) => read("userCreditedOf", r)),
+        ...referrals.map((r) => readHeld(r)),
       ]);
 
       const credited = new Map<string, bigint>();
-      referrals.forEach((r, i) => credited.set(r.toLowerCase(), totals[i] ?? BigInt(0)));
+      const creditedTo = new Map<string, bigint>();
+      referrals.forEach((r, i) => {
+        credited.set(r.toLowerCase(), figures[i] ?? BigInt(0));
+        creditedTo.set(r.toLowerCase(), figures[referrals.length + i] ?? BigInt(0));
+      });
 
       // A chain with no deployed verifier, or a KPI Boney does not gate, has no ceiling to report.
       // Skipped entirely rather than read and discarded — that is one round trip per referral.
       if (!verifier || !gated) {
-        return {progress, credited, ceiling: BigInt(0), configured: false};
+        return {progress, credited, creditedTo, ceiling: BigInt(0), configured: false};
       }
 
       // `observedProgressOf` does not revert on an unconfigured KPI — it divides by `_effectiveScale`,
@@ -123,6 +159,7 @@ export function useKolReportState({
       return {
         progress,
         credited,
+        creditedTo,
         ceiling: observed.reduce((sum, v) => sum + v, BigInt(0)),
         configured: config.configured,
       };
@@ -132,6 +169,8 @@ export function useKolReportState({
   return {
     progress: query.data?.progress ?? BigInt(0),
     credited: query.data?.credited ?? EMPTY,
+    /** What the selected KOL already holds for each referral — `creditedToOf`, keyed lowercase. */
+    creditedTo: query.data?.creditedTo ?? EMPTY,
     /** Sum of `observedProgressOf` across the live referrals — what a claim is trimmed to. */
     ceiling: query.data?.ceiling ?? BigInt(0),
     /** Whether Boney's verifier has a config for this KPI at all. */

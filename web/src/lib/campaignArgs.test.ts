@@ -400,6 +400,141 @@ describe("event source params", () => {
     );
   });
 
+  it("encodes the short form when no filter is set", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Deposit(address,uint256)",
+            actorTopic: "1",
+            amountMode: "dataWord0",
+            scale: "1",
+            filterTopic: "0",
+            filterValue: "",
+          },
+        },
+      ],
+    });
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    expect(kpis[0].params).toHaveLength(2 + 5 * 64);
+    expect(decodeEventSource(kpis[0].params)!.filterTopic).toBeUndefined();
+  });
+
+  it("tolerates a draft that predates the filter fields", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Deposit(address,uint256)",
+            actorTopic: "1",
+            amountMode: "dataWord0",
+            scale: "1",
+          },
+        },
+      ],
+    });
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    expect(kpis[0].params).toHaveLength(2 + 5 * 64);
+  });
+
+  it("left-pads a filter address into a topic word", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Transfer(address,address,uint256)",
+            actorTopic: "2",
+            amountMode: "dataWord0",
+            scale: "1000000000000000",
+            filterTopic: "1",
+            filterValue: "0x816Fc6EeE47e3157A666827a0C06205294C81770",
+          },
+        },
+      ],
+    });
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    expect(kpis[0].params).toHaveLength(2 + 7 * 64);
+
+    const decoded = decodeEventSource(kpis[0].params);
+    expect(decoded!.filterTopic).toBe(1);
+    expect(decoded!.filterValue).toBe(
+      "0x000000000000000000000000816fc6eee47e3157a666827a0c06205294c81770",
+    );
+  });
+
+  it("keeps a zero filter value, which is what makes mints expressible", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Transfer(address,address,uint256)",
+            actorTopic: "2",
+            amountMode: "count",
+            scale: "1",
+            filterTopic: "1",
+            filterValue: "0x0000000000000000000000000000000000000000",
+          },
+        },
+      ],
+    });
+    const [, kpis] = buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18});
+    const decoded = decodeEventSource(kpis[0].params);
+    expect(decoded!.filterTopic).toBe(1);
+    expect(decoded!.filterValue).toBe(`0x${"0".repeat(64)}`);
+  });
+
+  it("throws when a filter topic is set with no value to compare", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Transfer(address,address,uint256)",
+            actorTopic: "2",
+            amountMode: "dataWord0",
+            scale: "1",
+            filterTopic: "1",
+            filterValue: "  ",
+          },
+        },
+      ],
+    });
+    expect(() => buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18})).toThrow(
+      /filterValue/,
+    );
+  });
+
+  it("throws when the filter topic is also the actor topic", () => {
+    const d = draft({
+      kpis: [
+        {
+          ...draft().kpis[0],
+          eventSource: {
+            source: WETH_BASE,
+            signature: "Transfer(address,address,uint256)",
+            actorTopic: "2",
+            amountMode: "dataWord0",
+            scale: "1",
+            filterTopic: "2",
+            filterValue: "0x816Fc6EeE47e3157A666827a0C06205294C81770",
+          },
+        },
+      ],
+    });
+    expect(() => buildCreateCampaignArgs(d, {project: PROJECT, tokenDecimals: 18})).toThrow(
+      /filterTopic/,
+    );
+  });
+
   it("throws on an out-of-range actor topic", () => {
     const d = draft({
       kpis: [

@@ -13,18 +13,21 @@
  *
  * Two properties worth stating plainly:
  *
- *  - **It cannot credit strangers.** `reportUserAction` reverts `NoAttribution` without a live
- *    touch, and a touch needs the referral's own EIP-712 signature. Indexing all traffic on a contract
- *    and crediting it is not a thing this can do, by construction.
- *  - **Reports are cumulative and idempotent.** `newTotal` is a running total, not a delta, and a
- *    re-run over the same range decides to send nothing. Losing the cursor file costs a rescan,
- *    not double-crediting.
+ *  - **It cannot credit strangers.** Only a wallet that signed an EIP-712 touch can be credited, and
+ *    every action is resolved against who held that wallet at the action's own block. Indexing all
+ *    traffic on a contract and crediting it is not a thing this can do, by construction.
+ *  - **Reports are cumulative and idempotent.** `newTotal` is a running total over the referral's whole
+ *    attributed history, not a delta, and a re-run over the same range decides to send nothing. There
+ *    is deliberately no cursor: a range shallower than that history would produce a window-scoped total
+ *    that `Campaign` compares against a lifetime watermark and silently ignores. The range is instead
+ *    bounded by attribution — it starts just after the campaign's first touch, since nothing earlier is
+ *    creditable to anybody.
  *
  * Trust model: with `verifier == address(0)` the campaign credits the reported number as-is. This
  * indexer is honest but unverified on chain — a state-reading `IKpiVerifier` would bound it, and
  * is the natural next step.
  */
-import {readFileSync, writeFileSync, existsSync} from "node:fs";
+import {readFileSync, existsSync} from "node:fs";
 import {resolve, dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {
@@ -36,8 +39,8 @@ import {
   type PublicClient,
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
-import {CampaignAbi, AttributionRegistryAbi, BoneyAbi} from "../src/lib/abis";
-import {decodeEventSource, type EventSource} from "../src/lib/kpiSource";
+import {CampaignAbi, BoneyAbi, AttributionRegistryAbi} from "../src/lib/abis";
+import {decodeEventSource, topicFilterArray, type EventSource} from "../src/lib/kpiSource";
 import {catalogSignature} from "../src/lib/eventNames";
 import {
   actorFromTopic,
@@ -45,16 +48,31 @@ import {
   blockChunks,
   decideReport,
   encodeActions,
-  type ActorFloors,
+  foldToLimit,
+  logScanKey,
   type IndexedLog,
 } from "../src/lib/indexerCore";
-import {GENERATED_DEPLOYMENTS} from "../src/lib/deployments";
+import {
+  attributionLookup,
+  buildAttributionWindows,
+  earliestAttributedBlock,
+  type AttributionLookup,
+  type TouchLog,
+} from "../src/lib/attributionWindows";
+import {blockAtTimestamp, earliestCoveringTouch} from "../src/lib/blockSearch";
+import {
+  harvestLogTimestamps,
+  missingTimestamps,
+  timestampBatches,
+  type BlockTimestamps,
+} from "../src/lib/blockTimestamps";
 import {TOUCH_STORED} from "../src/lib/events";
-import {readBroadcast} from "./generate-deployments";
+import {progress, progressDone} from "./progress";
+import {loadTimestampCache, saveTimestampCache} from "./timestampCache";
+import {readBroadcast, readStartBlock} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(here, "../..");
-const STATE_PATH = resolve(REPO_ROOT, ".indexer-state.json");
 
 /**
  * Base's public endpoint rejects wider `eth_getLogs` ranges outright:
@@ -62,19 +80,8 @@ const STATE_PATH = resolve(REPO_ROOT, ".indexer-state.json");
  */
 const MAX_LOG_RANGE = BigInt(2_000);
 
-/**
- * How far back to scan when there is no cursor and no `--from-block`.
- *
- * Scanning from genesis on an L2 is thousands of requests. A campaign that needs deeper history
- * gets an explicit `--from-block`; silently scanning 40M blocks would look like a hang.
- *
- * This is an RPC bound, *not* the correctness boundary — see `actorFloors`. On its own it says
- * nothing about when a campaign began: for any campaign younger than this many blocks (~28 hours on
- * Base's 2s blocks) `head - DEFAULT_LOOKBACK` is a block from before the campaign existed, which is
- * exactly when a freshly seeded one is being tested. The floor below keeps that from crediting
- * anything; clamping to the deployment block just keeps it from being scanned.
- */
-const DEFAULT_LOOKBACK = BigInt(50_000);
+/** Mirrors `Campaign.MAX_EVIDENCE_ACTIONS`; longer evidence reverts `TooManyActions`. */
+const MAX_EVIDENCE_ACTIONS = 256;
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -87,7 +94,7 @@ const fromBlockFlag = arg("--from-block");
 const dryRun = process.argv.includes("--dry-run");
 
 /**
- * `PRIVATE_KEY` from the repo-root `.env`, read the same way `seed-local.ts:93` does.
+ * `PRIVATE_KEY` from the repo-root `.env`.
  *
  * Foundry loads that file itself, but this is a plain node script, so it has to read it too.
  */
@@ -102,116 +109,118 @@ function envPrivateKey(): Hex | undefined {
   return (value || undefined) as Hex | undefined;
 }
 
-type State = Record<string, string>;
+/**
+ * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
+ * pass costs the limiter this many times less than one request per call would.
+ */
+const RPC_BATCH_SIZE = 100;
 
-function loadState(): State {
-  if (!existsSync(STATE_PATH)) return {};
-  try {
-    return JSON.parse(readFileSync(STATE_PATH, "utf8")) as State;
-  } catch {
-    // A corrupt cursor costs a rescan, which is a no-op thanks to cumulative reporting. Refusing
-    // to run would be the worse failure.
-    console.warn("  cursor file unreadable — rescanning from the default lookback");
-    return {};
-  }
-}
+/**
+ * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests. Wide
+ * enough to keep a few requests in flight, narrow enough that a public endpoint answers them.
+ */
+const READ_CONCURRENCY = 300;
 
-function saveState(state: State): void {
-  writeFileSync(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`);
-}
+/** Per-request ceiling. A loaded public endpoint answers a batch of block reads in a few seconds. */
+const RPC_TIMEOUT = 60_000;
 
-function cursorKey(chainId: number, campaign: string, kpiIndex: number): string {
-  return `${chainId}:${campaign.toLowerCase()}:${kpiIndex}`;
-}
-
-/** Fetches logs across a range the RPC will actually accept. */
+/**
+ * Fetches logs across a range the RPC will actually accept.
+ *
+ * @param client Chain to read from.
+ * @param source Event source the KPI names.
+ * @param fromBlock First block to scan.
+ * @param toBlock Last block to scan.
+ * @param timestamps Cache the logs' own `blockTimestamp` fields are collected into, and read back from.
+ * @returns Every matching log in the range, each carrying its block timestamp.
+ */
 async function fetchLogs(
   client: PublicClient,
   source: EventSource,
   fromBlock: bigint,
   toBlock: bigint,
+  timestamps: BlockTimestamps,
 ): Promise<IndexedLog[]> {
-  const out: IndexedLog[] = [];
   const chunks = blockChunks(fromBlock, toBlock, MAX_LOG_RANGE);
-  // Block timestamps are needed for verifier evidence, and one block carries many logs — cache so
-  // a busy range does not re-request the same block dozens of times.
-  const timestamps = new Map<bigint, bigint>();
+  const matched: Omit<IndexedLog, "timestamp">[] = [];
 
   for (const [i, chunk] of chunks.entries()) {
-    process.stdout.write(`\r    scanning ${i + 1}/${chunks.length} chunks…`);
+    progress(`scanning ${i + 1}/${chunks.length} chunks`);
 
     const logs = await client.getLogs({
       address: source.source,
       fromBlock: chunk.from,
       toBlock: chunk.to,
+      // Filtered by the node, not here. These sources are busy contracts, and every non-matching
+      // log downloaded is payload the run pays for and then discards. A fixed-topic filter narrows
+      // the same request; `aggregateByActor` applies it again over whatever comes back.
+      topics: [source.topic0.toLowerCase() as Hex, ...topicFilterArray(source)],
     });
 
+    harvestLogTimestamps(logs, timestamps);
+
     for (const log of logs) {
-      if (log.topics[0]?.toLowerCase() !== source.topic0.toLowerCase()) continue;
-
-      let timestamp = timestamps.get(log.blockNumber!);
-      if (timestamp === undefined) {
-        const block = await client.getBlock({blockNumber: log.blockNumber!});
-        timestamp = block.timestamp;
-        timestamps.set(log.blockNumber!, timestamp);
-      }
-
-      out.push({
+      matched.push({
         topics: log.topics as readonly Hex[],
         data: log.data,
         blockNumber: log.blockNumber!,
-        timestamp,
       });
     }
   }
+  if (chunks.length > 0) progressDone();
 
-  if (chunks.length > 0) process.stdout.write("\r");
-  return out;
+  // Verifier evidence carries each action's timestamp, so every block holding a matching log needs
+  // one. The logs above carried their own, and earlier passes on this chain carried the rest, so only
+  // what neither supplied is read — deduplicated, and in batches the transport packs into requests.
+  const blocks = [...new Set(matched.map((log) => log.blockNumber))];
+  const missing = missingTimestamps(blocks, timestamps);
+  let readSoFar = 0;
+
+  for (const batch of timestampBatches(missing, READ_CONCURRENCY)) {
+    readSoFar += batch.length;
+    progress(`reading ${readSoFar}/${missing.length} block timestamps`);
+    const read = await Promise.all(batch.map((blockNumber) => client.getBlock({blockNumber})));
+    read.forEach((block, j) => timestamps.set(batch[j], block.timestamp));
+  }
+  if (missing.length > 0) progressDone();
+
+  console.log(`  ${blocks.length} distinct block(s), ${missing.length} timestamp read(s) needed`);
+  return matched.map((log) => ({...log, timestamp: timestamps.get(log.blockNumber)!}));
 }
 
 /**
- * The earliest creditable timestamp for every actor these logs touched.
+ * Who held each of a campaign's referrals, at every block they ever acted in.
  *
  * This is the correctness boundary the block range is not. `reportUserAction` receives a total, never
  * the blocks behind it, so the contract cannot tell that a figure includes activity from before the
- * campaign existed or before the user was attributed — with `verifier == address(0)` it credits the
- * number as-is. Only this filter stands between a wide scan and a wrong credit.
+ * campaign existed or from a spell nobody was attributed for — with `verifier == address(0)` it credits
+ * the number as-is. Only this filter stands between a wide scan and a wrong credit.
  *
- * `max(firstSignedAt, startTime)` because both bounds are real and neither implies the other: activity
- * from before the user was ever attributed is nobody's doing, and the campaign's own start rules out
- * everything before it regardless of who was attributed when.
+ * Scanned from the oldest touch that could still cover creditable work rather than from the protocol's
+ * deployment: a touch expires at most `effectiveMaxDuration` after it is stored, and activity before
+ * the campaign's start credits nobody, so anything older covers nothing this campaign will pay for.
  *
- * **The first touch, not the current one.** `Campaign` credits `newTotal - _userCredited[user][kpi]`
- * and that guard is keyed by user alone, spanning every promoter the user ever had. `newTotal` must
- * therefore be cumulative over the user's whole attributed history — measure it from the *latest*
- * touch and a user who switched promoters recomputes a total at or below what the previous promoter
- * was already credited, so the new one is credited nothing, permanently. `touchOf` returns only the
- * live touch, so the floor comes from the `TouchStored` history instead.
+ * One log scan for the whole campaign rather than a read per referral, and it also answers "was this
+ * referral ever attributed at all" — absent from the history means dropped, which matches `Campaign`
+ * skipping actions no promoter held.
  *
- * One log scan for the whole campaign rather than a read per actor, and it also answers "was this
- * actor ever attributed at all" — absent from the history means dropped, which `aggregateByActor`
- * treats as "no credit", matching `Campaign` reverting `NoAttribution`.
+ * @param client Public client used for the log scan.
+ * @param registry Attribution registry address.
+ * @param campaign Campaign the touches belong to.
+ * @param startTime Campaign start; actions before it are creditable to nobody.
+ * @param fromBlock Lowest block to scan touches from.
+ * @param head Highest block to scan touches to.
+ * @returns The attribution lookup, and the lowest block any action of this campaign can be credited at.
  */
-async function actorFloors(
+async function campaignAttribution(
   client: PublicClient,
   registry: `0x${string}`,
   campaign: `0x${string}`,
   startTime: bigint,
   fromBlock: bigint,
   head: bigint,
-  logs: readonly IndexedLog[],
-  source: EventSource,
-): Promise<{floors: ActorFloors; unattributed: string[]}> {
-  const actors = new Set<string>();
-  for (const log of logs) {
-    const actor = actorFromTopic(log, source.actorTopic);
-    if (actor) actors.add(getAddress(actor));
-  }
-
-  // Every touch this campaign ever stored, oldest kept. Scanned from the same lower bound as the
-  // activity: a touch below it would be invisible here, and crediting from a floor we cannot see
-  // would be worse than reporting nothing.
-  const firstSignedAt = new Map<string, bigint>();
+): Promise<{attribution: AttributionLookup; attributedFrom: bigint | null}> {
+  const touches: TouchLog[] = [];
   for (const chunk of blockChunks(fromBlock, head, MAX_LOG_RANGE)) {
     const touchLogs = await client.getLogs({
       address: registry,
@@ -221,34 +230,59 @@ async function actorFloors(
       toBlock: chunk.to,
     });
     for (const log of touchLogs) {
-      const user = log.args.user;
-      const signedAt = log.args.signedAt;
-      if (!user || signedAt === undefined) continue;
-      const key = getAddress(user).toLowerCase();
-      const seen = firstSignedAt.get(key);
-      const at = BigInt(signedAt);
-      if (seen === undefined || at < seen) firstSignedAt.set(key, at);
+      if (!log.args.user || !log.args.promoterId) continue;
+      touches.push({
+        user: getAddress(log.args.user),
+        promoterId: log.args.promoterId,
+        signedAt: log.args.signedAt ?? BigInt(0),
+        expiresAt: log.args.expiresAt ?? BigInt(0),
+        blockNumber: log.blockNumber ?? BigInt(0),
+      });
     }
   }
 
-  const floors = new Map<string, bigint>();
-  const unattributed: string[] = [];
+  const windows = buildAttributionWindows(touches);
+
+  return {
+    attribution: attributionLookup(windows, startTime),
+    attributedFrom: earliestAttributedBlock(windows),
+  };
+}
+
+/**
+ * Referrals a KPI's logs show acting who were never attributed on the campaign.
+ *
+ * @param logs Matched activity logs.
+ * @param source Event source describing how to read an actor out of a log.
+ * @param attribution Attribution lookup for the campaign.
+ * @returns Their addresses, checksummed.
+ */
+function unattributedActors(
+  logs: readonly IndexedLog[],
+  source: EventSource,
+  attribution: AttributionLookup,
+): string[] {
+  const actors = new Set<string>();
+  for (const log of logs) {
+    const actor = actorFromTopic(log, source.actorTopic);
+    if (actor) actors.add(getAddress(actor));
+  }
+
+  const out: string[] = [];
   for (const actor of actors) {
-    const first = firstSignedAt.get(actor.toLowerCase());
-    if (first === undefined || first === BigInt(0)) {
-      // Reported rather than dropped in silence: these used to each print a "no live attribution
-      // touch" line from the loop below, and losing that would make a busy source look quiet.
-      unattributed.push(actor);
-      continue;
-    }
-    floors.set(actor.toLowerCase(), first > startTime ? first : startTime);
+    // Reported rather than dropped in silence: losing this line would make a busy source look quiet.
+    if (!attribution.known(actor as `0x${string}`)) out.push(actor);
   }
-
-  return {floors, unattributed};
+  return out;
 }
 
 async function main(): Promise<void> {
-  const publicClient = createPublicClient({transport: http(rpcUrl)}) as PublicClient;
+  const publicClient = createPublicClient({
+    transport: http(rpcUrl, {
+      timeout: RPC_TIMEOUT,
+      batch: {batchSize: RPC_BATCH_SIZE, wait: 8},
+    }),
+  }) as PublicClient;
 
   const chainId = await publicClient.getChainId();
   const addresses = readBroadcast(chainId);
@@ -273,7 +307,6 @@ async function main(): Promise<void> {
   console.log(`Reporter ${account?.address ?? "(dry run — no key)"}`);
 
   const head = await publicClient.getBlockNumber();
-  const state = loadState();
 
   // The Boney facade only exposes summary rows; KPI specs live on the Campaign itself.
   const views = (await publicClient.readContract({
@@ -286,6 +319,17 @@ async function main(): Promise<void> {
   let reported = 0;
   let skipped = 0;
 
+  // Shared across every timestamp→block search and every log scan this run, and carried over from
+  // earlier passes on this chain. The searches start from the same bounds, so they probe the same
+  // midpoints and the second campaign onward costs almost nothing.
+  const blockTimestamps = loadTimestampCache(chainId);
+  if (blockTimestamps.size > 0) {
+    console.log(`${blockTimestamps.size} block timestamp(s) cached from earlier passes`);
+  }
+  // From the same broadcast receipt the addresses come from. `lib/deployments.ts` can lag a redeploy,
+  // and a floor above the registry that holds the touches would hide them.
+  const deployedAt = BigInt(readStartBlock(chainId));
+
   for (const view of views) {
     if (onlyCampaign && view.campaign.toLowerCase() !== onlyCampaign) continue;
 
@@ -296,6 +340,43 @@ async function main(): Promise<void> {
       publicClient.readContract({address: view.campaign, abi: CampaignAbi, functionName: "project"}),
       publicClient.readContract({address: view.campaign, abi: CampaignAbi, functionName: "kpiCount"}),
     ]);
+
+    // Log scans this campaign's KPIs can share. Scoped to the campaign because the floor is, and so
+    // that a scan's logs are not held in memory once the next campaign cannot reuse them.
+    const logScans = new Map<string, IndexedLog[]>();
+
+    // Resolved once per campaign, and only for a campaign with an event-sourced KPI worth scanning.
+    let attributionOnce:
+      | Promise<{attribution: AttributionLookup; attributedFrom: bigint | null}>
+      | undefined;
+    const attributionFor = async () => {
+      if (!attributionOnce) {
+        const maxDuration = (await publicClient.readContract({
+          address: attributionRegistry,
+          abi: AttributionRegistryAbi,
+          functionName: "effectiveMaxDuration",
+          args: [view.campaign],
+        })) as bigint;
+
+        const touchFloor = await blockAtTimestamp(
+          async (blockNumber) => (await publicClient.getBlock({blockNumber})).timestamp,
+          earliestCoveringTouch(startTime as bigint, BigInt(maxDuration)),
+          deployedAt,
+          head,
+          blockTimestamps,
+        );
+
+        attributionOnce = campaignAttribution(
+          publicClient,
+          attributionRegistry,
+          view.campaign,
+          startTime as bigint,
+          touchFloor,
+          head,
+        );
+      }
+      return attributionOnce;
+    };
 
     for (let kpiIndex = 0; kpiIndex < Number(kpiCount); kpiIndex++) {
       const spec = (await publicClient.readContract({
@@ -340,71 +421,57 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const key = cursorKey(chainId, view.campaign, kpiIndex);
-      // Never below the deployment block: no campaign can predate the registry that created it, so a
-      // lookback reaching further is pure RPC spend. An explicit `--from-block` is honoured as given.
-      const deployedAt = GENERATED_DEPLOYMENTS[chainId]?.startBlock ?? BigInt(0);
-      const requested = fromBlockFlag
-        ? BigInt(fromBlockFlag)
-        : state[key]
-          ? BigInt(state[key])
-          : head > DEFAULT_LOOKBACK
-            ? head - DEFAULT_LOOKBACK
-            : BigInt(0);
-      const fromBlock = fromBlockFlag || requested > deployedAt ? requested : deployedAt;
+      // Attribution first, because it bounds the activity scan. `newTotal` is cumulative over the
+      // referral's whole attributed life, so the range may only leave out blocks that could never have
+      // been credited — nothing at or before the campaign's first touch can. Within the range each
+      // action is then resolved against its own referral's windows. An explicit `--from-block` wins.
+      const {attribution, attributedFrom} = await attributionFor();
+      if (attributedFrom === null && !fromBlockFlag) {
+        console.log(`  skipped: no touch was ever stored on this campaign — nobody to credit`);
+        skipped++;
+        continue;
+      }
+      const fromBlock = fromBlockFlag ? BigInt(fromBlockFlag) : attributedFrom!;
 
       console.log(`  blocks ${fromBlock}..${head}`);
-      const logs = await fetchLogs(publicClient, source, fromBlock, head);
+      const scanKey = logScanKey(source, fromBlock, head);
+      let logs = logScans.get(scanKey);
+      if (logs) {
+        console.log(`  reusing the scan an earlier KPI on this source already paid for`);
+      } else {
+        logs = await fetchLogs(publicClient, source, fromBlock, head, blockTimestamps);
+        logScans.set(scanKey, logs);
+
+        // Stored before the credited-total reads and the transactions, so a failure past this point
+        // still leaves the next pass the timestamps this one paid for.
+        saveTimestampCache(chainId, blockTimestamps);
+      }
       console.log(`  ${logs.length} matching log(s)`);
 
-      const {floors, unattributed} = await actorFloors(
-        publicClient,
-        attributionRegistry,
-        view.campaign,
-        startTime as bigint,
-        fromBlock,
-        head,
-        logs,
-        source,
-      );
-      for (const actor of unattributed) {
-        console.log(`  · ${actor}: no live attribution touch — Campaign would revert NoAttribution`);
+      for (const actor of unattributedActors(logs, source, attribution)) {
+        console.log(`  · ${actor}: never attributed on this campaign — nobody to credit`);
         skipped++;
       }
-      const totals = aggregateByActor(logs, source, floors);
+      const totals = aggregateByActor(logs, source, attribution);
 
       for (const total of totals.values()) {
-        const [promoterId, alreadyCredited] = await Promise.all([
-          publicClient.readContract({
-            address: attributionRegistry,
-            abi: AttributionRegistryAbi,
-            functionName: "activePromoter",
-            args: [view.campaign, total.referral],
-          }),
-          publicClient.readContract({
-            address: view.campaign,
-            abi: CampaignAbi,
-            functionName: "userCreditedOf",
-            args: [total.referral, BigInt(kpiIndex)],
-          }),
-        ]);
+        const alreadyCredited = (await publicClient.readContract({
+          address: view.campaign,
+          abi: CampaignAbi,
+          functionName: "userCreditedOf",
+          args: [total.referral, BigInt(kpiIndex)],
+        })) as bigint;
 
-        const attributed =
-          promoterId !== "0x0000000000000000000000000000000000000000000000000000000000000000";
-
-        const decision = decideReport(total, attributed, alreadyCredited as bigint);
+        const decision = decideReport(total, alreadyCredited);
         if (!decision.send) {
           console.log(`  · ${total.referral}: ${decision.reason}`);
           skipped++;
           continue;
         }
 
-        // Evidence is only read when the KPI names a verifier (Campaign.sol:325); paying calldata
-        // for a blob nothing decodes would be waste.
-        const evidence =
-          spec.verifier === "0x0000000000000000000000000000000000000000"
-            ? "0x"
-            : encodeActions(decision.actions);
+        // Sent for every KPI, verifier or not: `Campaign` decodes it itself to credit each action to
+        // whoever held the referral at that action's block.
+        const evidence = encodeActions(foldToLimit(decision.actions, MAX_EVIDENCE_ACTIONS));
 
         if (dryRun || !wallet || !account) {
           console.log(`  · ${total.referral}: would report ${decision.newTotal} (dry run)`);
@@ -426,15 +493,12 @@ async function main(): Promise<void> {
         );
         reported++;
       }
-
-      // Advance past the head we scanned, not past the last log: an empty range still means
-      // everything below is settled, and rescanning it would find nothing.
-      if (!dryRun) {
-        state[key] = (head + BigInt(1)).toString();
-        saveState(state);
-      }
     }
   }
+
+  // Saved again at the end, because the last thing to gather timestamps need not be a scan: a campaign
+  // whose touches were never stored costs a block search and then skips every KPI.
+  saveTimestampCache(chainId, blockTimestamps);
 
   console.log(`\n${reported} report(s) sent, ${skipped} skipped.`);
 }

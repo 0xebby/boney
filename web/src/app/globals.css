@@ -3,27 +3,8 @@
 /**
  * Boney design tokens — yellow on black.
  *
- * The brand is a bright yellow on a near-black surface. That choice constrains where yellow is
- * allowed to appear, and the constraint is measured, not guessed:
- *
- *   - As INK and CHROME, brand yellow is excellent: #ffc800 on #0a0a09 is 12.75:1, and the
- *     lightest ink step is 16.45:1. Every text token below clears WCAG AA (worst is muted at
- *     5.82:1).
- *   - As a CATEGORICAL SERIES color it is illegal, and no amount of taste changes that. The dark
- *     lightness band is OKLCH L 0.48–0.67; every vivid yellow measured sits at 0.74–0.86, so it
- *     fails the band outright. Series colors therefore keep the documented dark palette, whose
- *     yellow slot is the darker #c98500 — re-validated against this surface, all six checks PASS
- *     (worst adjacent CVD ΔE 8.4, normal-vision 19.3, all ≥3:1).
- *
- * Two further consequences worth not undoing:
- *   - The slot ORDER is the CVD-safety mechanism. Leading with brand yellow was tried and
- *     collapsed magenta↔aqua to ΔE 1.6 (deuteranopia). The documented order stays.
- *   - `--status-warning` moved off yellow to orange. A yellow "Pending" pill on a yellow-branded
- *     page reads as chrome, not as state, and status must never be ambiguous.
- *
- * Meters use their own single-hue amber ramp (validated --ordinal: monotone L, adjacent ΔL ≥
- * 0.06, light end 2.04:1 on surface), so magnitude reads in the brand color without spending a
- * categorical slot.
+ * Brand yellow is ink and chrome only, never a categorical series color. Series colors use the dark
+ * palette below; meters use the single-hue `--seq-*` amber ramp.
  */
 
 :root {
@@ -44,13 +25,17 @@
   --brand: #ffc800;
   --brand-dim: #b38c00;
 
+  /* Ethos Network's green, lifted to clear the dark plane. Attribution only — never a series or
+     status color, and always set beside the word "Ethos". */
+  --brand-ethos: #1fa34a;
+
   /* Chrome — warm-tinted so hairlines belong to the palette rather than reading gray */
   --gridline: #2a2721;
   --baseline: #3a352b;
   --border: rgba(255, 200, 0, 0.14);
   --border-strong: rgba(255, 200, 0, 0.28);
 
-  /* Categorical series — documented dark order, fixed, never cycled, never assigned by rank */
+  /* Categorical series — fixed dark order. Never reordered, cycled, or assigned by rank. */
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
@@ -60,7 +45,7 @@
   --series-7: #9085e9;
   --series-8: #e66767;
 
-  /* Status — reserved; never reused as a series color. Always paired with a label. */
+  /* Status — reserved, never reused as a series color, always paired with a label. */
   --status-good: #35c135;
   --status-warning: #f0871a;
   --status-serious: #ec835a;
@@ -95,6 +80,7 @@
 
   --color-brand: var(--brand);
   --color-brand-dim: var(--brand-dim);
+  --color-brand-ethos: var(--brand-ethos);
 
   --color-gridline: var(--gridline);
   --color-baseline: var(--baseline);
@@ -132,13 +118,10 @@ body {
 }
 
 /**
- * The display face carries the playful register: brand mark, page titles, and hero figures.
+ * Display face: brand mark, page titles, hero figures.
  *
- * Bagel Fat One has exactly one weight, so the weight is pinned here with `!important` rather
- * than left to call sites. A Tailwind `font-extrabold` on a 400-only family does not pick a
- * heavier cut — there isn't one — it asks the browser to synthesise a fake bold, which smears
- * the terminals of an already very fat face. Tracking is tightened because bubble letters carry
- * a lot of built-in sidebearing.
+ * Bagel Fat One has one weight (400), pinned here. Do not add a Tailwind weight utility alongside
+ * `.font-display`.
  */
 .font-display {
   font-family: var(--font-display);
@@ -146,18 +129,12 @@ body {
   letter-spacing: -0.01em;
 }
 
-/**
- * Columns of numbers must align vertically, so table cells and axis ticks get
- * tabular figures. Large standalone values (stat tiles, hero figures) deliberately
- * keep proportional figures — tabular makes a number like `121` look loose at
- * display sizes.
- */
+/* Tabular figures, for table cells and axis ticks. Not for large standalone figures. */
 .tnum {
   font-variant-numeric: tabular-nums;
 }
 
-/* Visible focus ring for keyboard nav; never removed, only restyled. Brand yellow rather than
-     a series color — focus is chrome, and chrome must not borrow an identity hue. */
+/* Focus ring for keyboard nav. Never removed, and never a series color. */
 :focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
@@ -165,19 +142,8 @@ body {
 }
 
 /**
- * Blinking beta chip in the top bar.
- *
- * Opacity rather than `visibility` or a color swap, so the glyphs never reflow and the text stays
- * selectable and legible to a screen reader throughout — a blink that toggles `display` would
- * remove the word from the accessibility tree twice a second.
- *
- * It bottoms out at 0.25 instead of 0, so the label is always faintly present rather than fully
- * disappearing. A chip that vanishes completely reads as a rendering fault; one that pulses reads
- * as deliberate.
- *
- * `steps(1, end)` gives the hard on/off of a terminal cursor rather than a smooth fade, which is
- * what "blinking" means for a status chip. The reduced-motion block below pins this to a single
- * iteration, so a user who asked for less motion gets a static chip at full opacity.
+ * Blinking beta chip in the top bar. Opacity-based, bottoms out at 0.25, hard on/off, and reduced to
+ * a single iteration under `prefers-reduced-motion`.
  */
 @keyframes blink {
   0%,
@@ -192,6 +158,60 @@ body {
 
 .animate-blink {
   animation: blink 1.2s steps(1, end) infinite;
+}
+
+/**
+ * Dialog entry: the overlay fades, the panel rises into it.
+ *
+ * Short and single-shot. The reduced-motion block below collapses both to nothing.
+ */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-overlay-in {
+  animation: overlay-in 140ms ease-out both;
+}
+
+.animate-dialog-in {
+  animation: dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/**
+ * Landing hero entry: each line rises into place, staggered by `[animation-delay:…]` at the call site.
+ *
+ * `both` so an element with a delay is held out of sight rather than flashing at full opacity first.
+ * Transform and opacity only, and the reduced-motion block below flattens it to a single frame.
+ */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-rise-in {
+  animation: rise-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Respect reduced-motion for every transition in the app. */

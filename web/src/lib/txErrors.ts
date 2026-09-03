@@ -189,10 +189,16 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `${kpiLabel(a[0])} is a per-user KPI, so it can't be reported as a campaign-wide total.`,
   NoAttribution: ([user]) =>
     `No promoter is attributed to ${addr(user)}, so this action can't be credited. The referral needs a stored touch first.`,
+  AmbiguousAttribution: ([user, kpiIndex]) =>
+    `${addr(user)} switched promoter since the last ${kpiLabel(kpiIndex)} report, so a report with no per-action evidence can't say whose work this is. Report from observed actions instead.`,
   NonMonotonic: () =>
     "That report moves a total backwards. Progress can only go up — the chain already has a higher figure.",
   VerifierOvercredit: () =>
     "The verifier tried to credit more than the reported amount. Nothing was recorded.",
+  TooManyActions: ([provided, max]) =>
+    `That report carries ${count(provided)} actions as evidence, and the limit is ${count(max)}. Report a narrower range, or merge the actions.`,
+  UnorderedEvidence: ([index]) =>
+    `The evidence goes backwards at action ${Number(index) + 1}. Actions have to be ordered oldest first.`,
 
   // ── Campaign: creation ──
   NoKpis: () => "Add at least one KPI before creating the campaign.",
@@ -229,6 +235,8 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     "That referral link is dated in the future — usually a clock that's running fast. Try again in a moment.",
   TouchNotNewer: () =>
     "A more recent attribution is already stored for this wallet, so this one can't replace it.",
+  TouchAlreadyActive: ([, expiresAt]) =>
+    `You're already attributed to this promoter until ${at(expiresAt)}. The window can't be extended, but you can switch to a different promoter.`,
   PromoterNotRegistered: () =>
     "That promoter hasn't joined this campaign, so the referral can't be attributed.",
   CampaignOver: ([endTime]) =>

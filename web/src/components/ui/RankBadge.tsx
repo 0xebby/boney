@@ -8,7 +8,7 @@ import type {Rank} from "@/lib/ranks";
  * only carrier — the name is always present, and the tier is announced to screen readers — so this
  * stays legible in monochrome and to anyone who does not distinguish the steps.
  *
- * `reachOnly` bands get a warning outline instead of a ramp step. Those are the ranks an account
+ * `reachOnly` bands get a brand outline instead of a ramp step. Those are the ranks an account
  * with no Ethos credibility can reach on follower count alone, and a project browsing for
  * trustworthy promoters needs that visible on the row, not buried in the docs.
  *
@@ -42,7 +42,7 @@ export function RankBadge({
 }) {
   const style = RANK_STYLE[rank.id];
   const unranked =
-    tone === "muted" ? "border border-hairline-strong text-ink-muted" : "border border-warning/50 text-warning";
+    tone === "muted" ? "border border-hairline-strong text-ink-muted" : "border border-brand-dim/50 text-brand";
 
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">

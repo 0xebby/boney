@@ -1,5 +1,6 @@
 import {MAX_KPIS, MAX_TIERS_PER_KPI, MAX_CAMPAIGN_NAME_LENGTH, type KpiKind} from "./types";
 import {MAX_BONEY_SCORE} from "./boneyscore";
+import {normalizeTopicValue} from "./kpiSource";
 
 /**
  * Client-side mirrors of `Campaign`'s constructor validation.
@@ -12,8 +13,10 @@ import {MAX_BONEY_SCORE} from "./boneyscore";
  * TooManyTiers, TiersNotAscending, ZeroTierReward, CustomKpiNeedsVerifier, ZeroRewardPool,
  * InvalidWindow, UnreachableReputation, EmptyName, NameTooLong, InvalidNameChar, NameTaken.
  *
- * One rule here has no Solidity counterpart: the event-source checks, flagged where they appear.
- * The chain never reads that blob, so a malformed source deploys fine and then indexes nothing.
+ * Two rules here have no Solidity counterpart, each flagged where it appears. The event-source checks:
+ * the chain never reads that blob, so a malformed source deploys fine and then indexes nothing. And
+ * tiers on an aggregate KPI: the contract accepts them and no promoter can ever cross one, so the pool
+ * escrows real money behind rewards nothing can release.
  *
  * The `minReputation` ceiling used to be in that category and no longer is — `Campaign`'s
  * constructor rejects an unreachable gate itself, which is what covers campaigns created outside
@@ -47,6 +50,10 @@ export type EventSourceDraft = {
   amountMode: string;
   /** Divisor applied before crediting, so tier thresholds stay human numbers. */
   scale: string;
+  /** Indexed topic that must equal `filterValue`, as "0" (no filter) | "1" | "2" | "3". */
+  filterTopic?: string;
+  /** Address or 32-byte word `topics[filterTopic]` must equal. */
+  filterValue?: string;
 };
 
 export type KpiDraft = {
@@ -296,6 +303,29 @@ export function validateCampaignDraft(
         message: "Add at least one reward tier, or mark this KPI as aggregate.",
       });
     }
+    /*
+      The reverse rule, which has NO Solidity counterpart — the contract accepts an aggregate KPI
+      carrying a full reward ladder, and that combination can never pay anybody.
+
+      `reportUserAction` reverts `AggregateKpi` before it does attribution or verification, and the only
+      writable path for an aggregate, `applyAggregateUpdate`, moves `_totalProgress` and never
+      `_progress[promoter]`. So no promoter can hold progress on one, no tier threshold can be crossed,
+      and every tier below is unreachable by construction rather than merely unlikely.
+
+      This is not hypothetical: on 2026-08-25, campaign 8 "Gyndore" escrowed 350,000 bUSD against a
+      three-tier, 27,000 bUSD ladder on a single aggregate Swap KPI, and was ended three hours later with
+      `totalProgress` 0. The escrow is real money locked behind rewards nothing can release, so this
+      blocks rather than warns — and unlike the checks above it is a rule about *what the campaign can
+      do*, not a mirror of the constructor.
+    */
+    if (kpi.aggregate && kpi.tiers.length > 0) {
+      issues.push({
+        path: `kpis.${i}.tiers`,
+        message:
+          "An aggregate KPI tracks a campaign-wide total, so no promoter can be credited on it and " +
+          "these tiers can never pay out. Remove the tiers, or untick aggregate.",
+      });
+    }
     // Solidity: TooManyTiers
     if (kpi.tiers.length > MAX_TIERS_PER_KPI) {
       issues.push({
@@ -338,6 +368,35 @@ export function validateCampaignDraft(
 
       if (src.scale.trim() && parseCount(src.scale) === null) {
         issues.push({path: `kpis.${i}.eventSource.scale`, message: "Enter a whole number."});
+      }
+
+      const filterTopic = Number(src.filterTopic?.trim() || "0");
+      const filterValue = src.filterValue?.trim() ?? "";
+      if (!Number.isInteger(filterTopic) || filterTopic < 0 || filterTopic > 3) {
+        issues.push({
+          path: `kpis.${i}.eventSource.filterTopic`,
+          message: "The filter topic must be 1, 2, or 3, or none.",
+        });
+      } else if (filterTopic !== 0) {
+        if (filterTopic === topic) {
+          // One topic cannot both carry the credited wallet and be pinned to a literal.
+          issues.push({
+            path: `kpis.${i}.eventSource.filterTopic`,
+            message: "The filter topic must differ from the actor topic.",
+          });
+        }
+        if (!filterValue) {
+          // A zero value is a real filter — a mint's `from` — so it cannot stand in for "unset".
+          issues.push({
+            path: `kpis.${i}.eventSource.filterValue`,
+            message: "Enter the value this topic must equal.",
+          });
+        } else if (normalizeTopicValue(filterValue) === null) {
+          issues.push({
+            path: `kpis.${i}.eventSource.filterValue`,
+            message: "Enter an address or a 32-byte hex word.",
+          });
+        }
       }
 
       // TouchWindowVerifier reads params as a bare uint64 and returns lookback 0 unless the blob
