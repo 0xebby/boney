@@ -73,8 +73,12 @@ web/.data/
 # `relay-kpi-metric.ts` read logs and report them, they do not create them.
 #
 # The `pnpm` aliases in web/package.json (`seed`, `fund:test`, `weth:*`, `sygma:deposit`, `demo:seed`,
-# `swap:weth-usdc`, `swap:gyndore`) are left in place, so a working copy that still holds these files
-# runs unchanged.
+# `swap:weth-usdc`, `swap:gyndore`, `stake:gyndore`) are left in place, so a working copy that still
+# holds these files runs unchanged.
+#
+# The `gyndore-*` drivers are matched by pattern rather than named one at a time: they arrive a verb
+# at a time (swap, stake, …) and every one of them exists to move a KPI. The read-only probes for the
+# same campaign are named `__gyn-*` and stay visible.
 web/scripts/fund-test-wallets.ts
 web/scripts/seed-local.ts
 web/scripts/demo-seed.ts
@@ -83,4 +87,4 @@ web/scripts/drive-weth-kpi.ts
 web/scripts/drive-event-kpi.mjs
 web/scripts/sygma-deposit.ts
 web/scripts/uniswap-swap.ts
-web/scripts/gyndore-swap.ts
+web/scripts/gyndore-*.ts
