@@ -72,13 +72,8 @@ web/.data/
 # public is the recipe. The protocol's own two reporting halves stay tracked — `indexer.ts` and
 # `relay-kpi-metric.ts` read logs and report them, they do not create them.
 #
-# The `pnpm` aliases in web/package.json (`seed`, `fund:test`, `weth:*`, `sygma:deposit`, `demo:seed`,
-# `swap:weth-usdc`, `swap:gyndore`, `stake:gyndore`) are left in place, so a working copy that still
+# The matching `pnpm` aliases in web/package.json are left in place, so a working copy that still
 # holds these files runs unchanged.
-#
-# The `gyndore-*` drivers are matched by pattern rather than named one at a time: they arrive a verb
-# at a time (swap, stake, …) and every one of them exists to move a KPI. The read-only probes for the
-# same campaign are named `__gyn-*` and stay visible.
 web/scripts/fund-test-wallets.ts
 web/scripts/seed-local.ts
 web/scripts/demo-seed.ts
@@ -87,4 +82,23 @@ web/scripts/drive-weth-kpi.ts
 web/scripts/drive-event-kpi.mjs
 web/scripts/sygma-deposit.ts
 web/scripts/uniswap-swap.ts
-web/scripts/gyndore-*.ts
+web/scripts/gyndore-swap.ts
+
+# Every .md except the one GitHub renders on the repo page. The rest is working material — the
+# protocol spec, internal reviews, plans, launch notes, agent instructions — and this repo is public.
+# `boneyMd/findings.md` details high-severity bugs and `testing.md` holds throwaway Base Sepolia keys,
+# so neither may ever be staged; testing.md is in .git/info/exclude as well.
+#
+# `!README.md` is anchored: unanchored it would also re-include every nested README. A file inside an
+# ignored directory cannot be re-included at all, which is why boneyMd/ below needs no exception.
+*.md
+!/README.md
+boneyMd/
+
+# Claude Code's whole directory — project instructions, docs, local skills, and worktrees. Working
+# material rather than shared procedure. The worktrees especially must never be committed: each is a
+# checkout of *this* repo living inside it, so git records it as a gitlink (mode 160000) with no
+# matching .gitmodules entry, which makes every `git submodule` command abort with "no submodule
+# mapping found". The branches themselves carry the work. Supersedes the narrower `.claude/…` rules
+# above.
+.claude/
