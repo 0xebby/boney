@@ -21,17 +21,20 @@ import {StatusPill} from "@/components/ui/StatusPill";
  * @param options Every offerable campaign with its eligibility, from `joinOptions`.
  * @param onJoined Called once the join confirms, so the caller can refetch membership.
  * @param loading Whether the campaign list is still arriving.
+ * @param caption A line under the trigger saying what promoting a campaign gets you.
  * @param className Extra classes for the anchor the trigger and its panels position against.
  */
 export function JoinCampaignMenu({
   options,
   onJoined,
   loading = false,
+  caption,
   className = "",
 }: {
   options: readonly JoinOption[];
   onJoined: () => void;
   loading?: boolean;
+  caption?: string;
   className?: string;
 }) {
   const router = useRouter();
@@ -99,7 +102,7 @@ export function JoinCampaignMenu({
     : "Promote a campaign";
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative flex flex-col gap-2 ${className}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -115,6 +118,12 @@ export function JoinCampaignMenu({
           ▾
         </span>
       </button>
+
+      {/* In flow rather than absolute, so the panel and the wallet progress below it clear
+          the caption instead of landing on top of it. */}
+      {caption ? (
+        <p className="text-balance text-center text-xs leading-snug text-ink-muted">{caption}</p>
+      ) : null}
 
       {open ? (
         <div

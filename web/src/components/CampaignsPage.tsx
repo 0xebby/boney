@@ -200,19 +200,27 @@ export function CampaignsPage() {
             with the ones this wallet cannot join yet saying why. */}
         {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
             each takes half of a measure narrow enough to stay a pair, wide enough to read as the
-            page’s two entry points. Stacked below `sm`, where half of a phone is not a button. */}
+            page’s two entry points. Stacked below `sm`, where half of a phone is not a button.
+            A caption under each states what that side of the marketplace does. */}
         <div className="mx-auto flex w-full max-w-xl flex-col gap-3 py-2 sm:flex-row sm:py-4">
-          <Link
-            href="/create"
-            className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90 sm:flex-1"
-          >
-            Create a campaign
-          </Link>
+          <div className="flex flex-col gap-2 sm:flex-1">
+            <Link
+              href="/create"
+              className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90"
+            >
+              Create a campaign
+            </Link>
+
+            <p className="text-balance text-center text-xs leading-snug text-ink-muted">
+              Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
+            </p>
+          </div>
 
           <JoinCampaignMenu
             options={joinable}
             onJoined={refetchJoined}
             loading={isLoading}
+            caption="Generate unique link, share and earn rewards."
             className="sm:flex-1"
           />
         </div>
