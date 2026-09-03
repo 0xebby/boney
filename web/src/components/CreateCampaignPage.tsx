@@ -369,7 +369,7 @@ export function CreateCampaignPage() {
       <Card>
         <CardHeader title="Eligibility" />
         <Field
-          label="Minimum reputation (0 = open to all)"
+          label="Minimum BoneyScore (0 = open to all)"
           value={draft.minReputation}
           onChange={(v) => updateField("minReputation", v)}
           error={issueFor("minReputation")}

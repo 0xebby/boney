@@ -91,3 +91,43 @@ export function StatRow({children}: {children: ReactNode}) {
     </div>
   );
 }
+
+/**
+ * The same number without the tile's border and background, for use inside a `Card`.
+ *
+ * A `StatTile` nested in a card draws a second box around every figure, so a panel of related
+ * numbers reads as a grid of separate cards. The typography is `StatTile`'s exactly — proportional
+ * figures, brand label, `text-ink` value — so the two forms sit side by side without disagreeing.
+ */
+export function Figure({
+  label,
+  value,
+  unit,
+  qualifier,
+  hint,
+  size = "md",
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  qualifier?: string;
+  hint?: string;
+  /** `lg` for the one figure a panel leads with. */
+  size?: "md" | "lg";
+}) {
+  const scale = size === "lg" ? "text-3xl sm:text-4xl" : "text-2xl sm:text-3xl";
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-bold text-brand">{label}</span>
+
+      <div className="flex flex-wrap items-baseline gap-x-1.5">
+        <span className={`font-display leading-tight text-ink ${scale}`}>{value}</span>
+        {unit ? <span className="text-sm font-semibold text-ink-secondary">{unit}</span> : null}
+        {qualifier ? <span className="text-xs text-ink-muted">{qualifier}</span> : null}
+      </div>
+
+      {hint ? <span className="text-xs leading-snug text-ink-muted">{hint}</span> : null}
+    </div>
+  );
+}

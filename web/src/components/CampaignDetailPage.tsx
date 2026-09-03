@@ -306,7 +306,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
                   value={formatDuration(Number(detail.attributionWindow))}
                 />
                 <Field
-                  label="Min. reputation"
+                  label="Min. BoneyScore"
                   value={
                     detail.minReputation === BigInt(0)
                       ? "Open to all"
