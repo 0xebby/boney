@@ -122,7 +122,7 @@ export function JoinCampaignMenu({
       {/* In flow rather than absolute, so the panel and the wallet progress below it clear
           the caption instead of landing on top of it. */}
       {caption ? (
-        <p className="text-balance text-center text-xs leading-snug text-ink-muted">{caption}</p>
+        <p className="text-balance text-center text-xs leading-snug text-brand">{caption}</p>
       ) : null}
 
       {open ? (
