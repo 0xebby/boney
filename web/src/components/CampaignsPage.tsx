@@ -15,7 +15,7 @@ import {Figure} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
-import {Card, CardHeader} from "@/components/ui/Card";
+import {Card} from "@/components/ui/Card";
 import {JoinCampaignMenu} from "@/components/ui/JoinCampaignMenu";
 import {CampaignFilters as CampaignFilterControls} from "@/components/CampaignFilters";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
@@ -172,12 +172,12 @@ export function CampaignsPage() {
 
         {/* One panel across the width: what the marketplace is paying out and how much of it has
             landed. Four figures reading left to right, the pool set larger as the one everything
-            else is a share of. */}
-        <Card>
-          <CardHeader title="Overview" />
+            else is a share of. Unheaded — each figure carries its own label, so a heading above them
+            would only name the panel a second time.
 
-          {/* One gap for both axes, equal to the card's own inset: every space inside the panel —
-              figure to figure, figure to edge — measures the same. */}
+            One gap for both axes, equal to the card's own inset: every space inside the panel —
+            figure to figure, figure to edge — measures the same. */}
+        <Card>
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Figure
               label="Total Reward Pool"
