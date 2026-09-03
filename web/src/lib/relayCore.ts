@@ -66,7 +66,7 @@ export type DecodedEvent = {
   blockNumber: bigint;
 };
 
-// ── event handling  ────────────────────────────────────────────────────
+// ── event handling ───────────────────────────────────────────────
 
 /**
  * Builds a real ABI event from the stored human-readable signature.
@@ -178,7 +178,7 @@ export type ScanRange =
  * Also stays `confirmations` behind the head, so a reorg cannot strand a checkpoint on a block that
  * no longer exists — the checkpoint is monotonic on chain and cannot be walked back.
  *
-The one case that needs care is a run split across several transactions; see `planReportBatches`.
+ * The one case that needs care is a run split across several transactions; see `planReportBatches`.
  */
 export function resolveScanRange(input: {
   checkpoint: bigint;
