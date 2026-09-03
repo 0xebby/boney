@@ -8,28 +8,22 @@ out/
 /broadcast/**/dry-run/
 
 # Docs. `/docs/` is `forge doc` output — regenerable from the sources it documents, like out/ above,
-# and 4 MB of it. The prose a reader needs is in README.md and boneyMd/.
+# and 4 MB of it.
 #
 # Anchored with a leading slash: unanchored, `docs/` matches a directory of that name at ANY depth,
-# which silently swept up `web/src/app/docs/` (the /docs route) and `.claude/docs/`. Both are source.
+# which silently swept up `web/src/app/docs/` — the /docs route, which is source.
 /docs/
-BoneyDocs.md
-todo.md
-todo-frontend.md
-plan.md
-future.md
-changes.md
 
-# Local testing notes. Holds throwaway Base Sepolia keys for driving the fixture by hand, and
-# this repo is public — so it is ignored by name here as well as in .git/info/exclude.
-testing.md
-
-# Internal code reviews and the unpublished protocol spec. Both live in boneyMd/ alongside the
-# published docs, and this repo is public — findings.md details high-severity bugs, so it must never
-# be staged. Drop the spec/ rule when the spec is ready to publish.
-boneyMd/findings.md
-boneyMd/spec/
-boneyMd
+# Every .md except the one GitHub renders on the repo page. The rest is working material — the
+# protocol spec, internal reviews, plans, launch notes, agent instructions — and this repo is public.
+# `boneyMd/findings.md` details high-severity bugs and `testing.md` holds throwaway Base Sepolia keys,
+# so neither may ever be staged; testing.md is in .git/info/exclude as well.
+#
+# `!README.md` is anchored: unanchored it would also re-include every nested README. A file inside an
+# ignored directory cannot be re-included at all, which is why boneyMd/ below needs no exception.
+*.md
+!/README.md
+boneyMd/
 
 # One-off HTML explainers written to the repo root while working something out. The version of any
 # of this that ships is prose in boneyMd/ or a page in the app.
@@ -53,19 +47,16 @@ web/.vercel
 # which is a no-op because reports are cumulative.
 .indexer-state.json
 
-# Claude Code worktrees. These are checkouts of *this* repo living inside it, so git records each
-# one as a gitlink (mode 160000) with no matching .gitmodules entry — which makes every
-# `git submodule` command abort with "no submodule mapping found". They are local scratch space
-# and must never be committed; the branches themselves carry the work.
-.claude/worktrees/
+# Claude Code's whole directory — project instructions, docs, local skills, and worktrees. Working
+# material rather than shared procedure. The worktrees especially must never be committed: each is a
+# checkout of *this* repo living inside it, so git records it as a gitlink (mode 160000) with no
+# matching .gitmodules entry, which makes every `git submodule` command abort with "no submodule
+# mapping found". The branches themselves carry the work.
+.claude/
 
 # Per-machine tool settings, not shared state. `.vscode/extensions.json` and `launch.json` are
 # tracked because they are shared procedure; settings.json is whatever this machine happened to set.
-.claude/settings.local.json
 .vscode/settings.json
-
-# Local agent skills. Kept out for now — promote one here if it becomes shared procedure.
-.claude/skills/
 
 # Campaign guides written by /api/campaign-guide — a local-dev convenience, not shared state.
 # The committed catalog in web/src/lib/campaignGuide.ts is the path a deploy relies on.
