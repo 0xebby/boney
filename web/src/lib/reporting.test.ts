@@ -236,7 +236,7 @@ describe("planKolReport", () => {
     const plan = planKolReport({...base, aggregate: true});
     expect(plan).toMatchObject({ok: false});
     if (plan.ok) return;
-    expect(plan.reason).toMatch(/AggregateKpi/);
+    expect(plan.reason).toMatch(/never credit a promoter/);
   });
 
   it("passes the KOL's own block through as the reason", () => {
@@ -497,7 +497,7 @@ describe("planObservedReport", () => {
     const plan = planned({aggregate: true});
     expect(plan).toMatchObject({ok: false});
     if (plan.ok) return;
-    expect(plan.reason).toMatch(/AggregateKpi/);
+    expect(plan.reason).toMatch(/never credit a promoter/);
   });
 
   it("passes the KOL's own block through as the reason", () => {
