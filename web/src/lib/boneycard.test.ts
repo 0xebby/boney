@@ -266,13 +266,13 @@ describe("qualificationHeadline", () => {
       verifyToJoin: filler(3),
     });
     expect(line).toBe(
-      "You can join 5 campaigns right now — verify your BoneyScore to unlock 3 more.",
+      "You can promote 5 campaigns right now — verify your BoneyScore to unlock 3 more.",
     );
   });
 
   it("singularises", () => {
     expect(qualificationHeadline({...base, joinableNow: filler(1)})).toBe(
-      "You can join 1 campaign right now.",
+      "You can promote 1 campaign right now.",
     );
   });
 
@@ -300,7 +300,7 @@ describe("qualificationHeadline", () => {
     expect(
       qualificationHeadline({...base, joinableNow: filler(3), verifyToJoin: filler(1)}, {verifiable: false}),
     ).toBe(
-      "You can join 3 campaigns right now. 1 more is score-gated, and this network cannot record a BoneyScore yet.",
+      "You can promote 3 campaigns right now. 1 more is score-gated, and this network cannot record a BoneyScore yet.",
     );
     expect(qualificationHeadline({...base, scoreTooLow: filler(1)}, {anonymous: true})).toBe(
       "1 open campaign, and it is score-gated. Connect to see where you stand.",
@@ -309,12 +309,12 @@ describe("qualificationHeadline", () => {
 
   it("does not claim nothing is open when the wallet has joined everything", () => {
     expect(qualificationHeadline({...base, joined: filler(2)})).toBe(
-      "You have joined every campaign that is currently open.",
+      "You are promoting every campaign that is currently open.",
     );
   });
 
   it("falls back to an honest empty state", () => {
-    expect(qualificationHeadline(base)).toBe("No campaigns are open to join right now.");
+    expect(qualificationHeadline(base)).toBe("No campaigns are open to promote right now.");
   });
 
   /**
@@ -329,7 +329,7 @@ describe("qualificationHeadline", () => {
     );
     expect(line).not.toMatch(/verify/i);
     expect(line).toBe(
-      "You can join 5 campaigns right now. 3 more are score-gated, and this network cannot record a BoneyScore yet.",
+      "You can promote 5 campaigns right now. 3 more are score-gated, and this network cannot record a BoneyScore yet.",
     );
   });
 
@@ -342,13 +342,13 @@ describe("qualificationHeadline", () => {
 
   it("still reports an empty chain honestly when nothing is open at all", () => {
     expect(qualificationHeadline(base, {verifiable: false})).toBe(
-      "No campaigns are open to join right now.",
+      "No campaigns are open to promote right now.",
     );
   });
 
   /**
    * The shared-card voice. `qualify` never asks whether a wallet is connected, so the grouping is
-   * correct for a visitor — but "you can join" is a claim about a reader whose address nobody knows,
+   * correct for a visitor — but "you can promote" is a claim about a reader whose address nobody knows,
    * and "above your score" is a judgement about a stranger.
    */
   describe("anonymous", () => {
@@ -1051,7 +1051,7 @@ describe("nextMilestone", () => {
     const next = nextMilestone(card.milestones);
     expect(next?.key).toBe("firstJoin");
     // The unearned copy is an instruction, not an achievement written in the past tense.
-    expect(next?.todo).toMatch(/^Join/);
+    expect(next?.todo).toMatch(/^Promote/);
   });
 
   it("skips the rungs already earned", () => {

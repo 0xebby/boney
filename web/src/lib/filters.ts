@@ -109,3 +109,17 @@ export function summarize(views: readonly CampaignView[]): CampaignSummary {
 
   return {count: views.length, activeCount, totalPool, totalPaidOut};
 }
+
+/**
+ * How many filters are narrowing the list, for the count on the disclosure that holds them.
+ *
+ * @param filters The current filter state.
+ * @returns The number of filters set away from their default.
+ */
+export function activeFilterCount(filters: CampaignFilters): number {
+  let n = 0;
+  if (filters.status !== EMPTY_FILTERS.status) n += 1;
+  if (filters.search.trim() !== "") n += 1;
+  if (filters.joinableOnly !== EMPTY_FILTERS.joinableOnly) n += 1;
+  return n;
+}

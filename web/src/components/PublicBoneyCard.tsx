@@ -26,7 +26,7 @@ import {explorerAddressUrl} from "@/lib/chains";
  *
  * ## What it deliberately leaves out
  *
- * **The qualification list.** "What you can join" is a question about the viewer, and the viewer of a
+ * **The qualification list.** "What you can promote" is a question about the viewer, and the viewer of a
  * public card is not its subject.
  *
  * **The score meter.** A meter is a ratio against a limit and the limit is `ReputationRegistry.maxScore()`,
@@ -191,7 +191,7 @@ function Footer() {
     <Card>
       <p className="text-sm text-ink">This is a Boneyard promoter card.</p>
       <p className="mt-1 text-xs text-ink-secondary">
-        Every count on it is earned on chain — campaigns joined, actions credited to a referral, reward
+        Every count on it is earned on chain — campaigns promoted, actions credited to a referral, reward
         tiers settled. Nothing here is self-reported.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">

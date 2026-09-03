@@ -1,5 +1,6 @@
 import {describe, it, expect} from "vitest";
 import {
+  activeFilterCount,
   filterCampaigns,
   isJoinable,
   summarize,
@@ -151,5 +152,24 @@ describe("summarize", () => {
     const huge = BigInt("9007199254740993"); // beyond Number.MAX_SAFE_INTEGER
     const s = summarize([view({rewardPool: huge}), view({rewardPool: huge})]);
     expect(s.totalPool).toBe(huge * BigInt(2));
+  });
+});
+
+describe("activeFilterCount", () => {
+  it("counts nothing for the default filters", () => {
+    expect(activeFilterCount(EMPTY_FILTERS)).toBe(0);
+  });
+
+  it("counts each filter that narrows the list", () => {
+    expect(activeFilterCount(filters({status: "Active"}))).toBe(1);
+    expect(activeFilterCount(filters({search: "venus"}))).toBe(1);
+    expect(activeFilterCount(filters({joinableOnly: true}))).toBe(1);
+    expect(
+      activeFilterCount(filters({status: "Pending", search: "0x12", joinableOnly: true})),
+    ).toBe(3);
+  });
+
+  it("ignores whitespace-only search, which filters nothing", () => {
+    expect(activeFilterCount(filters({search: "   "}))).toBe(0);
   });
 });

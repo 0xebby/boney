@@ -136,7 +136,7 @@ describe("humanizeContractError", () => {
 describe("describeTxError", () => {
   it("humanises a revert that viem already named", () => {
     const {message, detail} = describeTxError(revertError("AlreadyJoined", []));
-    expect(message).toBe("This wallet has already joined the campaign.");
+    expect(message).toBe("This wallet is already promoting the campaign.");
     expect(detail).toBe("AlreadyJoined()");
   });
 

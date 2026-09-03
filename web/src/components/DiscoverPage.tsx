@@ -33,8 +33,8 @@ import type {CampaignView} from "@/lib/types";
  *
  * Two honesty constraints shape the whole page:
  *
- *  - **Scores here are snapshots.** `PromoterJoined.reputation` is what the promoter scored at join
- *    time, and attestations expire. Every score is labelled "at join"
+ *  - **Scores here are snapshots.** `PromoterJoined.reputation` is what the promoter scored at the start
+ *    time, and attestations expire. Every score is labelled "at start"
  *  a project choosing promoters off a stale number should know
  *    it is
  *    stale. Reading current scores would cost one `scoreOf` call per wallet.
@@ -81,7 +81,7 @@ export function DiscoverPage({
       <header>
         <h1 className="font-display text-2xl text-ink">Discover promoters</h1>
         <p className="mt-0.5 text-xs text-ink-muted">
-          Browse promoters by BoneyScore rank. Scores are as recorded when each promoter joined.
+          Browse promoters by BoneyScore rank. Scores are as recorded when each promoter started.
         </p>
       </header>
 
@@ -94,7 +94,7 @@ export function DiscoverPage({
         <StatTile
           label="Top BoneyScore"
           value={busy ? "—" : summary.topScore.toLocaleString("en-US")}
-          hint="at join"
+          hint="at start"
         />
         <StatTile
           label="Median"
@@ -156,7 +156,7 @@ export function DiscoverPage({
 
       {directory.scannedFrom !== undefined ? (
         <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
-          Showing joins from block {directory.scannedFrom.toString()} onward. Promoters who joined
+          Showing memberships from block {directory.scannedFrom.toString()} onward. Promoters who started
           earlier are not listed — this chain&rsquo;s history is longer than one scan can cover.
         </p>
       ) : null}
@@ -178,7 +178,7 @@ export function DiscoverPage({
             title={all.length === 0 ? "No promoters yet" : "No promoters at these ranks"}
             description={
               all.length === 0
-                ? "Once promoters join a campaign on this network they appear here, ranked by BoneyScore."
+                ? "Once promoters start promoting a campaign on this network they appear here, ranked by BoneyScore."
                 : "Every promoter in this campaign sits outside the ranks you selected."
             }
             action={
@@ -304,11 +304,11 @@ function PromoterTable({
               </th>
               <th scope="col" className="px-3 py-2 text-right text-xs font-medium text-ink-muted">
                 BoneyScore
-                <span className="sr-only"> at join</span>
+                <span className="sr-only"> at start</span>
               </th>
               {/*
                 Headed "now" because it is read live from the registry while the column beside it
-                is the join-time snapshot. Two epochs in one row is a real hazard — a project could
+                is the starting snapshot. Two epochs in one row is a real hazard — a project could
                 otherwise read the split as the breakdown *of* the score next to it, which it is
                 not — so the difference is labelled in the header rather than left to the docs.
               */}

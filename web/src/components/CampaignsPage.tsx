@@ -2,6 +2,7 @@
 
 import {useMemo, useState} from "react";
 import Link from "next/link";
+import {useAccount} from "wagmi";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
 import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
 import {useCampaignGuides} from "@/hooks/useCampaignGuides";
@@ -10,11 +11,13 @@ import {poolValue} from "@/lib/poolValue";
 import {useJoinedCampaigns} from "@/hooks/useJoinedCampaigns";
 import {useNow} from "@/hooks/useNow";
 import {DataTable, type Column} from "@/components/ui/DataTable";
-import {StatTile, StatRow} from "@/components/ui/StatTile";
+import {Figure} from "@/components/ui/StatTile";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
+import {JoinCampaignMenu} from "@/components/ui/JoinCampaignMenu";
+import {CampaignFilters as CampaignFilterControls} from "@/components/CampaignFilters";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {WelcomeDialog} from "@/components/WelcomeDialog";
 import {welcomeFigure} from "@/lib/welcome";
@@ -23,8 +26,8 @@ import {
   summarize,
   EMPTY_FILTERS,
   type CampaignFilters,
-  type StatusFilter,
 } from "@/lib/filters";
+import {joinOptions} from "@/lib/joinPicker";
 import {utilization} from "@/lib/campaign";
 import {summarizeKinds} from "@/lib/kpiSummary";
 import {projectName, hasProjectName} from "@/lib/projects";
@@ -32,27 +35,11 @@ import type {ResolvedGuide} from "@/lib/campaignGuide";
 import {formatTokenAmount, formatPercent, formatTimeUntil, formatUsd} from "@/lib/format";
 import type {CampaignView, KpiSpec} from "@/lib/types";
 
-/**
- * Filter order, most-asked-for first: a visitor scanning the marketplace wants what is running
- * now, so Active leads and the rest follow the lifecycle.
- *
- * Spelled out rather than spread from `CAMPAIGN_STATUS`, because that array mirrors the Solidity
- * enum and its indices are load-bearing (`statusFromIndex`) — it cannot be reordered to suit the
- * UI. `satisfies` keeps the two from drifting apart on spelling; this list must name every status.
- */
-const STATUS_OPTIONS = [
-  "all",
-  "Active",
-  "Pending",
-  "Paused",
-  "Ended",
-  "Cancelled",
-] as const satisfies readonly StatusFilter[];
-
 export function CampaignsPage() {
   const {campaigns, tokens, isLoading, isRefreshing, error, refetch, deployed, chainId} =
     useCampaigns();
   const {reputation} = useReputation();
+  const {isConnected} = useAccount();
   const [filters, setFilters] = useState<CampaignFilters>(EMPTY_FILTERS);
 
   /*
@@ -79,7 +66,7 @@ export function CampaignsPage() {
     of one cache entry rather than a second fan-out. It returns an empty list with no wallet
     connected, so a disconnected visitor issues no reads and sees no markers.
   */
-  const {joined} = useJoinedCampaigns(campaigns);
+  const {joined, refetch: refetchJoined} = useJoinedCampaigns(campaigns);
 
   // Lowercased so a checksummed address from one source still matches a lowercase one from
   // another — the two happen to agree today, but a mismatch would silently drop every marker.
@@ -118,6 +105,17 @@ export function CampaignsPage() {
   const columns = useMemo(
     () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, guides, chainId),
     [tokens, now, joinedAddresses, kpiSpecs, guides, chainId],
+  );
+
+  /*
+    What the promote menu offers — built from `campaigns`, not `visible`.
+
+    The table's filters narrow what a visitor is reading; they are not a statement about what they
+    are allowed to join. Sourcing the menu from the filtered list would make "Ended only" empty it.
+  */
+  const joinable = useMemo(
+    () => joinOptions(campaigns, {reputation, joinedAddresses, connected: isConnected}),
+    [campaigns, reputation, joinedAddresses, isConnected],
   );
 
   if (!deployed) {
@@ -172,115 +170,92 @@ export function CampaignsPage() {
           </div>
         </header>
 
-        <StatRow>
-          <StatTile
-            label="Active campaigns"
-            value={summary.activeCount.toLocaleString("en-US")}
-            qualifier={`of ${summary.count.toLocaleString("en-US")}`}
-          />
-          <StatTile
-            label="Total Reward Pool"
-            value={formatUsd(value.pool, {compact: true})}
-            //accent="var(--series-1)"
-          />
-          <StatTile
-            label="Rewards Earned"
-            value={formatUsd(value.paidOut, {compact: true})}
-            //accent="var(--series-3)"
-          />
-          {/*
+        {/* One panel across the width: what the marketplace is paying out and how much of it has
+            landed. Four figures reading left to right, the pool set larger as the one everything
+            else is a share of. Unheaded — each figure carries its own label, so a heading above them
+            would only name the panel a second time.
 
-          */}
-          <StatTile
-            label="Pool Utilization"
-            value={formatPercent(value.paidOut, value.pool)}
-            //hint="across all campaigns"
-          />
-        </StatRow>
-
-        {/* One filter row above everything it scopes — never per-card filters. Search leads it, on the
-            same line as the status and eligibility controls it narrows with: it is one control among
-            them rather than a hero field, and sharing their row is what keeps the three baselines
-            aligned. The controls sit at the trailing edge, above the table's own right-aligned
-            columns; what the row *says* stays at the left.
-
-            Only from `sm` up, though. Below it the field takes the whole line and the rest wraps, and a
-            trailing edge there leaves each wrapped group at its own offset — which is the ragged column
-            the row exists to prevent. On a phone they stack against the left edge instead. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
-          {/* `flex-1` so the field runs from the left edge to whatever sits next in the row, rather than
-              stopping at a fixed width and leaving a gap the eye reads as a missing control. `min-w-56`
-              keeps a project name legible once the row is crowded. */}
-          <div className="w-full sm:min-w-56 sm:flex-1">
-            <label className="sr-only" htmlFor="campaign-search">
-              Search campaigns, project names, or campaign IDs
-            </label>
-            <input
-              id="campaign-search"
-              type="search"
-              value={filters.search}
-              onChange={(e) => setFilters((f) => ({...f, search: e.target.value}))}
-              placeholder="Search campaigns, projects, or IDs…"
-              className="h-11 w-full rounded-md border border-hairline-strong bg-surface-1 px-2.5 text-xs text-ink transition-colors placeholder:text-ink-muted hover:border-brand-dim focus:border-brand sm:h-8"
+            One gap for both axes, equal to the card's own inset: every space inside the panel —
+            figure to figure, figure to edge — measures the same. */}
+        <Card>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Figure
+              label="Total Reward Pool"
+              value={formatUsd(value.pool, {compact: true})}
+              size="lg"
             />
-          </div>
-
-          {/* No `mr-auto`: the field beside it already absorbs the row's free space, and two elements
-              competing for it split it between them. */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 empty:hidden">
-            {visible.length !== campaigns.length ? (
-              <span className="text-xs text-ink-muted">
-                {visible.length} of {campaigns.length}
-              </span>
-            ) : null}
-
-            {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
-                column that quietly stopped describing the tail of the list would read as "no KPIs
-                here". */}
-            {kpiSpecsDropped > 0 ? (
-              <span className="text-xs text-ink-muted">
-                KPI kinds not loaded for {kpiSpecsDropped} campaign
-                {kpiSpecsDropped === 1 ? "" : "s"}
-              </span>
-            ) : null}
-          </div>
-
-          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-secondary">
-            <input
-              type="checkbox"
-              checked={filters.joinableOnly}
-              onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
-              className="size-3.5 accent-[var(--brand)]"
+            <Figure
+              label="Active campaigns"
+              value={summary.activeCount.toLocaleString("en-US")}
+              qualifier={`of ${summary.count.toLocaleString("en-US")}`}
             />
-            Joinable by me
-          </label>
-
-          {/* `flex-wrap`: six chips measure wider than a phone's content column, and wrapping inside
-              their own box keeps every status visible — an `overflow-x-auto` strip would put half of
-              them behind a gesture nothing advertises. */}
-          <div className="flex flex-wrap items-center gap-1 rounded-md border border-hairline bg-surface-1 p-0.5">
-            {STATUS_OPTIONS.map((option) => {
-              const active = filters.status === option;
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => setFilters((f) => ({...f, status: option}))}
-                  aria-pressed={active}
-                  className={`rounded px-2 py-1.5 text-xs transition-colors sm:py-1 ${
-                    active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  {option === "all" ? "All" : option}
-                </button>
-              );
-            })}
+            <Figure label="Rewards Earned" value={formatUsd(value.paidOut, {compact: true})} />
+            <Figure label="Pool Utilization" value={formatPercent(value.paidOut, value.pool)} />
           </div>
+        </Card>
+
+        {/* The two actions the page exists to start, centred between the overview above and the table
+            below. Promoting is a menu rather than a link because the campaign has to be chosen, and
+            the choice is the part a promoter needs help with — every offerable campaign is listed,
+            with the ones this wallet cannot promote yet saying why. */}
+        {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
+            each takes half of a measure narrow enough to stay a pair, wide enough to read as the
+            page’s two entry points. A caption under each states what that side of the marketplace
+            does. Stacked below `sm`, where half of a phone is not a button, and spaced wider there
+            so a caption groups with the button above it instead of reading as four loose lines. */}
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-6 py-2 sm:flex-row sm:gap-3 sm:py-4">
+          <div className="flex flex-col gap-2 sm:flex-1">
+            <Link
+              href="/create"
+              className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90"
+            >
+              Create a campaign
+            </Link>
+
+            <p className="text-balance text-center text-xs leading-snug text-brand">
+              Set your KPIs. Escrow reward pool. Pay for verifiable results.
+            </p>
+          </div>
+
+          <JoinCampaignMenu
+            options={joinable}
+            onJoined={refetchJoined}
+            loading={isLoading}
+            caption="Generate a unique boneylink, share and earn rewards."
+            className="sm:flex-1"
+          />
         </div>
 
         <Card padded={false}>
+          {/* The table’s own header carries what the list is showing and the one control that
+              changes it — filters live behind it rather than in a row of their own above the panel.
+              Padded to the table’s own cell inset, so the title starts where the first column does. */}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-2 py-2.5 sm:px-3">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-sm font-bold text-brand">Browse campaigns</h2>
+
+              {visible.length !== campaigns.length ? (
+                <span className="tnum text-xs text-ink-muted">
+                  {visible.length} of {campaigns.length}
+                </span>
+              ) : null}
+
+              {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
+                  column that quietly stopped describing the tail of the list would read as “no KPIs
+                  here”. */}
+              {kpiSpecsDropped > 0 ? (
+                <span className="text-xs text-ink-muted">
+                  KPI kinds not loaded for {kpiSpecsDropped} campaign
+                  {kpiSpecsDropped === 1 ? "" : "s"}
+                </span>
+              ) : null}
+            </div>
+
+            <CampaignFilterControls filters={filters} setFilters={setFilters} />
+          </div>
+
           {isLoading ? (
-            <SkeletonRows rows={4} cols={7} />
+            <SkeletonRows rows={4} cols={8} />
           ) : error ? (
             <ErrorState message={String(error)} onRetry={() => refetch()} />
           ) : (
@@ -374,22 +349,38 @@ function buildColumns(
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
         setting it. The table lays out `auto`, so a cell's widest possible content is what sizes
-        its column: an uncapped name — or a `Joined` badge that appears when the wallet connects
+        its column: an uncapped name — or a `Promoting` badge that appears when the wallet connects
         and vanishes when it disconnects — moved every column to its right. The cap makes this
         column's measure a constant, so the badge is free to come and go.
       */
       render: (c) => (
-        <span className="flex max-w-[42vw] items-center gap-2 sm:max-w-[220px]">
-          <Link
-            href={`/campaign/${c.campaignId}`}
-            title={projectName(c)}
-            className="min-w-0 truncate font-medium text-ink hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {projectName(c)}
-          </Link>
-          {hasJoined(c) ? <JoinedBadge /> : null}
-        </span>
+        <div className="flex max-w-[42vw] flex-col gap-0.5 sm:max-w-[220px]">
+          <span className="flex items-center gap-2">
+            <Link
+              href={`/campaign/${c.campaignId}`}
+              title={projectName(c)}
+              className="min-w-0 truncate font-medium text-ink hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {projectName(c)}
+            </Link>
+            {hasJoined(c) ? <JoinedBadge /> : null}
+          </span>
+
+          {/* A phone drops six of the nine columns, which left it a name, a status and a number.
+              The three that decide whether a campaign is worth opening — when it ends, what it
+              gates on, how much of the pool has moved — ride under the name instead, and go away
+              from `md` up where the table shows them itself. */}
+          <span className="text-[11px] leading-snug text-ink-muted md:hidden">
+            {now > 0 ? `${formatTimeUntil(c.endTime, now)} · ` : ""}
+            {c.minReputation === BigInt(0)
+              ? "open to all"
+              : `min ${c.minReputation.toLocaleString("en-US")}`}
+            {c.paidOut > BigInt(0)
+              ? ` · ${formatPercent(Number(c.paidOut), Number(c.rewardPool))} paid`
+              : ""}
+          </span>
+        </div>
       ),
     },
     {
@@ -438,19 +429,11 @@ function buildColumns(
       },
     },
     {
-      key: "paid",
-      header: "Paid out",
-      numeric: true,
-      hideOnMobile: true,
-      sortValue: (c) => c.paidOut,
-      render: (c) => formatTokenAmount(c.paidOut, meta(c).decimals, {compact: true}),
-    },
-    {
       key: "utilization",
       header: "Progress",
       sortValue: (c) => utilization(c),
       // The fixed width is also why this is one of the first columns dropped on a phone: 140px of a
-      // 375px viewport spent on a bar whose number is already in "Paid out".
+      // 375px viewport spent on a bar, when the same percentage rides under the project name there.
       hideOnMobile: true,
       width: "140px",
       render: (c) => (
@@ -489,7 +472,7 @@ function buildColumns(
     },
     {
       key: "minRep",
-      header: "Min. rep.",
+      header: "Min. BoneyScore",
       numeric: true,
       hideOnMobile: true,
       sortValue: (c) => c.minReputation,

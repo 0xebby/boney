@@ -1,5 +1,5 @@
 /**
- * JoinedBadge — marks a campaign the connected wallet has already joined as a promoter.
+ * JoinedBadge — marks a campaign the connected wallet is already promoting.
  *
  * Deliberately not a `StatusPill` variant. That component carries the campaign's own lifecycle,
  * which is a fact about the campaign and identical for everyone looking at it; this is a fact about
@@ -7,7 +7,7 @@
  * would put a personal marker in the same visual channel as Active/Ended and make a row look like
  * it had two statuses, so this takes brand tinting instead.
  *
- * Only ever rendered in the affirmative — there is no "not joined" badge. Absence is the default
+ * Only ever rendered in the affirmative — there is no "not promoting" badge. Absence is the default
  * state of every row, so marking it would add noise to most of the table to say nothing.
  *
  * Colour is not the only carrier: the word is always present, which keeps the marker legible in
@@ -22,9 +22,9 @@ export function JoinedBadge() {
   return (
     <span
       className="inline-flex shrink-0 items-center whitespace-nowrap rounded bg-brand/10 px-1 py-px text-[9px] font-medium uppercase leading-none tracking-wide text-brand"
-      title="You have joined this campaign as a promoter"
+      title="You are promoting this campaign"
     >
-      Joined
+      Promoting
     </span>
   );
 }

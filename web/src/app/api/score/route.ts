@@ -13,8 +13,8 @@ import {scoreResponse} from "@/lib/score";
  * **The number this returns is not the number `Campaign.join()` reads.** `join()` gates on
  * `ReputationRegistry.scoreOf`, which is 0 until attestations are submitted and gas is paid. The two
  * are kept apart in `lib/boneycard.qualify`, which runs the join guard against both and reports
- * "verify to join" for the gap. Anything rendering this value as though it were the on-chain score
- * will produce a Join button that reverts `InsufficientReputation`.
+ * "verify to promote" for the gap. Anything rendering this value as though it were the on-chain score
+ * will produce a promote button that reverts `InsufficientReputation`.
  *
  * The score itself, its cache and its failure mapping live in `lib/score.ts`, because the public card
  * at `/b/<wallet>` is server-rendered and calls the same function directly rather than fetching this

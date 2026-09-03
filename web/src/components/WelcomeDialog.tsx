@@ -17,7 +17,7 @@ const CTA =
  * The first-visit introduction to the marketplace.
  *
  * Leads with the live escrowed total, then addresses the two sides of it in turn — promoters, who
- * join a campaign and get paid per verified result, and projects, who fund one. Each side carries
+ * promote a campaign and get paid per verified result, and projects, who fund one. Each side carries
  * its own action: promoters are already looking at the campaign list behind the dialog, so theirs
  * closes it, while a project's goes to `/create`.
  *
@@ -81,7 +81,7 @@ export function WelcomeDialog({figure, ready}: {figure: WelcomeFigure; ready: bo
 
         <p className={`mt-4 sm:mt-5 ${EYEBROW}`}>For promoters</p>
         <p className="mt-2 text-balance text-base leading-snug text-ink-muted sm:text-lg">
-          Join a campaign, share your boneylink.
+          Promote a campaign, share your boneylink.
         </p>
         <p className="text-balance text-base font-medium leading-snug text-ink sm:text-lg">
           Get paid per verified result.

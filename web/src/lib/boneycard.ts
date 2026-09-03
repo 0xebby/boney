@@ -159,7 +159,7 @@ export function cardScoreFrom(status: number, body: unknown): CardScore {
  *
  *  1. The score meter's denominator. Quoting 28,000 on a network that caps at something else
  *     mis-draws the bar.
- *  2. **Whether "verify to join" is a promise that can be kept.** A registry with no weighted
+ *  2. **Whether "verify to promote" is a promise that can be kept.** A registry with no weighted
  *     schemas has a ceiling of 0, every wallet scores 0 permanently, and no attestation can change
  *     that. Offering a Verify button there sells one transaction per schema for no possible effect
  *     — the same class of mistake as the reverted transaction in `useScoreCeiling`'s header, only
@@ -224,12 +224,12 @@ export function scoreScaleFrom(ceiling: bigint | undefined): ScoreScale {
  *
  * `verifyToJoin` is the whole reason this is five groups rather than a boolean: it is the set the
  * prospective score clears and the chain does not, which is exactly where a naive implementation
- * hands someone a Join button that reverts.
+ * hands someone a promote button that reverts.
  */
 export type QualificationGroup =
-  /** On-chain score already clears it (or it has no gate). Join works today. */
+  /** On-chain score already clears it (or it has no gate). Promoting works today. */
   | "joinableNow"
-  /** Prospective score clears it, on-chain does not. Attest first, then join. */
+  /** Prospective score clears it, on-chain does not. Attest first, then promote. */
   | "verifyToJoin"
   /** Even the prospective score falls short. */
   | "scoreTooLow"
@@ -272,7 +272,7 @@ const EMPTY_QUALIFICATION = (): Qualification => ({
  * drift.
  *
  * `connected` is deliberately not a parameter. `canJoin` treats a missing wallet as a blocker,
- * which is right for a Join button but wrong here: qualification answers "would this wallet be
+ * which is right for a promote button but wrong here: qualification answers "would this wallet be
  * admitted", not "can this browser sign right now". Passing `connected: false` through would
  * collapse every campaign into one bucket and make the shared card (`/b/<wallet>`, no wallet
  * connected) useless. The button's own guard still calls `canJoin` with the real value.
@@ -352,7 +352,7 @@ const agrees = (n: number, one: string, many: string) => (n === 1 ? one : many);
  *
  * `anonymous` is the no-wallet case, which is a real one: the card renders before a connection and at
  * `/b/<wallet>` for a visitor who is not the subject. The grouping is still valid there — `qualify`
- * never asks whether a wallet is connected — but the second person is not, because "you can join"
+ * never asks whether a wallet is connected — but the second person is not, because "you can promote"
  * is a claim about a reader whose address nobody knows. The counts are the same; only the voice
  * changes.
  *
@@ -380,7 +380,7 @@ export function qualificationHeadline(
     if (gated > 0) {
       return `${plural(gated, "open campaign", "open campaigns")}, ${agrees(gated, "and it is", "all of them")} score-gated. Connect to see where you stand.`;
     }
-    return "No campaigns are open to join right now.";
+    return "No campaigns are open to promote right now.";
   }
 
   if (opts.verifiable === false) {
@@ -389,26 +389,26 @@ export function qualificationHeadline(
     // side of a verification they sit on, and there is no verification on this network.
     const gated = verify + short;
     if (now > 0 && gated > 0) {
-      return `You can join ${plural(now, "campaign", "campaigns")} right now. ${gated} more ${agrees(gated, "is", "are")} score-gated, and this network cannot record a BoneyScore yet.`;
+      return `You can promote ${plural(now, "campaign", "campaigns")} right now. ${gated} more ${agrees(gated, "is", "are")} score-gated, and this network cannot record a BoneyScore yet.`;
     }
-    if (now > 0) return `You can join ${plural(now, "campaign", "campaigns")} right now.`;
+    if (now > 0) return `You can promote ${plural(now, "campaign", "campaigns")} right now.`;
     if (gated > 0) {
       return `${plural(gated, "open campaign", "open campaigns")} ${agrees(gated, "is", "are")} score-gated, and this network cannot record a BoneyScore yet.`;
     }
   }
 
   if (now > 0 && verify > 0) {
-    return `You can join ${plural(now, "campaign", "campaigns")} right now — verify your BoneyScore to unlock ${verify} more.`;
+    return `You can promote ${plural(now, "campaign", "campaigns")} right now — verify your BoneyScore to unlock ${verify} more.`;
   }
-  if (now > 0) return `You can join ${plural(now, "campaign", "campaigns")} right now.`;
+  if (now > 0) return `You can promote ${plural(now, "campaign", "campaigns")} right now.`;
   if (verify > 0) {
     return `Verify your BoneyScore to unlock ${plural(verify, "campaign", "campaigns")}.`;
   }
   if (short > 0) {
     return `${plural(short, "open campaign", "open campaigns")} ${agrees(short, "needs", "need")} a higher BoneyScore than yours.`;
   }
-  if (q.joined.length > 0) return "You have joined every campaign that is currently open.";
-  return "No campaigns are open to join right now.";
+  if (q.joined.length > 0) return "You are promoting every campaign that is currently open.";
+  return "No campaigns are open to promote right now.";
 }
 
 /**
@@ -527,8 +527,8 @@ export type Milestone = {
    *
    * Two labels rather than one because an unearned achievement written in the past tense reads as a
    * failure — a wallet that has done nothing would be looking at seven greyed-out things it has not
-   * done. The empty card is the state that matters most, and "Join your first campaign" is an
-   * invitation where "First campaign joined" is a void.
+   * done. The empty card is the state that matters most, and "Promote your first campaign" is an
+   * invitation where "First campaign promoted" is a void.
    */
   todo: string;
   earned: boolean;
@@ -630,11 +630,11 @@ function joinOrdered(memberships: readonly HistoryMembership[]): HistoryMembersh
 }
 
 const MILESTONE_LABEL: Record<MilestoneKey, string> = {
-  firstJoin: "First campaign joined",
+  firstJoin: "First campaign promoted",
   firstCredit: "First action credited",
   firstTier: "First tier crossed",
   firstPaid: "First reward paid",
-  fifthCampaign: "5th campaign joined",
+  fifthCampaign: "5th campaign promoted",
   firstRepeatProject: "First repeat project",
   secondKind: "First second protocol type",
 };
@@ -648,11 +648,11 @@ const MILESTONE_LABEL: Record<MilestoneKey, string> = {
  * may already have done everything asked.
  */
 const MILESTONE_TODO: Record<MilestoneKey, string> = {
-  firstJoin: "Join your first campaign",
+  firstJoin: "Promote your first campaign",
   firstCredit: "Get your first action credited",
   firstTier: "Cross your first reward tier",
   firstPaid: "Have a reward pay out",
-  fifthCampaign: "Join five campaigns",
+  fifthCampaign: "Promote five campaigns",
   firstRepeatProject: "Promote for the same project twice",
   secondKind: "Deliver on a second protocol type",
 };

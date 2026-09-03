@@ -174,8 +174,8 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   NothingToReclaim: () => "There's nothing left in escrow to reclaim.",
 
   // ── Campaign: joining ──
-  AlreadyJoined: () => "This wallet has already joined the campaign.",
-  NotJoined: () => "This wallet hasn't joined the campaign yet.",
+  AlreadyJoined: () => "This wallet is already promoting the campaign.",
+  NotJoined: () => "This wallet isn't promoting the campaign yet.",
   InsufficientReputation: ([current, required]) =>
     `Your BoneyScore is ${score(current)}, and this campaign requires ${score(required)}. Build reputation or pick a campaign with a lower bar.`,
   UnreachableReputation: ([required, max]) =>
@@ -238,7 +238,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   TouchAlreadyActive: ([, expiresAt]) =>
     `You're already attributed to this promoter until ${at(expiresAt)}. The window can't be extended, but you can switch to a different promoter.`,
   PromoterNotRegistered: () =>
-    "That promoter hasn't joined this campaign, so the referral can't be attributed.",
+    "That promoter isn't promoting this campaign, so the referral can't be attributed.",
   CampaignOver: ([endTime]) =>
     `This campaign closed at ${at(endTime)}, so referrals can no longer be attributed to it.`,
   CampaignTerminal: ([status]) =>
