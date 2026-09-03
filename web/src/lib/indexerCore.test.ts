@@ -6,6 +6,7 @@ import {
   aggregateByActor,
   blockChunks,
   decideReport,
+  logScanKey,
   encodeActions,
   foldToLimit,
   rawAmount,
@@ -880,5 +881,50 @@ describe("tallyByPromoter", () => {
     const tally = tallyByPromoter(ALICE, total.actions, attribution);
     const summed = [...tally.values()].reduce((sum, v) => sum + v, BigInt(0));
     expect(summed).toBe(total.amount);
+  });
+});
+
+describe("logScanKey", () => {
+  const FROM = BigInt(46_130_021);
+  const TO = BigInt(46_277_856);
+
+  it("matches for the same source over the same range", () => {
+    expect(logScanKey(source(), FROM, TO)).toBe(logScanKey(source(), FROM, TO));
+  });
+
+  it("ignores the fields that only change how the logs are read", () => {
+    const other = source({actorTopic: 2, amountMode: AMOUNT_MODE.count, scale: BigInt(1)});
+    expect(logScanKey(other, FROM, TO)).toBe(logScanKey(source(), FROM, TO));
+  });
+
+  it("separates a different contract", () => {
+    const other = source({source: "0x7B47daC59075aF44046795BA347EC872D5409263"});
+    expect(logScanKey(other, FROM, TO)).not.toBe(logScanKey(source(), FROM, TO));
+  });
+
+  it("separates a different event signature", () => {
+    const other = source({topic0: pad("0x01", {size: 32})});
+    expect(logScanKey(other, FROM, TO)).not.toBe(logScanKey(source(), FROM, TO));
+  });
+
+  it("separates a different block range", () => {
+    expect(logScanKey(source(), FROM, TO)).not.toBe(logScanKey(source(), FROM, TO + BigInt(1)));
+    expect(logScanKey(source(), FROM, TO)).not.toBe(logScanKey(source(), FROM - BigInt(1), TO));
+  });
+
+  it("separates a fixed-topic filter from an unfiltered scan, and one value from another", () => {
+    const filtered = source({filterTopic: 2, filterValue: pad(ALICE, {size: 32})});
+    const otherValue = source({filterTopic: 2, filterValue: pad(BOB, {size: 32})});
+
+    expect(logScanKey(filtered, FROM, TO)).not.toBe(logScanKey(source(), FROM, TO));
+    expect(logScanKey(filtered, FROM, TO)).not.toBe(logScanKey(otherValue, FROM, TO));
+  });
+
+  it("reads a checksummed address and an upper-case topic as the same request", () => {
+    const shouted = source({
+      source: "0x4200000000000000000000000000000000000006",
+      topic0: WETH_DEPOSIT_TOPIC.toUpperCase().replace("0X", "0x") as Hex,
+    });
+    expect(logScanKey(shouted, FROM, TO)).toBe(logScanKey(source(), FROM, TO));
   });
 });

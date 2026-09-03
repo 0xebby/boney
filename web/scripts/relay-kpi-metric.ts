@@ -53,7 +53,15 @@ import {
   type TouchLog,
 } from "../src/lib/attributionWindows";
 import {blockAtTimestamp, earliestCoveringTouch} from "../src/lib/blockSearch";
+import {
+  harvestLogTimestamps,
+  missingTimestamps,
+  timestampBatches,
+  type BlockTimestamps,
+} from "../src/lib/blockTimestamps";
 import {TOUCH_STORED} from "../src/lib/events";
+import {progress, progressDone} from "./progress";
+import {loadTimestampCache, saveTimestampCache} from "./timestampCache";
 import {
   aggregateDeltas,
   decodeUserEvents,
@@ -91,13 +99,19 @@ const CONFIRMATIONS = BigInt(5);
 const BATCH_SIZE = 200;
 
 /**
- * How many block-timestamp reads are in flight at once. Public endpoints throttle a wider fan-out,
- * and a throttled batch costs more than a narrower one. Same constant `indexer.ts` uses.
+ * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
+ * pass costs the limiter this many times less than one request per call would.
  */
-const TIMESTAMP_CONCURRENCY = 12;
+const RPC_BATCH_SIZE = 100;
 
-/** Per-request ceiling. A loaded public endpoint answers a single `eth_getBlockByNumber` in ~1s. */
-const RPC_TIMEOUT = 30_000;
+/**
+ * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests. Wide
+ * enough to keep a few requests in flight, narrow enough that a public endpoint answers them.
+ */
+const READ_CONCURRENCY = 300;
+
+/** Per-request ceiling. A loaded public endpoint answers a batch of block reads in a few seconds. */
+const RPC_TIMEOUT = 60_000;
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -131,6 +145,7 @@ function reporterKey(): Hex | undefined {
  * @param source Event source from the KPI's params, or null when it could not be decoded.
  * @param fromBlock First block to scan.
  * @param toBlock Last block to scan.
+ * @param timestamps Cache the logs' own `blockTimestamp` fields are collected into.
  * @returns Every matching log in the range.
  */
 async function fetchLogs(
@@ -140,12 +155,13 @@ async function fetchLogs(
   source: EventSource | null,
   fromBlock: bigint,
   toBlock: bigint,
+  timestamps: BlockTimestamps,
 ): Promise<RelayLog[]> {
   const out: RelayLog[] = [];
   const chunks = blockChunks(fromBlock, toBlock, MAX_LOG_RANGE);
 
   for (const [i, chunk] of chunks.entries()) {
-    process.stdout.write(`\r    scanning ${i + 1}/${chunks.length} chunks…`);
+    progress(`scanning ${i + 1}/${chunks.length} chunks`);
     const logs = await client.getLogs({
       address,
       fromBlock: chunk.from,
@@ -156,6 +172,8 @@ async function fetchLogs(
       ],
     });
 
+    harvestLogTimestamps(logs, timestamps);
+
     for (const log of logs) {
       if (log.topics[0]?.toLowerCase() !== topic0.toLowerCase()) continue;
       if (source && !matchesTopicFilter(log, source)) continue;
@@ -163,7 +181,7 @@ async function fetchLogs(
       out.push({topics: log.topics, data: log.data, blockNumber: log.blockNumber});
     }
   }
-  if (chunks.length > 0) process.stdout.write("\r\x1b[K");
+  if (chunks.length > 0) progressDone();
 
   return out;
 }
@@ -179,7 +197,10 @@ async function main(): Promise<void> {
   const kpiIndex = BigInt(arg("--kpi") ?? "0");
 
   const client = createPublicClient({
-    transport: http(rpcUrl, {timeout: RPC_TIMEOUT}),
+    transport: http(rpcUrl, {
+      timeout: RPC_TIMEOUT,
+      batch: {batchSize: RPC_BATCH_SIZE, wait: 8},
+    }),
   }) as PublicClient;
   const chainId = await client.getChainId();
 
@@ -300,6 +321,11 @@ async function main(): Promise<void> {
 
   // ── scan and decode ────────────────────────────────────────────
 
+  // One cache for every timestamp this pass needs, shared by the touch search, the touch scan and
+  // the KPI logs, and carried over from earlier passes on this chain.
+  const blockTimestamps = loadTimestampCache(chainId);
+  const cachedOnEntry = blockTimestamps.size;
+
   const logs = await fetchLogs(
     client,
     config.targetContract,
@@ -307,6 +333,7 @@ async function main(): Promise<void> {
     indexerSource,
     range.fromBlock,
     range.toBlock,
+    blockTimestamps,
   );
   const {decoded, undecodable} = decodeUserEvents(logs, event, config);
 
@@ -348,6 +375,7 @@ async function main(): Promise<void> {
       earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
       BigInt(readStartBlock(chainId)),
       range.toBlock,
+      blockTimestamps,
     );
     const touches: TouchLog[] = [];
     for (const chunk of blockChunks(touchFloor, range.toBlock, MAX_LOG_RANGE)) {
@@ -358,6 +386,7 @@ async function main(): Promise<void> {
         fromBlock: chunk.from,
         toBlock: chunk.to,
       });
+      harvestLogTimestamps(touchLogs, blockTimestamps);
       for (const log of touchLogs) {
         if (!log.args.user || !log.args.promoterId) continue;
         touches.push({
@@ -371,24 +400,33 @@ async function main(): Promise<void> {
     }
     const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
 
-    // One read per distinct block, not per log. A busy range shares blocks heavily, and the reads
-    // go out in bounded batches: a range carrying thousands of logs fans out past what a public
-    // endpoint will answer, and the whole run then fails on a timeout.
-    const blockTimestamps = new Map<bigint, bigint>();
-    const blocks = uniqueBlocks(decoded);
-    for (let i = 0; i < blocks.length; i += TIMESTAMP_CONCURRENCY) {
-      const batch = blocks.slice(i, i + TIMESTAMP_CONCURRENCY);
-      process.stdout.write(`\r    reading ${i + batch.length}/${blocks.length} block timestamps…`);
+    // One read per distinct block, and only for the blocks nothing has supplied yet: the logs
+    // carried their own timestamps, and earlier passes on this chain carried the rest.
+    const wanted = uniqueBlocks(decoded);
+    const missing = missingTimestamps(wanted, blockTimestamps);
+    let readSoFar = 0;
+    for (const batch of timestampBatches(missing, READ_CONCURRENCY)) {
+      readSoFar += batch.length;
+      progress(`reading ${readSoFar}/${missing.length} block timestamps`);
       const read = await Promise.all(batch.map((blockNumber) => client.getBlock({blockNumber})));
       read.forEach((block, j) => blockTimestamps.set(batch[j], block.timestamp));
     }
-    if (blocks.length > 0) process.stdout.write("\r\x1b[K");
+    if (missing.length > 0) progressDone();
+
+    console.log(
+      `  ${wanted.length} distinct block(s), ${missing.length} timestamp read(s) needed` +
+        ` (${cachedOnEntry} cached from earlier passes)`,
+    );
 
     const result = aggregateDeltas({decoded, attribution, blockTimestamps});
     for (const [user, delta] of result.deltas) deltas.set(user, delta);
     excludedPreAttribution = result.excludedPreAttribution;
     unattributed = result.unattributed;
   }
+
+  // Stored before the totals reads and the transactions, so a failure past this point still leaves
+  // the next pass the timestamps this one paid for.
+  saveTimestampCache(chainId, blockTimestamps);
 
   if (unattributed.length > 0) {
     console.log(
@@ -404,17 +442,21 @@ async function main(): Promise<void> {
   // ── totals ─────────────────────────────────────────────────────
 
   const current = new Map<string, bigint>();
-  await Promise.all(
-    [...deltas.keys()].map(async (user) => {
-      const total = await client.readContract({
-        address: verifier,
-        abi: EventMetricKpiVerifierAbi,
-        functionName: "verifiedTotalOf",
-        args: [campaign, kpiIndex, getAddress(user)],
-      });
-      current.set(user, total);
-    }),
-  );
+  const credited = [...deltas.keys()];
+  for (let i = 0; i < credited.length; i += READ_CONCURRENCY) {
+    const batch = credited.slice(i, i + READ_CONCURRENCY);
+    const totals = await Promise.all(
+      batch.map((user) =>
+        client.readContract({
+          address: verifier,
+          abi: EventMetricKpiVerifierAbi,
+          functionName: "verifiedTotalOf",
+          args: [campaign, kpiIndex, getAddress(user)],
+        }),
+      ),
+    );
+    totals.forEach((total, j) => current.set(batch[j], total));
+  }
 
   const {users, totals} = nextTotals(deltas, current);
   for (const [i, user] of users.entries()) {

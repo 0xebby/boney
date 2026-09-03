@@ -48,10 +48,17 @@ if [ "${#TARGETS[@]}" -eq 0 ]; then
   exit 0
 fi
 
+# The relayer's own scan progress is worth seeing while it runs, and the summary below still needs
+# the whole output, so it goes through `tee` rather than command substitution.
+PASS_LOG="$(mktemp -t boney-relay-pass.XXXXXX)"
+trap 'rm -f "$PASS_LOG"' EXIT
+
 while true; do
   for t in "${TARGETS[@]}"; do
     c="${t%%:*}"; k="${t##*:}"
-    out=$(pnpm relay --campaign "$c" --kpi "$k" --rpc "$RPC" 2>&1)
+    printf '[%s] %s kpi %s scanning…\n' "$(date -u +%H:%M:%S)" "${c:0:10}" "$k"
+    pnpm relay --campaign "$c" --kpi "$k" --rpc "$RPC" 2>&1 | tee "$PASS_LOG"
+    out=$(cat "$PASS_LOG")
     # Match an address followed by `old → new`. The looser "contains an arrow" test is wrong: the
     # relayer prints `scanning: <from> → <to>` on every cycle that has new blocks, so it reported a
     # credit every time.

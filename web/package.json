@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:up": "./scripts/dev-up.sh",
+    "dev:down": "./scripts/dev-up.sh --down",
     "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "next start",
     "lint": "eslint",

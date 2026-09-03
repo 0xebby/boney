@@ -254,7 +254,7 @@ export function planKolReport({
   if (amount <= BigInt(0)) {
     return {
       ok: false,
-      reason: "every tier on this KPI already crossed:there is nothing left to release",
+      reason: "every tier on this KPI already crossed: there is nothing left to release",
     };
   }
 
@@ -333,7 +333,7 @@ export type CeilingStatus =
  * `observedProgressOf`. 
  * 
  * Compared in aggregate rather than per referral because the panel reports a KOL
- * as one action; per-referral capping is the contract's job, reproducing it again here is repitition.
+ * as one action; per-referral capping is the contract's job, reproducing it again here is repetition.
  *
  * **The two figures are not measuring quite the same thing**, which is why `capped` cannot be
  * described as a delay. `measured` comes from the browser's log scan (`useObservedActions`), which
@@ -431,7 +431,7 @@ export function planObservedReport({
   progress: bigint;
 }): ReportPlan {
   if (aggregate) {
-    return {ok: false, reason: "aggregate KPIs never credit a promoter."};
+    return {ok: false, reason: "aggregate KPIs never credit a promoter"};
   }
   if (kol.blocked) return {ok: false, reason: kol.blocked};
   if (!hasSource) {
@@ -478,7 +478,7 @@ export function planObservedReport({
     return {
       ok: false,
       reason: sawActivity
-        ? "every observed action is already credited:nothing new to report"
+        ? "every observed action is already credited: nothing new to report"
         : "no KPI actions observed for this KOL's referrals yet",
     };
   }

@@ -49,6 +49,7 @@ import {
   decideReport,
   encodeActions,
   foldToLimit,
+  logScanKey,
   type IndexedLog,
 } from "../src/lib/indexerCore";
 import {
@@ -59,7 +60,15 @@ import {
   type TouchLog,
 } from "../src/lib/attributionWindows";
 import {blockAtTimestamp, earliestCoveringTouch} from "../src/lib/blockSearch";
+import {
+  harvestLogTimestamps,
+  missingTimestamps,
+  timestampBatches,
+  type BlockTimestamps,
+} from "../src/lib/blockTimestamps";
 import {TOUCH_STORED} from "../src/lib/events";
+import {progress, progressDone} from "./progress";
+import {loadTimestampCache, saveTimestampCache} from "./timestampCache";
 import {readBroadcast, readStartBlock} from "./generate-deployments";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -101,10 +110,19 @@ function envPrivateKey(): Hex | undefined {
 }
 
 /**
- * How many block-timestamp reads are in flight at once. Public endpoints throttle a wider fan-out,
- * and a throttled batch costs more than a narrower one.
+ * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
+ * pass costs the limiter this many times less than one request per call would.
  */
-const TIMESTAMP_CONCURRENCY = 12;
+const RPC_BATCH_SIZE = 100;
+
+/**
+ * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests. Wide
+ * enough to keep a few requests in flight, narrow enough that a public endpoint answers them.
+ */
+const READ_CONCURRENCY = 300;
+
+/** Per-request ceiling. A loaded public endpoint answers a batch of block reads in a few seconds. */
+const RPC_TIMEOUT = 60_000;
 
 /**
  * Fetches logs across a range the RPC will actually accept.
@@ -113,6 +131,7 @@ const TIMESTAMP_CONCURRENCY = 12;
  * @param source Event source the KPI names.
  * @param fromBlock First block to scan.
  * @param toBlock Last block to scan.
+ * @param timestamps Cache the logs' own `blockTimestamp` fields are collected into, and read back from.
  * @returns Every matching log in the range, each carrying its block timestamp.
  */
 async function fetchLogs(
@@ -120,12 +139,13 @@ async function fetchLogs(
   source: EventSource,
   fromBlock: bigint,
   toBlock: bigint,
+  timestamps: BlockTimestamps,
 ): Promise<IndexedLog[]> {
   const chunks = blockChunks(fromBlock, toBlock, MAX_LOG_RANGE);
   const matched: Omit<IndexedLog, "timestamp">[] = [];
 
   for (const [i, chunk] of chunks.entries()) {
-    process.stdout.write(`\r    scanning ${i + 1}/${chunks.length} chunks…`);
+    progress(`scanning ${i + 1}/${chunks.length} chunks`);
 
     const logs = await client.getLogs({
       address: source.source,
@@ -137,6 +157,8 @@ async function fetchLogs(
       topics: [source.topic0.toLowerCase() as Hex, ...topicFilterArray(source)],
     });
 
+    harvestLogTimestamps(logs, timestamps);
+
     for (const log of logs) {
       matched.push({
         topics: log.topics as readonly Hex[],
@@ -145,25 +167,24 @@ async function fetchLogs(
       });
     }
   }
+  if (chunks.length > 0) progressDone();
 
   // Verifier evidence carries each action's timestamp, so every block holding a matching log needs
-  // one read. Batched and deduplicated: one block carries many logs, and serially is unusably slow
-  // over thousands of them.
+  // one. The logs above carried their own, and earlier passes on this chain carried the rest, so only
+  // what neither supplied is read — deduplicated, and in batches the transport packs into requests.
   const blocks = [...new Set(matched.map((log) => log.blockNumber))];
-  const timestamps = new Map<bigint, bigint>();
+  const missing = missingTimestamps(blocks, timestamps);
+  let readSoFar = 0;
 
-  for (let i = 0; i < blocks.length; i += TIMESTAMP_CONCURRENCY) {
-    const batch = blocks.slice(i, i + TIMESTAMP_CONCURRENCY);
-    process.stdout.write(
-      `\r    reading ${i + batch.length}/${blocks.length} block timestamps…`,
-    );
-    const read = await Promise.all(
-      batch.map((blockNumber) => client.getBlock({blockNumber})),
-    );
+  for (const batch of timestampBatches(missing, READ_CONCURRENCY)) {
+    readSoFar += batch.length;
+    progress(`reading ${readSoFar}/${missing.length} block timestamps`);
+    const read = await Promise.all(batch.map((blockNumber) => client.getBlock({blockNumber})));
     read.forEach((block, j) => timestamps.set(batch[j], block.timestamp));
   }
+  if (missing.length > 0) progressDone();
 
-  if (chunks.length > 0) process.stdout.write("\r");
+  console.log(`  ${blocks.length} distinct block(s), ${missing.length} timestamp read(s) needed`);
   return matched.map((log) => ({...log, timestamp: timestamps.get(log.blockNumber)!}));
 }
 
@@ -256,7 +277,12 @@ function unattributedActors(
 }
 
 async function main(): Promise<void> {
-  const publicClient = createPublicClient({transport: http(rpcUrl)}) as PublicClient;
+  const publicClient = createPublicClient({
+    transport: http(rpcUrl, {
+      timeout: RPC_TIMEOUT,
+      batch: {batchSize: RPC_BATCH_SIZE, wait: 8},
+    }),
+  }) as PublicClient;
 
   const chainId = await publicClient.getChainId();
   const addresses = readBroadcast(chainId);
@@ -293,9 +319,13 @@ async function main(): Promise<void> {
   let reported = 0;
   let skipped = 0;
 
-  // Shared across every timestamp→block search this run. The searches start from the same bounds, so
-  // they probe the same midpoints and the second campaign onward costs almost nothing.
-  const blockTimestamps = new Map<bigint, bigint>();
+  // Shared across every timestamp→block search and every log scan this run, and carried over from
+  // earlier passes on this chain. The searches start from the same bounds, so they probe the same
+  // midpoints and the second campaign onward costs almost nothing.
+  const blockTimestamps = loadTimestampCache(chainId);
+  if (blockTimestamps.size > 0) {
+    console.log(`${blockTimestamps.size} block timestamp(s) cached from earlier passes`);
+  }
   // From the same broadcast receipt the addresses come from. `lib/deployments.ts` can lag a redeploy,
   // and a floor above the registry that holds the touches would hide them.
   const deployedAt = BigInt(readStartBlock(chainId));
@@ -310,6 +340,10 @@ async function main(): Promise<void> {
       publicClient.readContract({address: view.campaign, abi: CampaignAbi, functionName: "project"}),
       publicClient.readContract({address: view.campaign, abi: CampaignAbi, functionName: "kpiCount"}),
     ]);
+
+    // Log scans this campaign's KPIs can share. Scoped to the campaign because the floor is, and so
+    // that a scan's logs are not held in memory once the next campaign cannot reuse them.
+    const logScans = new Map<string, IndexedLog[]>();
 
     // Resolved once per campaign, and only for a campaign with an event-sourced KPI worth scanning.
     let attributionOnce:
@@ -400,7 +434,18 @@ async function main(): Promise<void> {
       const fromBlock = fromBlockFlag ? BigInt(fromBlockFlag) : attributedFrom!;
 
       console.log(`  blocks ${fromBlock}..${head}`);
-      const logs = await fetchLogs(publicClient, source, fromBlock, head);
+      const scanKey = logScanKey(source, fromBlock, head);
+      let logs = logScans.get(scanKey);
+      if (logs) {
+        console.log(`  reusing the scan an earlier KPI on this source already paid for`);
+      } else {
+        logs = await fetchLogs(publicClient, source, fromBlock, head, blockTimestamps);
+        logScans.set(scanKey, logs);
+
+        // Stored before the credited-total reads and the transactions, so a failure past this point
+        // still leaves the next pass the timestamps this one paid for.
+        saveTimestampCache(chainId, blockTimestamps);
+      }
       console.log(`  ${logs.length} matching log(s)`);
 
       for (const actor of unattributedActors(logs, source, attribution)) {
@@ -450,6 +495,10 @@ async function main(): Promise<void> {
       }
     }
   }
+
+  // Saved again at the end, because the last thing to gather timestamps need not be a scan: a campaign
+  // whose touches were never stored costs a block search and then skips every KPI.
+  saveTimestampCache(chainId, blockTimestamps);
 
   console.log(`\n${reported} report(s) sent, ${skipped} skipped.`);
 }
