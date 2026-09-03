@@ -49,6 +49,7 @@ import {
   decideReport,
   encodeActions,
   foldToLimit,
+  logScanKey,
   type IndexedLog,
 } from "../src/lib/indexerCore";
 import {
@@ -340,6 +341,10 @@ async function main(): Promise<void> {
       publicClient.readContract({address: view.campaign, abi: CampaignAbi, functionName: "kpiCount"}),
     ]);
 
+    // Log scans this campaign's KPIs can share. Scoped to the campaign because the floor is, and so
+    // that a scan's logs are not held in memory once the next campaign cannot reuse them.
+    const logScans = new Map<string, IndexedLog[]>();
+
     // Resolved once per campaign, and only for a campaign with an event-sourced KPI worth scanning.
     let attributionOnce:
       | Promise<{attribution: AttributionLookup; attributedFrom: bigint | null}>
@@ -429,12 +434,19 @@ async function main(): Promise<void> {
       const fromBlock = fromBlockFlag ? BigInt(fromBlockFlag) : attributedFrom!;
 
       console.log(`  blocks ${fromBlock}..${head}`);
-      const logs = await fetchLogs(publicClient, source, fromBlock, head, blockTimestamps);
-      console.log(`  ${logs.length} matching log(s)`);
+      const scanKey = logScanKey(source, fromBlock, head);
+      let logs = logScans.get(scanKey);
+      if (logs) {
+        console.log(`  reusing the scan an earlier KPI on this source already paid for`);
+      } else {
+        logs = await fetchLogs(publicClient, source, fromBlock, head, blockTimestamps);
+        logScans.set(scanKey, logs);
 
-      // Stored before the credited-total reads and the transactions, so a failure past this point
-      // still leaves the next pass the timestamps this one paid for.
-      saveTimestampCache(chainId, blockTimestamps);
+        // Stored before the credited-total reads and the transactions, so a failure past this point
+        // still leaves the next pass the timestamps this one paid for.
+        saveTimestampCache(chainId, blockTimestamps);
+      }
+      console.log(`  ${logs.length} matching log(s)`);
 
       for (const actor of unattributedActors(logs, source, attribution)) {
         console.log(`  · ${actor}: never attributed on this campaign — nobody to credit`);
@@ -483,6 +495,10 @@ async function main(): Promise<void> {
       }
     }
   }
+
+  // Saved again at the end, because the last thing to gather timestamps need not be a scan: a campaign
+  // whose touches were never stored costs a block search and then skips every KPI.
+  saveTimestampCache(chainId, blockTimestamps);
 
   console.log(`\n${reported} report(s) sent, ${skipped} skipped.`);
 }

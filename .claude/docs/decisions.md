@@ -428,6 +428,48 @@ Two related changes came with the cursor removal. Evidence is now sent for **eve
 only attached when a verifier would read it. And the `activePromoter` read before each report is gone:
 gating on the live touch is exactly what would drop the retroactive credit segmentation exists to pay.
 
+### Block timestamps come off the logs here too, and the cache is shared with the relayer
+
+The same fix as `relay-kpi-metric.ts`, for the same reason and with the same guarantee — see its section
+for the equivalence check. The scale here is larger, because a pass covers every event-sourced KPI:
+measured 2026-09-02 on Base Sepolia, 10 KPIs over 4 campaigns wanted 231,620 block timestamps summed.
+At the ~42 blocks/s twelve concurrent `eth_getBlockByNumber` calls managed, that is over 90 minutes of
+block reads on top of the log scans, and the endpoint's request limiter would have ended the pass long
+before then. Every KPI now reports `0 timestamp read(s) needed`.
+
+The cache file is shared rather than per-process: a block's timestamp is the same fact whoever asked for
+it, so `scripts/timestampCache.ts` keeps one `.cache/block-timestamps-<chainId>.json` that both the
+relayer and the indexer read and write. The indexer opened its next pass holding 70,061 blocks, most of
+them paid for by a relay pass. It is written to a temp file and renamed over the target, because
+`dev-up.sh` runs a relay loop and an indexer pass concurrently and a half-written file would be read
+back as an empty cache. The indexer writes it after each fresh scan and once more at the end of the
+pass, because the last thing to gather timestamps need not be a scan: a campaign whose touches were
+never stored costs a block search and then skips every KPI.
+
+### Two KPIs naming the same event share one scan
+
+`campaign 0` declares two KPIs over `Deposit` on WETH, and the second re-ran the identical
+`eth_getLogs` sweep the first had just finished — 74 chunks and 63,113 logs, discarded and fetched
+again. `campaign 2` duplicates a scan the same way. Two of the fixture's ten scans are exact repeats,
+about 130 of ~570 chunk requests.
+
+`logScanKey` keys a scan on what the request actually carries: address, `topic0`, the indexed-topic
+filter and the block range. `actorTopic`, `amountMode` and `scale` are deliberately absent — they change
+how `aggregateByActor` reads the logs afterwards, not which logs the node returns, so two KPIs differing
+only there can share one sweep.
+
+The memo is scoped to the campaign rather than the run. The activity floor is per-campaign, so a
+cross-campaign hit needs the same floor as well as the same source, and holding several scans' logs at
+once is already the run's largest allocation (~700 MB peak on this fixture).
+
+### Progress goes out as whole lines when stdout is a pipe
+
+`\r`-only progress makes an entire scan one unterminated line, so `dev-up.sh`'s
+`grep -vE 'scanning [0-9]+/'` dropped the real per-KPI output that shared it — the
+`N distinct block(s)` line was invisible in the startup log for that reason, confirmed by replaying the
+stream through the same filter. `scripts/progress.ts` redraws in place on a TTY and emits one line every
+two seconds otherwise, which both scripts now use.
+
 ---
 
 ## `src/verifiers/EventMetricKpiVerifier.sol`
@@ -697,8 +739,8 @@ counts requests, not calls.
 `relay-loop.sh` runs `pnpm relay` once per gated KPI, so a cache held only in memory is discarded
 between the Swap pass and the Staked pass even though their ranges almost entirely overlap — 41,981 and
 42,769 distinct blocks, 50,333 in the union. It is written to
-`web/.cache/relay-block-timestamps-<chainId>.json` and read back by the next pass; the Staked pass now
-opens holding the 42,207 blocks the Swap pass gathered.
+`web/.cache/block-timestamps-<chainId>.json` and read back by the next pass; the Staked pass now opens
+holding the 42,207 blocks the Swap pass gathered. The indexer reads and writes the same file.
 
 A cached timestamp is wrong only if the block it names was reorged out. The relayer already stops
 `CONFIRMATIONS = 5` short of the head and writes a monotonic on-chain checkpoint on that same
