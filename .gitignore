@@ -56,3 +56,22 @@ web/scripts/drive-event-kpi.mjs
 web/scripts/sygma-deposit.ts
 web/scripts/uniswap-swap.ts
 web/scripts/gyndore-swap.ts
+
+# Every .md except the one GitHub renders on the repo page. The rest is working material — the
+# protocol spec, internal reviews, plans, launch notes, agent instructions — and this repo is public.
+# `boneyMd/findings.md` details high-severity bugs and `testing.md` holds throwaway Base Sepolia keys,
+# so neither may ever be staged; testing.md is in .git/info/exclude as well.
+#
+# `!README.md` is anchored: unanchored it would also re-include every nested README. A file inside an
+# ignored directory cannot be re-included at all, which is why boneyMd/ below needs no exception.
+*.md
+!/README.md
+boneyMd/
+
+# Claude Code's whole directory — project instructions, docs, local skills, and worktrees. Working
+# material rather than shared procedure. The worktrees especially must never be committed: each is a
+# checkout of *this* repo living inside it, so git records it as a gitlink (mode 160000) with no
+# matching .gitmodules entry, which makes every `git submodule` command abort with "no submodule
+# mapping found". The branches themselves carry the work. Supersedes the narrower `.claude/…` rules
+# above.
+.claude/
