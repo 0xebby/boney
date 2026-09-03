@@ -108,7 +108,7 @@ export function CampaignsPage() {
   );
 
   /*
-    What the join menu offers — built from `campaigns`, not `visible`.
+    What the promote menu offers — built from `campaigns`, not `visible`.
 
     The table's filters narrow what a visitor is reading; they are not a statement about what they
     are allowed to join. Sourcing the menu from the filtered list would make "Ended only" empty it.
@@ -197,7 +197,7 @@ export function CampaignsPage() {
         {/* The two actions the page exists to start, centred between the overview above and the table
             below. Promoting is a menu rather than a link because the campaign has to be chosen, and
             the choice is the part a promoter needs help with — every offerable campaign is listed,
-            with the ones this wallet cannot join yet saying why. */}
+            with the ones this wallet cannot promote yet saying why. */}
         {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
             each takes half of a measure narrow enough to stay a pair, wide enough to read as the
             page’s two entry points. A caption under each states what that side of the marketplace
@@ -221,7 +221,7 @@ export function CampaignsPage() {
             options={joinable}
             onJoined={refetchJoined}
             loading={isLoading}
-            caption="Generate unique link, share and earn rewards."
+            caption="Generate a unique boneylink, share and earn rewards."
             className="sm:flex-1"
           />
         </div>
@@ -349,7 +349,7 @@ function buildColumns(
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
         setting it. The table lays out `auto`, so a cell's widest possible content is what sizes
-        its column: an uncapped name — or a `Joined` badge that appears when the wallet connects
+        its column: an uncapped name — or a `Promoting` badge that appears when the wallet connects
         and vanishes when it disconnects — moved every column to its right. The cap makes this
         column's measure a constant, so the badge is free to come and go.
       */

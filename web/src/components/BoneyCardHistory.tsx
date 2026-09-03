@@ -62,7 +62,7 @@ import {KPI_KIND_LABEL} from "@/lib/types";
  *
  * `self` is the connected wallet at `/card`; `other` is the public card at `/b/<wallet>`, where the
  * subject is somebody the reader may not know. Every sentence that addresses a person switches, and one
- * behaviour switches with it: unearned milestones stop being instructions. "Join your first campaign"
+ * behaviour switches with it: unearned milestones stop being instructions. "Promote your first campaign"
  * is advice, and advice aimed at a stranger's card is aimed at the wrong reader.
  */
 export type HistoryVoice = {kind: "self"} | {kind: "other"; subject: string};
@@ -100,7 +100,7 @@ function copyFor(voice: HistoryVoice): HistoryCopy {
         "Your score and the campaigns above need no indexer — only the history half does.",
       orphanNote: (n) =>
         `${n} reward ${n === 1 ? "payout" : "payouts"} could not be matched to a campaign you ` +
-        "joined. They are counted in your tiers but left out of what you earned.",
+        "promoted. They are counted in your tiers but left out of what you earned.",
       instruct: true,
     };
   }
@@ -109,11 +109,11 @@ function copyFor(voice: HistoryVoice): HistoryCopy {
     title: "History",
     subtitle: `Everything ${voice.subject} has done on Boneyard, counted. These only ever go up.`,
     emptyTitle: "No campaigns yet",
-    emptyBody: `${voice.subject} has not joined a campaign on Boneyard yet. The campaigns, referrals and reward tiers they earn will fill in here.`,
+    emptyBody: `${voice.subject} has not promoted a campaign on Boneyard yet. The campaigns, referrals and reward tiers they earn will fill in here.`,
     notIndexedNote: "The score above needs no indexer — only the history half does.",
     orphanNote: (n) =>
       `${n} reward ${n === 1 ? "payout" : "payouts"} could not be matched to a campaign this ` +
-      "wallet joined. They are counted in the tier total but left out of what it earned.",
+      "wallet promoted. They are counted in the tier total but left out of what it earned.",
     instruct: false,
   };
 }
@@ -202,7 +202,7 @@ function Unavailable({
 }
 
 /**
- * Nothing joined yet.
+ * Nothing promoted yet.
  *
  * Deliberately not a grid of zeros. The counts would all be 0 and all be true, and they would still be
  * the wrong thing to show — a new promoter needs the next step, which is the first milestone. Every
@@ -266,7 +266,7 @@ function Counts({
 
   return (
     <StatRow>
-      <StatTile label="CAMPAIGNS JOINED" value={card.campaignsJoined.toLocaleString()} />
+      <StatTile label="CAMPAIGNS PROMOTED" value={card.campaignsJoined.toLocaleString()} />
       <StatTile label="TIERS CROSSED" value={card.tiers.toLocaleString()} />
       <StatTile label="REFERRALS BROUGHT" value={card.referrals.toLocaleString()} />
       <EarnedTile dominant={dominant} others={others} meta={earnedToken} />
@@ -343,7 +343,7 @@ function Specializations({card}: {card: CardHistory}) {
  * to a screen reader.
  *
  * On the reader's own card the next rung is marked and worded as an instruction. On somebody else's it
- * is not: "Join your first campaign" is advice, and a stranger's card is the wrong place to give it —
+ * is not: "Promote your first campaign" is advice, and a stranger's card is the wrong place to give it —
  * there the unearned rungs simply sit undated, which is the fact.
  *
  * A milestone with `atBlock` and no `at` is one whose block lookup did not resolve. It renders the

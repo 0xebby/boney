@@ -79,7 +79,7 @@ export function ProjectPromotersPanel({
 
       <StatRow>
         <StatTile
-          label="Promoters joined"
+          label="Promoters enrolled"
           value={busy ? "—" : rows.length.toLocaleString("en-US")}
           qualifier={busy || rows.length === 0 ? undefined : `${earning} earning`}
         />
@@ -125,7 +125,7 @@ export function ProjectPromotersPanel({
             emptyState={
               <EmptyState
                 title="No promoters yet"
-                description="Nobody has joined this campaign, so no rewards have been released."
+                description="Nobody is promoting this campaign, so no rewards have been released."
               />
             }
           />
@@ -188,7 +188,7 @@ function buildColumns(
     },
     {
       key: "reputation",
-      header: "Score at join",
+      header: "Starting score",
       numeric: true,
       hideOnMobile: true,
       sortValue: (r) => r.reputation,
@@ -196,7 +196,7 @@ function buildColumns(
         The BoneyScore `Campaign.join` read at the time, which is what the reputation gate was
         checked against — not today's score. Reads 0 for a wallet that had no reputation record
         then, which is a fact about that moment rather than a failed lookup, so the header says
-        "at join" instead of implying it is current.
+        "Starting score" instead of implying it is current.
       */
       render: (r) => r.reputation.toLocaleString("en-US"),
     },
@@ -272,14 +272,14 @@ function ScanNotes({
     <div className="space-y-1 text-xs">
       {scannedFrom !== undefined ? (
         <p className="text-ink-muted">
-          History was scanned from block {scannedFrom.toLocaleString("en-US")} only — joins and
+          History was scanned from block {scannedFrom.toLocaleString("en-US")} only — memberships and
           payouts before that block are not in this table.
         </p>
       ) : null}
 
       {truncated ? (
         <p className="text-ink-muted">
-          More promoters joined than one read returns, so some memberships are missing from the rows
+          More promoters than one read returns, so some memberships are missing from the rows
           above.
         </p>
       ) : null}
@@ -294,7 +294,7 @@ function ScanNotes({
 
       {orphans > 0 ? (
         <p className="text-brand">
-          {orphans} paid wallet{orphans === 1 ? "" : "s"} did not appear in the join scan, so
+          {orphans} paid wallet{orphans === 1 ? "" : "s"} did not appear in the membership scan, so
           {orphans === 1 ? " its" : " their"} payouts are missing from the rows above.
         </p>
       ) : null}

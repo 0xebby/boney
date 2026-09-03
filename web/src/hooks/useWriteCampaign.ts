@@ -383,7 +383,7 @@ export function useJoinCampaign() {
   const join = useCallback(
     async (campaign: `0x${string}`, ctx?: IntentContext) => {
       if (!publicClient || !walletClient) {
-        setState({status: "error", message: "Connect a wallet to join this campaign."});
+        setState({status: "error", message: "Connect a wallet to promote this campaign."});
         return;
       }
 

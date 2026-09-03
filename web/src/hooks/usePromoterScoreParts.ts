@@ -55,7 +55,7 @@ const EMPTY: ScorePartsIndex = {parts: new Map(), skipped: 0};
  * every read simultaneously on mount, and this page already runs the most expensive scan in the app
  * before it can even list the wallets.
  *
- * **The values are current; the score beside them is at-join.** Attestations expire and weights are
+ * **The values are current; the score beside them is the starting one.** Attestations expire and weights are
  * governable, so a promoter admitted at 19,494 can split differently today having done nothing.
  * The two numbers answer different questions and the UI has to label them as such.
  */

@@ -15,7 +15,7 @@ import {cardPath} from "@/lib/publicCard";
  * rendering. What lives here is only the wiring between the card's verify affordance and
  * `useEthosAttestation`, plus the progress that submission reports back.
  *
- * Verification is deliberately reachable only from the "verify to join" group inside the card and
+ * Verification is deliberately reachable only from the "verify to promote" group inside the card and
  * never from the header. It costs one transaction per weighted schema, sequentially, and asking for
  * that before a promoter has seen anything work is the wrong first impression — the campaigns with no
  * reputation floor are the honest opening.
@@ -31,7 +31,7 @@ export default function Page() {
    *
    * The refetch is the half that makes the transition visible. `useEthosAttestation` submits and
    * reports success but owns no query, so without this the cached `scoreOf` stays where it was and
-   * every campaign it just unlocked keeps sitting under "Verify to join" — asking for a verification
+   * every campaign it just unlocked keeps sitting under "Verify to promote" — asking for a verification
    * that has already been paid for. `PromoterPanel` does the same after its own attest.
    */
   const onVerify = useCallback(async () => {

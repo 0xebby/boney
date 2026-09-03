@@ -79,15 +79,15 @@ export type Eligibility = {
  * `InsufficientReputation` when `minReputation != 0 && score < minReputation`.
  *
  * Pending is deliberately joinable: promoters can prepare tracking links before a campaign
- * launches. A UI that only offered Join on Active campaigns would hide a legitimate action.
+ * launches. A UI that only offered promoting on Active campaigns would hide a legitimate action.
  */
 export function canJoin(ctx: JoinContext): Eligibility {
-  if (!ctx.connected) return no("Connect a wallet to join this campaign.");
+  if (!ctx.connected) return no("Connect a wallet to promote this campaign.");
 
   if (ctx.status !== "Active" && ctx.status !== "Pending") {
     return no(`This campaign is ${ctx.status.toLowerCase()} and is no longer accepting promoters.`);
   }
-  if (ctx.alreadyJoined) return no("You have already joined this campaign.");
+  if (ctx.alreadyJoined) return no("You are already promoting this campaign.");
 
   // minReputation of 0 disables the check entirely — matching the contract's `!= 0` guard.
   if (ctx.minReputation > BigInt(0) && ctx.reputation < ctx.minReputation) {
@@ -150,7 +150,7 @@ export type SettleContext = {
  */
 export function canSettle(ctx: SettleContext): Eligibility {
   if (!ctx.connected) return no("Connect a wallet to settle these rewards.");
-  if (!ctx.joined) return no("This wallet has not joined the campaign, so it has earned nothing.");
+  if (!ctx.joined) return no("This wallet is not promoting the campaign, so it has earned nothing.");
 
   if (ctx.status === "Ended") {
     if (ctx.nowSeconds > ctx.endedAtSeconds + ctx.claimGraceSeconds) {

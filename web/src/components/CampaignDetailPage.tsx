@@ -462,7 +462,7 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
             description={
               role === "disconnected"
                 ? "Connect a wallet to see what each KPI measures and the reward tiers behind it."
-                : "Join as a promoter to see what each KPI measures and the reward tiers behind it."
+                : "Promote this campaign to see what each KPI measures and the reward tiers behind it."
             }
           />
         </Card>

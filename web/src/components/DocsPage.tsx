@@ -64,10 +64,10 @@ export function DocsPage() {
         />
       </Section>
 
-      <Section title="Joining as a Promoter">
+      <Section title="Promoting a Campaign">
         <p>
-          A promoter joins a campaign and receives a <Term>promoter id</Term> — a hash binding
-          their address to that specific campaign. The id is the subject of every attribution and
+          Promoting a campaign mints a <Term>promoter id</Term> — a hash binding the promoter&rsquo;s
+          address to that specific campaign. The id is the subject of every attribution and
           payout, and it is campaign-scoped by construction.
         </p>
         <p>
@@ -128,7 +128,7 @@ export function DocsPage() {
       <Section title="Choosing a Minimum BoneyScore [Campaign Creators]">
         <p>
           The gate is immutable once the campaign is created and cannot be lowered afterwards, so a
-          number chosen carelessly is a campaign nobody can join. Two figures bracket the useful
+          number chosen carelessly is a campaign nobody can promote. Two figures bracket the useful
           range:
         </p>
         <List

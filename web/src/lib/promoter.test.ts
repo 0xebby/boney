@@ -100,7 +100,7 @@ describe("canJoin", () => {
   it("blocks a second join — Solidity: AlreadyJoined", () => {
     const r = canJoin(ctx({alreadyJoined: true}));
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/already joined/i);
+    expect(r.reason).toMatch(/already promoting/i);
   });
 
   it("blocks below the reputation floor — Solidity: InsufficientReputation", () => {
@@ -196,7 +196,7 @@ describe("canSettle", () => {
   it("blocks a wallet that never joined — Solidity: NotJoined", () => {
     const r = canSettle(ctx({joined: false}));
     expect(r.ok).toBe(false);
-    expect(r.reason).toMatch(/not joined/i);
+    expect(r.reason).toMatch(/not promoting/i);
   });
 
   it("blocks a zero payout even when every contract guard passes", () => {

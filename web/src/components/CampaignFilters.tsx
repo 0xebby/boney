@@ -45,7 +45,7 @@ export function CampaignFilters({
 
   const count = activeFilterCount(filters);
 
-  /* Escape closes and a pointer outside dismisses — but no arrow-key walk, unlike the join menu:
+  /* Escape closes and a pointer outside dismisses — but no arrow-key walk, unlike the promote menu:
      this panel holds a text field, and the arrows belong to it. */
   useEffect(() => {
     if (!open) return;
@@ -167,7 +167,7 @@ export function CampaignFilters({
               onChange={(e) => setFilters((f) => ({...f, joinableOnly: e.target.checked}))}
               className="size-3.5 accent-[var(--brand)]"
             />
-            Joinable by me
+            Open to me
           </label>
 
           {count > 0 ? (

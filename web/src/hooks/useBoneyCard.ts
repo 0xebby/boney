@@ -103,7 +103,7 @@ export function useBoneyCard(wallet: `0x${string}` | undefined) {
         campaigns,
         prospective,
         // `undefined` means the read has not landed. Treating that as 0 would flash every gated
-        // campaign into "verify to join" and then move it, so the unresolved case is held at 0 only
+        // campaign into "verify to promote" and then move it, so the unresolved case is held at 0 only
         // because `qualificationReady` gates the render.
         onChain: reputation ?? BigInt(0),
         joined: joinedAddresses,
@@ -194,7 +194,7 @@ export function useBoneyCard(wallet: `0x${string}` | undefined) {
     /**
      * Re-read `scoreOf`. Submitting attestations changes it, and nothing else in the app will
      * notice: `useEthosAttestation` owns no query, so the cached reputation would otherwise keep
-     * the newly-verified campaigns sitting in "verify to join" until a reload. `PromoterPanel`
+     * the newly-verified campaigns sitting in "verify to promote" until a reload. `PromoterPanel`
      * refetches the same way after its own attest.
      */
     refetchReputation,
@@ -209,7 +209,7 @@ export function useBoneyCard(wallet: `0x${string}` | undefined) {
     }),
     /**
      * Whether the grouping can be trusted yet. Both the campaign list and the on-chain score have to
-     * be in before "joinable now" is distinguishable from "verify to join", and showing the wrong
+     * be in before "joinable now" is distinguishable from "verify to promote", and showing the wrong
      * one first would tell a promoter to pay for a verification they had already done.
      */
     qualificationReady: !campaignsLoading && !reputationLoading && !joinedLoading,

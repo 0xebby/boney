@@ -54,7 +54,7 @@ describe("joinOptions", () => {
     const [option] = joinOptions(rows, ctx({joinedAddresses: new Set([joined.toLowerCase()])}));
 
     expect(option.eligibility.ok).toBe(false);
-    expect(option.eligibility.reason).toBe("You have already joined this campaign.");
+    expect(option.eligibility.reason).toBe("You are already promoting this campaign.");
   });
 
   it("matches the joined set case-insensitively", () => {
@@ -93,7 +93,7 @@ describe("joinOptions", () => {
 
     expect(options).toHaveLength(2);
     for (const option of options) {
-      expect(option.eligibility.reason).toBe("Connect a wallet to join this campaign.");
+      expect(option.eligibility.reason).toBe("Connect a wallet to promote this campaign.");
       expect(option.eligibility.actionable).toBeUndefined();
     }
   });

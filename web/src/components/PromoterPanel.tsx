@@ -25,7 +25,7 @@ import type {CampaignDetail, PromoterState} from "@/lib/campaignDetail";
  * Promoter-side panel: promote a campaign, get a tracking link, and watch what it has paid.
  *
  * Eligibility comes from `lib/promoter`, which mirrors `Campaign.join`. A blocked action renders
- * with the contract's own reason rather than disappearing — "why can't I join?" is the question
+ * with the contract's own reason rather than disappearing — "why can't I promote this?" is the question
  * this exists to answer.
  *
  * Settlement is normally invisible here, and that is not an omission. `Campaign.reportUserAction`
@@ -136,13 +136,13 @@ export function PromoterPanel({
     }
   };
 
-  // Nothing to offer a disconnected visitor who cannot join either.
+  // Nothing to offer a disconnected visitor who cannot promote either.
   if (!isConnected && !joined) {
     return (
       <Card>
         <CardHeader title="Promote this campaign" subtitle="Earn rewards for verified results" />
         <p className="text-xs text-ink-muted">
-          Connect a wallet to join as a <b>promoter</b> and generate a <b>tracking link</b>.
+          Connect a wallet to <b>promote</b> this campaign and generate a <b>tracking link</b>.
         </p>
       </Card>
     );
@@ -155,7 +155,7 @@ export function PromoterPanel({
         subtitle={
           joined
             ? `Promoter ${shortAddress(promoterId ?? "0x", 10, 8)}`
-            : "Join to earn rewards for verified results"
+            : "Earn rewards for verified results"
         }
       />
 
@@ -187,7 +187,7 @@ export function PromoterPanel({
             title={joinEligibility.reason}
             className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isPending(join.state) ? "Joining…" : "Join as promoter"}
+            {isPending(join.state) ? "Promoting…" : "Start promoting"}
           </button>
 
           {!joinEligibility.ok && !scoreShortfall ? (
@@ -198,7 +198,7 @@ export function PromoterPanel({
             A reputation shortfall is the one refusal a promoter can act on without leaving the page:
             an un-attested wallet scores 0 and would otherwise see a permanently dead button on
             every gated campaign. Verifying pulls their Ethos score and social media reach on chain, after
-            which `reputation` refetches and the Join button may light up.
+            which `reputation` refetches and the promote button may light up.
 
             An expired score is the same refusal with a different cause, so it needs its own copy:
             the promoter did verify, and telling them to "verify" a second time reads as if the first

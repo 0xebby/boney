@@ -89,7 +89,7 @@ export function BoneyCard({
    * Where the history section sits, which depends on whether there is any.
    *
    * With campaigns behind it, the history is what the promoter opened the card for and it goes
-   * directly under the score. Empty, it is an invitation to join a first campaign — and the
+   * directly under the score. Empty, it is an invitation to promote a first campaign — and the
    * qualification list immediately above says the same thing with actual campaign names in it, so
    * leading with the weaker version of that message would just be repeating it.
    */
@@ -292,7 +292,7 @@ function UnclaimedHead({message}: {message: string}) {
       <p className="text-xs text-ink-secondary">{message}</p>
       <p className="text-xs text-ink-muted">
         Your score and your audience both come from a claimed Ethos profile. Without one you can still
-        join every campaign that sets no reputation floor.
+        promote every campaign that sets no reputation floor.
       </p>
       <a
         className="text-xs font-semibold text-brand underline"
@@ -350,7 +350,7 @@ function Qualifies({
   return (
     <Card>
       <CardHeader
-        title={anonymous ? "What is open to join" : "What you can join"}
+        title={anonymous ? "What is open to promote" : "What you can promote"}
         subtitle={ready ? headline : "Checking campaigns against your score…"}
       />
 
@@ -363,7 +363,7 @@ function Qualifies({
             label={anonymous ? "Open to anyone" : "Open to you now"}
             note={
               anonymous
-                ? "These set no reputation floor, so any wallet can join them without verifying anything."
+                ? "These set no reputation floor, so any wallet can promote them without verifying anything."
                 : "No reputation floor, or your on-chain score already clears it."
             }
           />
@@ -371,7 +371,7 @@ function Qualifies({
           {verifyToJoin.length > 0 ? (
             <Group
               campaigns={verifyToJoin}
-              label={verifiable ? "Verify to join" : "Score-gated"}
+              label={verifiable ? "Verify to promote" : "Score-gated"}
               note={
                 !verifiable
                   ? // The prospective score clears these; there is simply nowhere to record it, so
