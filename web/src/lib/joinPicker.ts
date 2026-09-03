@@ -2,7 +2,7 @@ import {canJoin, type Eligibility} from "./promoter";
 import type {CampaignView} from "./types";
 
 /**
- * The "Join a campaign" picker's option list — which campaigns a promoter is offered, in what
+ * The "Promote a campaign" picker's option list — which campaigns a promoter is offered, in what
  * order, and why a listed one is unavailable.
  */
 

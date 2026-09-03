@@ -22,7 +22,7 @@ import {KPI_KIND_LABEL} from "@/lib/types";
 import type {CampaignDetail, PromoterState} from "@/lib/campaignDetail";
 
 /**
- * Promoter-side panel: join a campaign, get a tracking link, and watch what it has paid.
+ * Promoter-side panel: promote a campaign, get a tracking link, and watch what it has paid.
  *
  * Eligibility comes from `lib/promoter`, which mirrors `Campaign.join`. A blocked action renders
  * with the contract's own reason rather than disappearing — "why can't I join?" is the question

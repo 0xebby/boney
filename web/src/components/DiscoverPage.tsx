@@ -178,7 +178,7 @@ export function DiscoverPage({
             title={all.length === 0 ? "No promoters yet" : "No promoters at these ranks"}
             description={
               all.length === 0
-                ? "Once promoters join a campaign on this network they appear here, ranked by BoneyScore."
+                ? "Once promoters start promoting a campaign on this network they appear here, ranked by BoneyScore."
                 : "Every promoter in this campaign sits outside the ranks you selected."
             }
             action={

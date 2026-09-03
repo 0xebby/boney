@@ -94,8 +94,8 @@ function copyFor(voice: HistoryVoice): HistoryCopy {
       subtitle: "Everything you have done on Boneyard, counted. These only ever go up.",
       emptyTitle: "Your history starts with one campaign",
       emptyBody:
-        "Join a campaign from the list above, share your tracking link, and the actions it earns " +
-        "fill in here. Nothing on this half of the card can go down.",
+        "Promote a campaign from the list above, share your tracking link, and the actions it " +
+        "earns fill in here. Nothing on this half of the card can go down.",
       notIndexedNote:
         "Your score and the campaigns above need no indexer — only the history half does.",
       orphanNote: (n) =>

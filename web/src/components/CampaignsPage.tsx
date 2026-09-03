@@ -195,7 +195,7 @@ export function CampaignsPage() {
         </Card>
 
         {/* The two actions the page exists to start, centred between the overview above and the table
-            below. Joining is a menu rather than a link because the campaign has to be chosen, and
+            below. Promoting is a menu rather than a link because the campaign has to be chosen, and
             the choice is the part a promoter needs help with — every offerable campaign is listed,
             with the ones this wallet cannot join yet saying why. */}
         {/* A capped band rather than two text-width buttons or a pair stretched across the panel:

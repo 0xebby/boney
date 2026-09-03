@@ -10,7 +10,7 @@ import {projectName} from "@/lib/projects";
 import {StatusPill} from "@/components/ui/StatusPill";
 
 /**
- * "Join a campaign" — a trigger that reveals the campaigns a promoter can join and signs the join
+ * "Promote a campaign" — a trigger that reveals the campaigns a promoter can join and signs the join
  * for whichever one they pick.
  *
  * Options and their refusals are decided in `lib/joinPicker`; this renders them and owns the
@@ -95,8 +95,8 @@ export function JoinCampaignMenu({
   }, [join.state.status, pending, onJoined, router]);
 
   const label = busy
-    ? `Joining ${pending ? projectName(pending.view) : "campaign"}…`
-    : "Join a campaign";
+    ? `Promoting ${pending ? projectName(pending.view) : "campaign"}…`
+    : "Promote a campaign";
 
   return (
     <div className={`relative ${className}`}>
@@ -121,7 +121,7 @@ export function JoinCampaignMenu({
           ref={panelRef}
           id="join-campaign-menu"
           role="menu"
-          aria-label="Campaigns you can join"
+          aria-label="Campaigns you can promote"
           className="absolute left-1/2 top-full z-30 mt-2 max-h-80 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto overscroll-contain rounded-lg border border-hairline bg-surface-1 p-1 shadow-lg"
         >
           {options.length === 0 ? (
