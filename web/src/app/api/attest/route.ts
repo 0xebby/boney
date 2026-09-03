@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
    * deployment is holding the wrong key for the chain it is pointed at) has to be worked out by hand.
    *
    * It is a real configuration hazard rather than a hypothetical: `ATTESTOR_PRIVATE_KEY` names the
-   * *referral* wallet in the repo-root `.env` that `scripts/demo-seed.ts` reads, and the *attestor* in
+   * *referral* wallet in the repo-root `.env`, and the *attestor* in
    * `web/.env.local`. Any process that picks up the first while serving this route signs with a key the
    * verifier has never heard of, and every attestation it mints is unusable.
    *

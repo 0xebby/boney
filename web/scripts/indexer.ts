@@ -94,7 +94,7 @@ const fromBlockFlag = arg("--from-block");
 const dryRun = process.argv.includes("--dry-run");
 
 /**
- * `PRIVATE_KEY` from the repo-root `.env`, read the same way `seed-local.ts:93` does.
+ * `PRIVATE_KEY` from the repo-root `.env`.
  *
  * Foundry loads that file itself, but this is a plain node script, so it has to read it too.
  */
