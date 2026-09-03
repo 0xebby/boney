@@ -156,7 +156,7 @@ export function PromoterDashboard() {
 
       <StatRow>
         <StatTile
-          label="Campaigns Joined"
+          label="Campaigns Promoted"
           value={rows.length.toLocaleString("en-US")}
           hint={`${activeCount} active`}
         />
@@ -178,7 +178,7 @@ export function PromoterDashboard() {
         <div className="px-4 pt-4">
           <CardHeader
             title="Campaigns you promote"
-            subtitle="Campaigns you joined, and your promotion boneylink to share for each"
+            subtitle="Campaigns you promote, and your boneylink to share for each"
           />
         </div>
         {isLoading || joinedQuery.isLoading ? (
@@ -196,8 +196,8 @@ export function PromoterDashboard() {
             isRefreshing={joinedQuery.isRefreshing}
             emptyState={
               <EmptyState
-                title="Not Joined Any Campaign Yet."
-                description="Browse the boneyard and join campaigns that match your audience. Each membership gives you a tracking link to share."
+                title="Not Promoting Any Campaign Yet."
+                description="Browse the boneyard and promote campaigns that match your audience. Each one gives you a tracking link to share."
                 action={
                   <Link
                     href="/"
@@ -273,8 +273,8 @@ function Header({connected = true}: {connected?: boolean}) {
         </h1>
         <p className="mt-0.5 text-xs text-ink-muted">
           {connected
-            ? "Campaigns you joined. Open one to see progress, what it has paid you, and your tracking link."
-            : "Promoters active on each campaign, and the links they share. Connect a wallet to join and get your own."}
+            ? "Campaigns you promote. Open one to see progress, what it has paid you, and your tracking link."
+            : "Promoters active on each campaign, and the links they share. Connect a wallet to promote and get your own."}
         </p>
       </div>
 

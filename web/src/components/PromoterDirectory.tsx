@@ -115,7 +115,7 @@ export function PromoterDirectory({
       */}
       {directory.scannedFrom !== undefined ? (
         <p className="rounded-md border border-hairline bg-surface-1 px-3 py-2 text-xs text-ink-muted">
-          Showing joins from block {directory.scannedFrom.toString()} onward. Earlier memberships
+          Showing memberships from block {directory.scannedFrom.toString()} onward. Earlier ones
           are not listed — this chain&rsquo;s history is longer than one scan can cover.
         </p>
       ) : null}
@@ -144,14 +144,14 @@ export function PromoterDirectory({
         <Card>
           <EmptyState
             title="No campaigns yet"
-            description="Once projects create campaigns and promoters join them, they appear here."
+            description="Once projects create campaigns and promoters start promoting, they appear here."
           />
         </Card>
       ) : totalMemberships === 0 ? (
         <Card>
           <EmptyState
             title="No promoters yet"
-            description="Nobody has joined a campaign on this network yet. Connect a wallet to be the first."
+            description="Nobody is promoting a campaign on this network yet. Connect a wallet to be the first."
             action={
               <Link
                 href="/"

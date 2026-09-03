@@ -217,10 +217,10 @@ export function ReportPanel({
       <CardHeader title="Report progress" />
 
       {scanning ? (
-        <p className="text-xs text-ink-muted">Scanning joins and attribution touches…</p>
+        <p className="text-xs text-ink-muted">Scanning promoters and attribution touches…</p>
       ) : kols.length === 0 ? (
         <p className="text-xs text-ink-muted">
-          No promoter has joined this campaign yet, so there is nobody to credit.
+          No promoter is promoting this campaign yet, so there is nobody to credit.
         </p>
       ) : (
         <div className="space-y-3">

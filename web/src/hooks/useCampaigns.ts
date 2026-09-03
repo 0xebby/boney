@@ -100,7 +100,7 @@ async function fetchTokenMetas(
   return Object.fromEntries(entries);
 }
 
-/** The connected wallet's reputation score, used by the "Joinable by me" filter. */
+/** The connected wallet's reputation score, used by the "Open to me" filter. */
 export function useReputation() {
   const client = usePublicClient({ chainId: useBoneyChainId() });
   const {address} = useAccount();

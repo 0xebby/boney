@@ -198,17 +198,17 @@ export function lifecycleIntent(
  */
 export function joinCampaignIntent(campaign: `0x${string}`, ctx?: IntentContext): SignIntent {
   return {
-    title: "Join as promoter",
+    title: "Promote this campaign",
     summary:
       "Registers your wallet as a promoter on this campaign and assigns the referral id your links are built from.",
     rows: [
       {label: "Campaign", value: campaignValue(campaign, ctx)},
-      addressRow("Joining", campaign, "The campaign records the signing wallet as the promoter."),
+      addressRow("Promoting", campaign, "The campaign records the signing wallet as the promoter."),
     ],
     important:
-      "Your BoneyScore is checked on chain: if it is below the campaign's minimum, the transaction reverts and you are charged only gas. Joining is public and cannot be undone.",
+      "Your BoneyScore is checked on chain: if it is below the campaign's minimum, the transaction reverts and you are charged only gas. Promoting is public and cannot be undone.",
     tone: "info",
-    confirmLabel: "Join campaign",
+    confirmLabel: "Promote campaign",
     prompts: ["transaction"],
   };
 }
