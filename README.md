@@ -389,8 +389,6 @@ pnpm test               # vitest
 pnpm lint               # eslint
 pnpm abis               # regenerate lib/abis from forge artifacts
 pnpm deployments 84532  # regenerate lib/deployments.ts from the broadcast receipt
-pnpm seed               # local fixture
-pnpm demo:seed          # the Base Sepolia demo fixture
 pnpm index              # the project's indexer     → Campaign.reportUserAction
 pnpm relay              # Boney's KPI relayer       → EventMetricKpiVerifier.reportBatch
 pnpm report-window      # derive a campaign's reporting block bounds
