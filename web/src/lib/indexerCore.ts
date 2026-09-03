@@ -432,6 +432,30 @@ export function encodeActions(actions: readonly EvidenceAction[]): Hex {
 // ── block range pagination ───────────────────────────────────────
 
 /**
+ * Identity of the `eth_getLogs` request a KPI's source implies over one block range.
+ *
+ * Two KPIs of the same campaign often name the same event on the same contract and differ only in how
+ * they read it, which `aggregateByActor` applies to the logs afterwards. Keyed on exactly the fields
+ * the request carries — address, signature, indexed-topic filter and range — so a scan is reused only
+ * where the node would have returned the same logs.
+ *
+ * @param source Event source the KPI names.
+ * @param fromBlock First block of the range.
+ * @param toBlock Last block of the range.
+ * @returns A key equal for two scans exactly when their log requests are identical.
+ */
+export function logScanKey(source: EventSource, fromBlock: bigint, toBlock: bigint): string {
+  return [
+    source.source.toLowerCase(),
+    source.topic0.toLowerCase(),
+    source.filterTopic ?? 0,
+    source.filterValue?.toLowerCase() ?? "",
+    fromBlock,
+    toBlock,
+  ].join("|");
+}
+
+/**
  * Splits a block range into chunks an RPC will accept.
  *
  * Base's public endpoint rejects `eth_getLogs` spanning more than 2000 blocks with
