@@ -62,3 +62,25 @@ web/.vercel
 # Campaign guides written by /api/campaign-guide — a local-dev convenience, not shared state.
 # The committed catalog in web/src/lib/campaignGuide.ts is the path a deploy relies on.
 web/.data/
+
+# Scripts that fund wallets or manufacture campaign activity. This repo is public, and together these
+# are a working recipe for standing up a funded campaign and moving its KPIs without anyone doing the
+# work: `fund-test-wallets.ts` sends testnet ETH and ERC-20s out of the attestor key, the two seeds
+# create and fund campaigns, and the rest emit the exact event a KPI credits — a WETH deposit, a Sygma
+# GMP deposit, a Uniswap V3 swap, an approve→fund→activate driven through the UI.
+#
+# No secret is involved; the only embedded keys are the well-known Anvil accounts. What should not be
+# public is the recipe. The protocol's own two reporting halves stay tracked — `indexer.ts` and
+# `relay-kpi-metric.ts` read logs and report them, they do not create them.
+#
+# The matching `pnpm` aliases in web/package.json are left in place, so a working copy that still
+# holds these files runs unchanged.
+web/scripts/fund-test-wallets.ts
+web/scripts/seed-local.ts
+web/scripts/demo-seed.ts
+web/scripts/drive-writes.mjs
+web/scripts/drive-weth-kpi.ts
+web/scripts/drive-event-kpi.mjs
+web/scripts/sygma-deposit.ts
+web/scripts/uniswap-swap.ts
+web/scripts/gyndore-swap.ts
