@@ -4,6 +4,7 @@ import Link from "next/link";
 import {usePathname} from "next/navigation";
 import {useEffect, useRef, useState} from "react";
 import {isActiveNav, type NavItem} from "@/lib/nav";
+import {NavLabel} from "@/components/ui/NavLabel";
 
 /**
  * NavDrawer — the nav below `sm`, as a panel from the left rather than a strip across the top.
@@ -162,7 +163,7 @@ export function NavDrawer({items}: {items: NavItem[]}) {
               aria-label="Main"
               className="flex flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain p-2"
             >
-              {items.map(({href, label}) => {
+              {items.map(({href, label, isNew}) => {
                 const active = isActiveNav(pathname, href);
                 return (
                   <Link
@@ -178,7 +179,7 @@ export function NavDrawer({items}: {items: NavItem[]}) {
                         : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
                     }`}
                   >
-                    {label}
+                    <NavLabel label={label} isNew={isNew} />
                   </Link>
                 );
               })}

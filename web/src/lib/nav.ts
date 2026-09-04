@@ -8,7 +8,12 @@
  * is provable by fixture while the components stay thin enough not to need a DOM to check.
  */
 
-export type NavItem = {href: string; label: string};
+export type NavItem = {
+  href: string;
+  label: string;
+  /** Whether the nav marks this destination as newly added. At most one item carries it. */
+  isNew?: boolean;
+};
 
 /**
  * The nav in display order.
@@ -26,7 +31,7 @@ export type NavItem = {href: string; label: string};
 const PUBLIC_NAV = [
   {href: "/", label: "Campaigns"},
   {href: "/discover", label: "Discover"},
-  {href: "/leaderboard", label: "Boneyboard"},
+  {href: "/leaderboard", label: "Boneyboard", isNew: true},
   {href: "/docs", label: "Docs"},
 ] as const;
 

@@ -79,6 +79,21 @@ describe("navItems", () => {
     }
   });
 
+  /** One destination carries the mark at a time — a second would read as noise rather than news. */
+  it("marks Boneyboard as the new destination and nothing else", () => {
+    for (const [connected, promoter] of [
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const) {
+      const marked = navItems({isConnected: connected, isPromoter: promoter})
+        .filter((item) => item.isNew)
+        .map((item) => item.label);
+      expect(marked).toEqual(["Boneyboard"]);
+    }
+  });
+
   it("keeps Docs last in every combination", () => {
     for (const [connected, promoter] of [
       [false, false],
