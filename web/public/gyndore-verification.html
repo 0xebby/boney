@@ -1,0 +1,704 @@
+<title>Gyndore Verification Trace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..112,400..700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  /* ── tokens: light is the base, both overrides only redefine ───────────── */
+  :root {
+    --ground: #EFF1EF;
+    --surface: #FAFBFA;
+    --surface-sunk: #E5E8E5;
+    --ink: #161A19;
+    --ink-soft: #4A5250;
+    --ink-faint: #7C8582;
+    --rule: #D3D8D5;
+    --rule-soft: #E2E6E3;
+
+    --accent: #1F6F62;
+    --accent-soft: #D7E7E3;
+    --accent-ink: #145046;
+
+    --pass: #3B7A52;
+    --pass-soft: #DCEADF;
+    --warn: #A2670B;
+    --warn-soft: #F4E7CD;
+    --idle: #6E7A85;
+    --idle-soft: #E1E6E9;
+
+    --shadow: 0 1px 2px rgba(22, 26, 25, .05), 0 6px 16px -10px rgba(22, 26, 25, .18);
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101413;
+      --surface: #181D1C;
+      --surface-sunk: #0B0E0E;
+      --ink: #E8EDEB;
+      --ink-soft: #A3AFAB;
+      --ink-faint: #74807C;
+      --rule: #2A3231;
+      --rule-soft: #212827;
+
+      --accent: #55B7A4;
+      --accent-soft: #1B3A35;
+      --accent-ink: #7FCFBF;
+
+      --pass: #6FB587;
+      --pass-soft: #1D3325;
+      --warn: #D69A2E;
+      --warn-soft: #3A2D12;
+      --idle: #8996A0;
+      --idle-soft: #222A2E;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 20px -12px rgba(0, 0, 0, .6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #101413;
+    --surface: #181D1C;
+    --surface-sunk: #0B0E0E;
+    --ink: #E8EDEB;
+    --ink-soft: #A3AFAB;
+    --ink-faint: #74807C;
+    --rule: #2A3231;
+    --rule-soft: #212827;
+
+    --accent: #55B7A4;
+    --accent-soft: #1B3A35;
+    --accent-ink: #7FCFBF;
+
+    --pass: #6FB587;
+    --pass-soft: #1D3325;
+    --warn: #D69A2E;
+    --warn-soft: #3A2D12;
+    --idle: #8996A0;
+    --idle-soft: #222A2E;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 20px -12px rgba(0, 0, 0, .6);
+  }
+  /* ── base ──────────────────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 40px 28px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+  h1 { font-size: 33px; font-weight: 700; letter-spacing: -.022em; font-stretch: 96%; line-height: 1.1; }
+  h2 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+  h3 { font-size: 14px; font-weight: 650; letter-spacing: -.005em; }
+  p { margin: 0; max-width: 66ch; }
+
+  .eyebrow {
+    font-family: var(--display);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-stretch: 88%;
+  }
+
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  /* ── masthead ──────────────────────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: 18px; }
+  .mast-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 20px; }
+  .mast-top h1 { flex: 1 1 340px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--display); font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 3px; white-space: nowrap;
+  }
+  .pill-pass { background: var(--pass-soft); color: var(--pass); }
+  .pill-warn { background: var(--warn-soft); color: var(--warn); }
+  .pill-idle { background: var(--idle-soft); color: var(--idle); }
+  .pill-accent { background: var(--accent-soft); color: var(--accent-ink); }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .ident {
+    display: flex; flex-wrap: wrap; gap: 2px 26px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+    padding-bottom: 18px; border-bottom: 1px solid var(--rule);
+  }
+  .ident b { color: var(--ink-soft); font-weight: 500; }
+
+  /* ── headline figures: the only place big numbers are spent ─────────────── */
+  .figures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); }
+  .fig { background: var(--surface); padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 3px; }
+  .fig .v { font-family: var(--display); font-size: 27px; font-weight: 650; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .fig .u { font-size: 12px; color: var(--ink-faint); }
+  .fig .k { font-family: var(--display); font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); }
+
+  /* ── the verdict ───────────────────────────────────────────────────────── */
+  .verdict {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 3px solid var(--warn);
+    padding: 20px 24px; display: flex; flex-direction: column; gap: 10px;
+    box-shadow: var(--shadow);
+  }
+  .verdict h2 { font-size: 17px; }
+  .verdict p { color: var(--ink-soft); }
+  .verdict strong { color: var(--ink); font-weight: 600; }
+
+  /* ── layer rows: the pipeline, in order, because order is the content ───── */
+  .layers { display: flex; flex-direction: column; }
+  .layer {
+    display: grid; grid-template-columns: 52px 1fr; gap: 0 20px;
+    padding: 26px 0; border-top: 1px solid var(--rule);
+  }
+  .layer:last-child { border-bottom: 1px solid var(--rule); }
+
+  .rail { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .rail .n {
+    font-family: var(--display); font-size: 13px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--ink-faint);
+  }
+  .rail .stripe { flex: 1; width: 3px; border-radius: 2px; min-height: 34px; }
+  .s-pass { background: var(--pass); }
+  .s-warn { background: var(--warn); }
+  .s-idle { background: var(--idle); }
+
+  .lbody { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .lhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+  .lhead h2 { margin-right: 2px; }
+  .lhead .mech { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
+  .lbody > p { color: var(--ink-soft); font-size: 14.5px; }
+
+  /* ── readouts: label/value pairs, one object repeated ───────────────────── */
+  .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 1px; background: var(--rule-soft); }
+  .ro { background: var(--surface); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ro .k { font-size: 10.5px; font-family: var(--display); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+  .ro .v { font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .ro .v em { font-style: normal; color: var(--ink-faint); font-size: 11.5px; }
+
+  /* ── tables ────────────────────────────────────────────────────────────── */
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 12px; text-align: left; white-space: nowrap; }
+  th {
+    font-family: var(--display); font-size: 10px; font-weight: 600;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint);
+    border-bottom: 1px solid var(--rule); background: var(--surface-sunk);
+  }
+  td { border-bottom: 1px solid var(--rule-soft); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  td.t { font-family: var(--body); white-space: normal; }
+  .r { text-align: right; }
+  .off { color: var(--warn); font-weight: 700; }
+  .zero { color: var(--ink-faint); }
+  .agree { color: var(--pass); }
+
+  /* ── charts ────────────────────────────────────────────────────────────── */
+  .chart { background: var(--surface); border: 1px solid var(--rule); padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .chart-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+  .chart-head h3 { font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 10px; height: 10px; border-radius: 1px; }
+  .chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .ct { font-family: var(--mono); font-size: 10px; fill: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .cl { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .cv { font-family: var(--mono); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .grid-line { stroke: var(--rule-soft); stroke-width: 1; }
+  .axis-line { stroke: var(--rule); stroke-width: 1; }
+
+  /* ── the trace: two passes, one range ──────────────────────────────────── */
+  .trace { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule); background: var(--surface); }
+  .pass { display: grid; grid-template-columns: 118px 1fr; gap: 0 18px; padding: 13px 16px; border-bottom: 1px solid var(--rule-soft); }
+  .pass:last-child { border-bottom: none; }
+  .pass.bad { background: var(--warn-soft); }
+  .pass .when { display: flex; flex-direction: column; gap: 1px; }
+  .pass .when .b { font-family: var(--mono); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pass .when .h { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
+  .pass .what { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 12.5px; }
+  .pass .what .rng { color: var(--ink-faint); }
+  .pass .what .wrote { font-variant-numeric: tabular-nums; }
+
+  .sum {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+    font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
+    background: var(--surface-sunk); border: 1px solid var(--rule);
+    padding: 12px 16px;
+  }
+  .sum .op { color: var(--ink-faint); }
+  .sum .bad { color: var(--warn); font-weight: 700; }
+  .sum .good { color: var(--pass); font-weight: 700; }
+
+  /* ── footer ────────────────────────────────────────────────────────────── */
+  footer {
+    display: flex; flex-direction: column; gap: 6px;
+    padding-top: 20px; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  }
+
+  @media (max-width: 720px) {
+    .page { padding: 28px 18px 56px; gap: 32px; }
+    h1 { font-size: 27px; }
+    .figures { grid-template-columns: repeat(2, 1fr); }
+    .layer { grid-template-columns: 30px 1fr; gap: 0 14px; }
+    .pass { grid-template-columns: 1fr; gap: 6px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+
+
+
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="mast-top">
+      <h1>Gyndore Testnet: six gates between a swap and a payout</h1>
+      <span class="pill pill-pass"><span class="dot"></span>Active</span>
+      <span class="pill pill-warn"><span class="dot"></span>1 anomaly, absorbed</span>
+    </div>
+    <div class="ident">
+      <span>campaign <b>0x86b7b22a…f06fc</b></span>
+      <span>id <b>3</b></span>
+      <span>Base Sepolia <b>84532</b></span>
+      <span>registry <b>0x3e0a2fc4…</b></span>
+      <span>window opens <b>46215147</b></span>
+    </div>
+    <div class="figures">
+      <div class="fig">
+        <span class="k">Escrowed</span>
+        <span class="v">9,700</span>
+        <span class="u">GYND of a 10,000 pool</span>
+      </div>
+      <div class="fig">
+        <span class="k">Paid out</span>
+        <span class="v">300</span>
+        <span class="u">3 tier-1 crossings × 100</span>
+      </div>
+      <div class="fig">
+        <span class="k">Attributed</span>
+        <span class="v">6</span>
+        <span class="u">live touches, 3 promoters</span>
+      </div>
+      <div class="fig">
+        <span class="k">Credited</span>
+        <span class="v">20</span>
+        <span class="u">KPI units across 3 KPIs</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="verdict">
+    <h2>Every layer is doing its job, and one of them is doing it despite a bug</h2>
+    <p>The project's claim is exactly right: <strong>5, 6, 1, 1</strong> swaps and <strong>4, 3</strong> stakes,
+      matching a full-window log scan wallet for wallet. Boney's independent ceiling reads
+      <strong>10, 12, 1, 2</strong> on the swap KPI — roughly double for three referrals, traced below to two
+      relay passes that overlapped and folded the same logs twice.</p>
+    <p>Nothing over-paid. Credit is <span class="mono">min(claim, ceiling)</span> and an adapter may discount but
+      never inflate, so an inflated ceiling simply stopped binding. <strong>The asymmetry that exists for the
+      dishonest-project case absorbed an honest-relayer bug instead</strong> — the failure surfaced as a number that
+      looks wrong on a dashboard rather than as tokens leaving escrow.</p>
+  </section>
+
+  <div class="layers">
+
+    <!-- ── 1 ── -->
+    <div class="layer">
+      <div class="rail"><span class="n">1</span><span class="stripe s-pass"></span></div>
+      <div class="lbody">
+        <div class="lhead">
+          <h2>Reputation gate</h2>
+          <span class="pill pill-pass"><span class="dot"></span>3 of 3 cleared</span>
+          <span class="mech">ReputationRegistry.scoreOf ≥ Campaign.minReputation</span>
+        </div>
+        <p>The floor is <span class="mono">10,000</span> against a <span class="mono">28,000</span> ceiling — a
+          real gate, not a formality, though the campaign guide still describes this campaign as open to anyone.
+          Scores are weighted sums of signed attestations, and the on-chain figure matched the subgraph exactly for
+          all three promoters.</p>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Schema</th><th class="r">Weight</th><th class="r">Max value</th><th class="r">Max age</th><th>State</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>ETHOS_SCORE</td><td class="r">7</td><td class="r">2,800</td><td class="r">180 d</td><td class="agree">enabled</td></tr>
+              <tr><td>X_REACH</td><td class="r">3</td><td class="r">2,800</td><td class="r">90 d</td><td class="agree">enabled</td></tr>
+              <tr><td>X_FOLLOWERS</td><td class="r">0</td><td class="r">—</td><td class="r">—</td><td class="zero">disabled</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="readout">
+          <div class="ro"><span class="k">0x98405c57…</span><span class="v">24,620 <em>dev wallet, stubbed</em></span></div>
+          <div class="ro"><span class="k">0xc7df1888…</span><span class="v">24,417 <em>stubbed</em></span></div>
+          <div class="ro"><span class="k">0xc27a6559…</span><span class="v">12,816 <em>live Ethos</em></span></div>
+        </div>
+        <p>The one wallet scored by live Ethos clears the floor by 2,816 while the stubbed wallets clear it by more
+          than twelve thousand. A gate tuned against the stub would reject the only real user here.</p>
+      </div>
+    </div>
+
+    <!-- ── 2 ── -->
+    <div class="layer">
+      <div class="rail"><span class="n">2</span><span class="stripe s-pass"></span></div>
+      <div class="lbody">
+        <div class="lhead">
+          <h2>Attribution</h2>
+          <span class="pill pill-pass"><span class="dot"></span>6 live, 0 expired</span>
+          <span class="mech">AttributionRegistry.promoterAt(campaign, user, block)</span>
+        </div>
+        <p>A referral signs a touch binding their wallet to one promoter; the registry keeps only the newest per
+          pair and resolves ownership <em>per action block</em>, so credit follows whoever held the wallet at the
+          moment it acted. All six touches are live inside the 30-day window, and every one has
+          <span class="mono">historyLength 1</span> — nobody re-signed, so no referral is split across promoters and
+          the per-block resolution never has to arbitrate.</p>
+        <div class="readout">
+          <div class="ro"><span class="k">Referrals</span><span class="v">6 <em>3 / 2 / 1 per promoter</em></span></div>
+          <div class="ro"><span class="k">Window</span><span class="v">30 d <em>enforced on chain</em></span></div>
+          <div class="ro"><span class="k">Re-signed</span><span class="v">0 <em>no contested spells</em></span></div>
+          <div class="ro"><span class="k">Chain vs subgraph</span><span class="v agree">identical</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 3 ── -->
+    <div class="layer">
+      <div class="rail"><span class="n">3</span><span class="stripe s-warn"></span></div>
+      <div class="lbody">
+        <div class="lhead">
+          <h2>Observation — Boney's ceiling</h2>
+          <span class="pill pill-warn"><span class="dot"></span>Inflated ~2× on KPI 0</span>
+          <span class="mech">EventMetricKpiVerifier.verifiedTotals, written by the relayer</span>
+        </div>
+        <p>An independent relayer scans the KPI's declared event source and records what it saw, so the project is
+          never the only witness to its own numbers. One blocking pass over roughly 31,000 blocks shows how much of
+          that work is rejection: the testnet is busy, and almost none of it belongs to a Boney referral.</p>
+
+        <div class="chart">
+          <div class="chart-head">
+            <h3>One relay pass, KPI 0 — 54,267 logs in, 13 units out</h3>
+            <div class="legend"><span><span class="swatch" style="background: var(--accent)"></span>log scale, powers of ten</span></div>
+          </div>
+          <svg viewBox="0 0 640 146" role="img" aria-label="Funnel: 54,267 swap logs matched, 49,587 actors discarded for having no attribution touch, 13 swap units credited.">
+            <line class="grid-line" x1="262.6" y1="4" x2="262.6" y2="110"></line>
+            <line class="grid-line" x1="357.2" y1="4" x2="357.2" y2="110"></line>
+            <line class="grid-line" x1="451.8" y1="4" x2="451.8" y2="110"></line>
+            <line class="grid-line" x1="546.4" y1="4" x2="546.4" y2="110"></line>
+
+            <text class="cl" x="158" y="24" text-anchor="end">Swap logs matched</text>
+            <rect x="168" y="8" width="447.9" height="24" fill="var(--accent)"></rect>
+            <text class="cv" x="607.9" y="24" text-anchor="end" fill="var(--surface)">54,267</text>
+
+            <text class="cl" x="158" y="62" text-anchor="end">Actors with no touch</text>
+            <rect x="168" y="46" width="444.1" height="24" fill="var(--warn)"></rect>
+            <text class="cv" x="604.1" y="62" text-anchor="end" fill="var(--surface)">49,587 discarded</text>
+
+            <text class="cl" x="158" y="100" text-anchor="end">Swap units credited</text>
+            <rect x="168" y="84" width="105.4" height="24" fill="var(--pass)"></rect>
+            <text class="cv" x="281.4" y="100" fill="var(--pass)">13</text>
+
+            <line class="axis-line" x1="168" y1="116" x2="620" y2="116"></line>
+            <text class="ct" x="168" y="132" text-anchor="middle">1</text>
+            <text class="ct" x="262.6" y="132" text-anchor="middle">10</text>
+            <text class="ct" x="357.2" y="132" text-anchor="middle">100</text>
+            <text class="ct" x="451.8" y="132" text-anchor="middle">1,000</text>
+            <text class="ct" x="546.4" y="132" text-anchor="middle">10,000</text>
+          </svg>
+        </div>
+
+        <p>The same pass on KPI 1 saw <span class="mono">56,675</span> Staked logs and discarded
+          <span class="mono">51,919</span> wallets. Both passes produced creditable activity for zero users and
+          landed as checkpoint-only transactions — the relayer paying gas to record that it found nothing new, which
+          is exactly what an honest witness looks like on a quiet campaign.</p>
+        <div class="readout">
+          <div class="ro"><span class="k">Head</span><span class="v">46,332,594</span></div>
+          <div class="ro"><span class="k">KPI 0 checkpoint</span><span class="v">46,332,276</span></div>
+          <div class="ro"><span class="k">KPI 1 checkpoint</span><span class="v">46,332,329</span></div>
+          <div class="ro"><span class="k">KPI 2 checkpoint</span><span class="v">46,332,141</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 4 ── -->
+    <div class="layer">
+      <div class="rail"><span class="n">4</span><span class="stripe s-pass"></span></div>
+      <div class="lbody">
+        <div class="lhead">
+          <h2>Claim — the project's report</h2>
+          <span class="pill pill-pass"><span class="dot"></span>Exact on all 6 referrals</span>
+          <span class="mech">Campaign.reportUserAction(kpiIndex, user, newTotal, evidence)</span>
+        </div>
+        <p>The project's own indexer reports an <em>absolute</em> total from a full-history scan and attaches
+          per-action evidence, so the chain can resolve each action to whoever held the referral at that block.
+          Re-running it is a no-op rather than a double credit — which is precisely the property the ceiling turns
+          out to lack.</p>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Referral</th><th>KPI</th><th class="r">Claimed</th><th class="r">Logs found</th><th>Action blocks</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>0x030e293a…</td><td>0 Swap</td><td class="r">5</td><td class="r agree">5</td><td>46260821 → 46261021</td></tr>
+              <tr><td>0x5a597273…</td><td>0 Swap</td><td class="r">6</td><td class="r agree">6</td><td>46261094 → 46261544</td></tr>
+              <tr><td>0x98bef229…</td><td>0 Swap</td><td class="r">1</td><td class="r agree">1</td><td>46222863</td></tr>
+              <tr><td>0xc7df1888…</td><td>0 Swap</td><td class="r">1</td><td class="r agree">1</td><td>46218071</td></tr>
+              <tr><td>0xc7df1888…</td><td>1 Stake</td><td class="r">4</td><td class="r agree">4</td><td>—</td></tr>
+              <tr><td>0xd572ab6b…</td><td>1 Stake</td><td class="r">3</td><td class="r agree">3</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Independently re-scanning the whole window with each KPI's own topic filter reproduced these counts
+          exactly, and found <strong>zero</strong> pre-attribution logs — no action predates the touch that claims
+          it.</p>
+      </div>
+    </div>
+
+    <!-- ── 5 ── -->
+    <div class="layer">
+      <div class="rail"><span class="n">5</span><span class="stripe s-pass"></span></div>
+      <div class="lbody">
+        <div class="lhead">
+          <h2>Guard</h2>
+          <span class="pill pill-pass"><span class="dot"></span>Absorbed the inflation</span>
+          <span class="mech">GuardedKpiVerifier, Mode.AGREE → min(claim, ceiling)</span>
+        </div>
+        <p>All three KPIs are gated. The guard credits the smaller of the two figures, so the ceiling is a track the
+          claim has to fit inside — never a number that can lift it. Where the solid bar fills the track, the two
+          witnesses agree exactly; where it stops short, the ceiling has headroom the claim never used.</p>
+
+        <div class="chart">
+          <div class="chart-head">
+            <h3>Ceiling vs claim, per referral — credited is the solid bar</h3>
+            <div class="legend">
+              <span><span class="swatch" style="background: var(--pass)"></span>claim, credited</span>
+              <span><span class="swatch" style="background: var(--accent-soft); border: 1px solid var(--accent)"></span>ceiling, observed</span>
+            </div>
+          </div>
+          <svg viewBox="0 0 640 232" role="img" aria-label="Per-referral ceiling versus claim. On KPI 0 the ceiling reads 10, 12, 1 and 2 where the claim reads 5, 6, 1 and 1. On KPI 1 both witnesses read 4 and 3.">
+            <line class="grid-line" x1="237.5" y1="4" x2="237.5" y2="188"></line>
+            <line class="grid-line" x1="345" y1="4" x2="345" y2="188"></line>
+            <line class="grid-line" x1="452.5" y1="4" x2="452.5" y2="188"></line>
+            <line class="grid-line" x1="560" y1="4" x2="560" y2="188"></line>
+
+            <text class="cl" x="120" y="22" text-anchor="end">kpi0 0x030e29…</text>
+            <rect x="130" y="8" width="358.3" height="20" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+            <rect x="130" y="8" width="179.2" height="20" fill="var(--pass)"></rect>
+            <text class="cv" x="496.3" y="22"><tspan fill="var(--pass)">5</tspan><tspan fill="var(--ink-faint)"> of </tspan><tspan fill="var(--accent)">10</tspan></text>
+
+            <text class="cl" x="120" y="54" text-anchor="end">kpi0 0x5a5972…</text>
+            <rect x="130" y="40" width="430" height="20" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+            <rect x="130" y="40" width="215" height="20" fill="var(--pass)"></rect>
+            <text class="cv" x="568" y="54"><tspan fill="var(--pass)">6</tspan><tspan fill="var(--ink-faint)"> of </tspan><tspan fill="var(--accent)">12</tspan></text>
+
+            <text class="cl" x="120" y="86" text-anchor="end">kpi0 0x98bef2…</text>
+            <rect x="130" y="72" width="35.8" height="20" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+            <rect x="130" y="72" width="35.8" height="20" fill="var(--pass)"></rect>
+            <text class="cv" x="173.8" y="86"><tspan fill="var(--pass)">1</tspan><tspan fill="var(--ink-faint)"> of </tspan><tspan fill="var(--accent)">1</tspan></text>
+
+            <text class="cl" x="120" y="118" text-anchor="end">kpi0 0xc7df18…</text>
+            <rect x="130" y="104" width="71.7" height="20" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+            <rect x="130" y="104" width="35.8" height="20" fill="var(--pass)"></rect>
+            <text class="cv" x="209.7" y="118"><tspan fill="var(--pass)">1</tspan><tspan fill="var(--ink-faint)"> of </tspan><tspan fill="var(--accent)">2</tspan></text>
+
+            <text class="cl" x="120" y="150" text-anchor="end">kpi1 0xc7df18…</text>
+            <rect x="130" y="136" width="143.3" height="20" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+            <rect x="130" y="136" width="143.3" height="20" fill="var(--pass)"></rect>
+            <text class="cv" x="281.3" y="150"><tspan fill="var(--pass)">4</tspan><tspan fill="var(--ink-faint)"> of </tspan><tspan fill="var(--accent)">4</tspan></text>
+
+            <text class="cl" x="120" y="182" text-anchor="end">kpi1 0xd572ab…</text>
+            <rect x="130" y="168" width="107.5" height="20" fill="var(--accent-soft)" stroke="var(--accent)"></rect>
+            <rect x="130" y="168" width="107.5" height="20" fill="var(--pass)"></rect>
+            <text class="cv" x="245.5" y="182"><tspan fill="var(--pass)">3</tspan><tspan fill="var(--ink-faint)"> of </tspan><tspan fill="var(--accent)">3</tspan></text>
+
+            <line class="axis-line" x1="130" y1="196" x2="560" y2="196"></line>
+            <text class="ct" x="130" y="212" text-anchor="middle">0</text>
+            <text class="ct" x="237.5" y="212" text-anchor="middle">3</text>
+            <text class="ct" x="345" y="212" text-anchor="middle">6</text>
+            <text class="ct" x="452.5" y="212" text-anchor="middle">9</text>
+            <text class="ct" x="560" y="212" text-anchor="middle">12</text>
+            <text class="ct" x="345" y="228" text-anchor="middle">KPI units</text>
+          </svg>
+        </div>
+
+        <p>KPI 1 is the control: both witnesses independently arrived at 4 and 3, and the guard had nothing to do.
+          KPI 0 is where the relayer over-counted, and the only visible consequence is unused headroom.</p>
+      </div>
+    </div>
+
+    <!-- ── 6 ── -->
+    <div class="layer">
+      <div class="rail"><span class="n">6</span><span class="stripe s-pass"></span></div>
+      <div class="lbody">
+        <div class="lhead">
+          <h2>Settlement</h2>
+          <span class="pill pill-pass"><span class="dot"></span>Reconciles to the wei</span>
+          <span class="mech">inline at report time, out of EscrowVault</span>
+        </div>
+        <p>Crossing a tier pays immediately inside the reporting transaction; there is no separate claim step to
+          withhold. Three promoters have crossed tier 1 and none has reached tier 2, which accounts for the escrow
+          balance exactly.</p>
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr><th>Promoter</th><th>KPI</th><th class="r">Progress</th><th class="r">Tier 1</th><th class="r">Tier 2</th><th class="r">Settled</th><th class="r">Paid</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>0x98405c57…</td><td>0 Swap</td><td class="r">12</td><td class="r">5</td><td class="r">25</td><td class="r agree">1</td><td class="r">100</td></tr>
+              <tr><td>0xc7df1888…</td><td>0 Swap</td><td class="r">1</td><td class="r">5</td><td class="r">25</td><td class="r zero">0</td><td class="r zero">—</td></tr>
+              <tr><td>0xc27a6559…</td><td>1 Stake</td><td class="r">3</td><td class="r">3</td><td class="r">15</td><td class="r agree">1</td><td class="r">100</td></tr>
+              <tr><td>0xc7df1888…</td><td>1 Stake</td><td class="r">4</td><td class="r">3</td><td class="r">15</td><td class="r agree">1</td><td class="r">100</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sum">
+          <span>3 crossings</span><span class="op">×</span><span>100 GYND</span><span class="op">=</span>
+          <span class="good">300 paid out</span><span class="op">·</span>
+          <span>10,000 pool</span><span class="op">−</span><span>300</span><span class="op">=</span>
+          <span class="good">9,700 still escrowed</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <section class="verdict" style="border-left-color: var(--accent)">
+    <span class="eyebrow">The anomaly, traced</span>
+    <h2>Two relay passes, one block range, counted twice</h2>
+    <p>The ceiling is written <em>additively</em> — stored total plus this pass's delta — so a range folded twice is
+      counted twice. The relayer resumes at <span class="mono">checkpoint + 1</span> for exactly that reason, and
+      that guarantee only holds while one pass runs at a time. Here two overlapped: the second read the checkpoint
+      before the first's transaction landed, scanned from the stale cursor, then read the total <em>after</em> it
+      landed and added its whole delta on top.</p>
+  </section>
+
+  <div class="trace">
+    <div class="pass">
+      <div class="when">
+        <span class="b">46,221,638</span>
+        <span class="h">0x32301826e9</span>
+      </div>
+      <div class="what">
+        <span class="wrote">0xc7df1888… → <b>1</b> — correct; its only swap is at 46,218,071</span>
+        <span class="rng">checkpoint advanced to 46,221,334</span>
+      </div>
+    </div>
+    <div class="pass bad">
+      <div class="when">
+        <span class="b">46,221,755</span>
+        <span class="h">0x0a4055c7e6</span>
+      </div>
+      <div class="what">
+        <span class="wrote">0xc7df1888… → <b>2</b> — the same swap, folded again</span>
+        <span class="rng">checkpoint advanced to 46,221,479 · its own range 46,221,335–46,221,479 holds no swap by this wallet</span>
+      </div>
+    </div>
+    <div class="pass">
+      <div class="when">
+        <span class="b">46,298,490</span>
+        <span class="h">0x80ef6db37b</span>
+      </div>
+      <div class="what">
+        <span class="wrote">0x030e293a… → <b>5</b>, 0x5a597273… → <b>6</b> — both correct</span>
+        <span class="rng">checkpoint advanced to 46,298,398</span>
+      </div>
+    </div>
+    <div class="pass bad">
+      <div class="when">
+        <span class="b">46,298,548</span>
+        <span class="h">0xca4ad1a493</span>
+      </div>
+      <div class="what">
+        <span class="wrote">0x030e293a… → <b>10</b>, 0x5a597273… → <b>12</b> — every log folded a second time</span>
+        <span class="rng">checkpoint advanced to 46,298,451 · its own range is 53 blocks wide and holds no swap at all — the last one was at 46,261,544</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sum">
+    <span>stored 5</span><span class="op">+</span><span>rescanned 5</span><span class="op">=</span>
+    <span class="bad">ceiling 10</span><span class="op">, while the claim stayed at</span>
+    <span class="good">5</span><span class="op">→ credited</span><span class="good">5</span>
+  </div>
+
+  <p style="color: var(--ink-soft)">The control is <span class="mono">0x98bef229…</span>: one swap at
+    46,222,863, reported once, never revisited — and its ceiling reads exactly 1. The three inflated totals are all
+    and only the ones a second pass touched.</p>
+
+  <section>
+    <span class="eyebrow">Reference</span>
+    <h2 style="margin: 6px 0 14px">The three KPIs as encoded</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>KPI</th><th>Source</th><th>Actor slot</th><th>Filter slot</th><th>Mode</th>
+            <th class="r">Tiers</th><th class="r">Rewards</th><th>Credited</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="t">0 · Swap</td><td>0x7B47daC5… pool</td><td class="r">topic 2</td>
+            <td>topic 1 = router</td><td>count</td><td class="r">5 / 25 / 100</td>
+            <td class="r">100 / 200 / 400</td><td class="agree">13 units</td>
+          </tr>
+          <tr>
+            <td class="t">1 · Stake $GYND</td><td>0x5c0E023C… staking</td><td class="r">topic 1</td>
+            <td>topic 2 = GYND</td><td>count</td><td class="r">3 / 15 / 50</td>
+            <td class="r">100 / 200 / 400</td><td class="agree">7 units</td>
+          </tr>
+          <tr>
+            <td class="t">2 · Provide liquidity</td><td>0x76998e42… NFPM</td><td class="r">topic 2</td>
+            <td>topic 1 = 0x0</td><td>count</td><td class="r">1 / 5 / 20</td>
+            <td class="r">100 / 200 / 400</td><td class="zero">0 units</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="verdict" style="border-left-color: var(--idle)">
+    <span class="eyebrow">Two more things worth knowing</span>
+    <h2>KPI 2 has never matched anything, and may not be able to</h2>
+    <p>A full-window scan with all six referrals OR'd into the actor slot found <strong>no referral there at
+      all</strong> — not a low count, an empty set. On this event that slot carries the position
+      <span class="mono">tokenId</span>, not a wallet, so the address comparison can't succeed; the source catalogue
+      already flags the probe that blessed it as a false positive, because the sampled token id happened to have
+      zero high bytes. The campaign guide has no row for this KPI either, so nothing in the UI invites a promoter
+      to try it. Worth confirming before anyone counts on that 400 GYND ladder.</p>
+    <p>Separately: the deployed subgraph (<span class="mono">v0.5.0</span>) predates the filtered
+      <span class="mono">params</span> layout and returns <span class="mono">source: null</span> for all three of
+      these KPIs, so it cannot decode this campaign's event sources. Promoters, touches and scores all came back
+      matching the chain exactly — the gap is only in the KPI source fields.</p>
+  </section>
+
+  <footer>
+    <span>Measured against Base Sepolia at head 46,332,594 · RPC base-sepolia-rpc.publicnode.com · 3 September 2026.</span>
+    <span>Figures read directly from ReputationRegistry, AttributionRegistry, EventMetricKpiVerifier, GuardedKpiVerifier, EscrowVault and Campaign; log counts from an independent full-window eth_getLogs scan.</span>
+    <span>Checkpoints move on every relay pass, so those four block numbers age immediately; everything else is settled state.</span>
+  </footer>
+
+</div>
+
+
+
+
