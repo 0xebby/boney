@@ -141,7 +141,7 @@ export function JoinCampaignMenu({
             <>
               {enabledCount === 0 ? (
                 <p className="px-3 pb-1 pt-2 text-xs text-ink-muted">
-                  None of these are open to this wallet yet — each one says why.
+                  Connect wallet to start promoting.
                 </p>
               ) : null}
 
