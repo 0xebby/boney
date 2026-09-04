@@ -11,7 +11,7 @@ const labelsFor = (isConnected: boolean, isPromoter: boolean) =>
 
 describe("navItems", () => {
   it("shows only the public entries to a visitor with no wallet", () => {
-    expect(labelsFor(false, false)).toEqual(["Campaigns", "Discover", "Docs"]);
+    expect(labelsFor(false, false)).toEqual(["Campaigns", "Discover", "Boneyboard", "Docs"]);
   });
 
   /** My Campaigns sits beside the marketplace it filters, not appended at the end. */
@@ -20,6 +20,7 @@ describe("navItems", () => {
       "Campaigns",
       "My Campaigns",
       "Discover",
+      "Boneyboard",
       "BoneyCard",
       "Docs",
     ]);
@@ -30,6 +31,7 @@ describe("navItems", () => {
       "Campaigns",
       "My Campaigns",
       "Discover",
+      "Boneyboard",
       "BoneyCard",
       "Promoters",
       "Docs",
@@ -41,7 +43,13 @@ describe("navItems", () => {
    * combination is reachable rather than hypothetical. Promoters should still appear.
    */
   it("handles promoter-without-connected, which the two async reads can produce", () => {
-    expect(labelsFor(false, true)).toEqual(["Campaigns", "Discover", "Promoters", "Docs"]);
+    expect(labelsFor(false, true)).toEqual([
+      "Campaigns",
+      "Discover",
+      "Boneyboard",
+      "Promoters",
+      "Docs",
+    ]);
   });
 
   /**
@@ -55,6 +63,20 @@ describe("navItems", () => {
 
     const withBoth = labelsFor(true, true);
     expect(withBoth.indexOf("BoneyCard")).toBeLessThan(withBoth.indexOf("Promoters"));
+  });
+
+  /** The board is public, so it appears with no wallet and does not move when one connects. */
+  it("shows Boneyboard in every combination, always after Discover", () => {
+    for (const [connected, promoter] of [
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const) {
+      const labels = labelsFor(connected, promoter);
+      expect(labels).toContain("Boneyboard");
+      expect(labels.indexOf("Boneyboard")).toBe(labels.indexOf("Discover") + 1);
+    }
   });
 
   it("keeps Docs last in every combination", () => {

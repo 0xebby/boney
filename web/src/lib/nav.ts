@@ -17,12 +17,16 @@ export type NavItem = {href: string; label: string};
  * links to `/`, and the list page leads with a `boneyard` hero — three copies of the name on one
  * screen reads as a stutter, so only the mark and the hero carry it.
  *
+ * Boneyboard follows Discover: both are public views of the same population, so they read as a pair
+ * before the wallet-gated entries begin.
+ *
  * Create is deliberately NOT in this list. It is the primary action of the whole product, so it sits
  * in the bar's right-hand cluster as a filled button rather than reading as one more peer link.
  */
 const PUBLIC_NAV = [
   {href: "/", label: "Campaigns"},
   {href: "/discover", label: "Discover"},
+  {href: "/leaderboard", label: "Boneyboard"},
   {href: "/docs", label: "Docs"},
 ] as const;
 
@@ -32,8 +36,8 @@ const PROMOTERS = {href: "/promoters", label: "Promoters"} as const;
 
 /**
  * The nav in display order, with the personal entries spliced into the positions they occupy when
- * present — "My Campaigns" beside the marketplace it filters, "BoneyCard" and "Promoters" beside
- * Discover, and Docs last either way. Building the list rather than rendering conditionals inline
+ * present — "My Campaigns" beside the marketplace it filters, "BoneyCard" and "Promoters" after the
+ * public pages, and Docs last either way. Building the list rather than rendering conditionals inline
  * keeps that ordering in one place instead of spread across two components' JSX.
  *
  * Three entries are personal rather than public, and appear only once they have something to show. A
@@ -58,11 +62,12 @@ export function navItems({
   isConnected: boolean;
   isPromoter: boolean;
 }): NavItem[] {
-  const [campaigns, discover, docs] = PUBLIC_NAV;
+  const [campaigns, discover, leaderboard, docs] = PUBLIC_NAV;
   return [
     campaigns,
     ...(isConnected ? [MY_CAMPAIGNS] : []),
     discover,
+    leaderboard,
     ...(isConnected ? [BONEYCARD] : []),
     ...(isPromoter ? [PROMOTERS] : []),
     docs,
