@@ -482,7 +482,7 @@ function EarningCard() {
 
   return (
     <Card>
-      <CardHeader title="How points are calculated" subtitle="Every credited action is verified on-chain" />
+      <CardHeader title="How BoneyPoints are calculated" subtitle="Every credited action is verified on-chain" />
       <ul className="flex flex-col divide-y divide-hairline">
         {rules.map((rule) => (
           <li key={rule.action} className="flex items-baseline justify-between gap-4 py-2 first:pt-0 last:pb-0">
