@@ -214,6 +214,62 @@ body {
   animation: rise-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/**
+ * Leaderboard bar fill: the meter grows from nothing to the width the row sets inline.
+ *
+ * There is no `to` keyframe — the implicit one is the element's own computed width, so a row can set
+ * `style={{width: "48%"}}` and this animates 0 → 48% without the value appearing twice.
+ */
+@keyframes bar-grow {
+  from {
+    width: 0;
+  }
+}
+
+.animate-bar-grow {
+  animation: bar-grow 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/**
+ * Rank-1 marker: a slow opacity breath that bottoms out at 0.55 rather than reaching 0.
+ *
+ * Same discipline as `blink` — a marker that disappears entirely reads as a rendering fault, and the
+ * glyph itself is never the only carrier of the rank.
+ */
+@keyframes crown-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.animate-crown-pulse {
+  animation: crown-pulse 2.4s ease-in-out infinite;
+}
+
+/**
+ * The sticky standing bar arriving from the bottom of the viewport once your own row scrolls away.
+ *
+ * Transform and opacity only, single-shot, and short enough not to delay reading the number.
+ */
+@keyframes strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-strip-in {
+  animation: strip-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* Respect reduced-motion for every transition in the app. */
 @media (prefers-reduced-motion: reduce) {
   *,

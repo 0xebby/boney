@@ -7,11 +7,12 @@ import {useAccount, useConnect, useDisconnect, useWalletClient} from "wagmi";
 import {BoneField, BoneyB} from "@/components/ui/Bone";
 import {RankBadge} from "@/components/ui/RankBadge";
 import {NavDrawer} from "@/components/ui/NavDrawer";
+import {NavLabel} from "@/components/ui/NavLabel";
 import {EthosMark} from "@/components/ui/EthosMark";
 import {usePromoterReputation} from "@/hooks/usePromoterReputation";
 import {useIsPromoter} from "@/hooks/useIsPromoter";
 import {useBoneyChainId} from "@/hooks/useBoneyChain";
-import {isActiveNav, navItems} from "@/lib/nav";
+import {isActiveNav, navItems, type NavItem} from "@/lib/nav";
 import {rankOf} from "@/lib/ranks";
 import {describeTxError} from "@/lib/txErrors";
 import {DEV_STUB_WALLET, canonicalStubAllowlistMessage} from "@/lib/stubWallets";
@@ -319,10 +320,10 @@ export function AppShell({children}: {children: ReactNode}) {
    * Label only, at `text-xs`: the six-item list a connected promoter sees is what used to overflow
    * the bar, and the glyphs cost width while naming nothing a reader could act on.
    *
-   * @param item The destination's href and label.
+   * @param item The destination's href, label and whether it is marked new.
    * @returns The link element, keyed by href.
    */
-  const navLink = ({href, label}: {href: string; label: string}) => {
+  const navLink = ({href, label, isNew}: NavItem) => {
     const active = isActiveNav(pathname, href);
     return (
       <Link
@@ -335,7 +336,7 @@ export function AppShell({children}: {children: ReactNode}) {
             : "text-ink-secondary hover:bg-surface-hover hover:text-ink"
         }`}
       >
-        {label}
+        <NavLabel label={label} isNew={isNew} />
       </Link>
     );
   };

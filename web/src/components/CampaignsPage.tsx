@@ -18,6 +18,7 @@ import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
 import {JoinCampaignMenu} from "@/components/ui/JoinCampaignMenu";
 import {CampaignFilters as CampaignFilterControls} from "@/components/CampaignFilters";
+import {LeaderboardTeaser} from "@/components/LeaderboardTeaser";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {WelcomeDialog} from "@/components/WelcomeDialog";
 import {welcomeFigure} from "@/lib/welcome";
@@ -288,6 +289,10 @@ export function CampaignsPage() {
             />
           )}
         </Card>
+
+        {/* Who is already earning, below the table rather than above it: the panel renders nothing
+            until the subgraph answers, so a slot here shifts only the docs link under it. */}
+        <LeaderboardTeaser />
 
         {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
             and not found what they came for is the one who wants an explanation, and the hero's job is
