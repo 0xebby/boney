@@ -34,7 +34,7 @@ export function LeaderboardTeaser() {
     <Card>
       <CardHeader
         title="Leaderboard"
-        subtitle="Points for verified actions"
+        subtitle="BoneyPoints for verified actions"
         action={
           <Link href="/leaderboard" className="text-xs font-medium text-brand hover:opacity-80">
             Full board →

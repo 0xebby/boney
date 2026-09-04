@@ -91,7 +91,7 @@ export function LeaderboardPage() {
       },
       {
         key: "points",
-        header: "Points",
+        header: "BoneyPoints",
         numeric: true,
         sortValue: (row) => row.total,
         render: (row) => (
@@ -158,7 +158,7 @@ export function LeaderboardPage() {
       {rows.length === 0 ? (
         <Card>
           <EmptyState
-            title="No points scored yet"
+            title="No BoneyPoints scored yet"
             description="Join a campaign or sign an attribution to open the board."
           />
         </Card>
@@ -184,7 +184,7 @@ export function LeaderboardPage() {
               hint="all-time"
             />
             <StatTile
-              label="Points awarded"
+              label="BoneyPoints awarded"
               value={compactNumber(totals.points)}
               hint={partial ? "at least" : "across the protocol"}
             />
@@ -197,7 +197,7 @@ export function LeaderboardPage() {
               label="Your rank"
               value={you ? `#${you.rank}` : "—"}
               qualifier={you ? `of ${rows.length}` : undefined}
-              hint={you ? `${you.total.toLocaleString("en-US")} points` : "not on the board yet"}
+              hint={you ? `${you.total.toLocaleString("en-US")} BoneyPoints` : "not on the board yet"}
             />
           </StatRow>
 
@@ -250,7 +250,7 @@ function Unavailable({
   if (expected) {
     return (
       <div className="flex flex-col gap-1.5 rounded border border-hairline bg-surface-2 p-3">
-        <p className="text-sm font-semibold text-ink">No points indexed here</p>
+        <p className="text-sm font-semibold text-ink">No BoneyPoints indexed here</p>
         <p className="text-xs text-ink-secondary">{unavailable.message}</p>
       </div>
     );
@@ -265,16 +265,13 @@ function Unavailable({
   );
 }
 
-/** The eyebrow, page title and its one line. Repeated across all three arms, so it is its own component. */
+/** The page title and its one line. Repeated across all three arms, so it is its own component. */
 function LeaderboardHeader() {
   return (
     <header className="animate-rise-in">
-      <p className="animate-blink mb-0.5 text-[9px] font-bold uppercase tracking-wider text-brand">
-        Now scoring
-      </p>
       <h1 className="font-display text-2xl text-ink">Boneyboard</h1>
       <p className="mt-0.5 text-xs text-ink-muted">
-        Points for verified actions, counted since the protocol went live.
+        BoneyPoints for verified actions, counted since the protocol went live.
       </p>
     </header>
   );
@@ -485,7 +482,7 @@ function EarningCard() {
 
   return (
     <Card>
-      <CardHeader title="Earning" subtitle="Every credited action is verified on chain" />
+      <CardHeader title="How points are calculated" subtitle="Every credited action is verified on-chain" />
       <ul className="flex flex-col divide-y divide-hairline">
         {rules.map((rule) => (
           <li key={rule.action} className="flex items-baseline justify-between gap-4 py-2 first:pt-0 last:pb-0">
