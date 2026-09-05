@@ -39,10 +39,13 @@ import {NextResponse, type NextRequest} from "next/server";
  */
 const ROUTE_SEGMENTS = new Set([
   "api",
+  "b",
   "campaign",
+  "card",
   "create",
   "discover",
   "docs",
+  "leaderboard",
   "my",
   "promoters",
   "r",

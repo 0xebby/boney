@@ -40,7 +40,7 @@ import {
 } from "viem";
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, BoneyAbi, AttributionRegistryAbi} from "../src/lib/abis";
-import {decodeEventSource, topicFilterArray, type EventSource} from "../src/lib/kpiSource";
+import {decodeEventSource, type EventSource} from "../src/lib/kpiSource";
 import {catalogSignature} from "../src/lib/eventNames";
 import {
   actorFromTopic,
@@ -49,8 +49,10 @@ import {
   decideReport,
   encodeActions,
   foldToLimit,
+  logRequest,
   logScanKey,
   type IndexedLog,
+  type RawLog,
 } from "../src/lib/indexerCore";
 import {
   attributionLookup,
@@ -125,6 +127,16 @@ const READ_CONCURRENCY = 300;
 const RPC_TIMEOUT = 60_000;
 
 /**
+ * Retries per request. A public endpoint rate-limits partway through a long pass rather than at its
+ * start, and the pass has no checkpoint of its own to resume from, so every request has to outlast
+ * the limiter's window.
+ */
+const RPC_RETRY_COUNT = 6;
+
+/** First backoff step, doubled per attempt: six retries wait about a minute in total. */
+const RPC_RETRY_DELAY = 1_000;
+
+/**
  * Fetches logs across a range the RPC will actually accept.
  *
  * @param client Chain to read from.
@@ -147,23 +159,21 @@ async function fetchLogs(
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
 
-    const logs = await client.getLogs({
-      address: source.source,
-      fromBlock: chunk.from,
-      toBlock: chunk.to,
-      // Filtered by the node, not here. These sources are busy contracts, and every non-matching
-      // log downloaded is payload the run pays for and then discards. A fixed-topic filter narrows
-      // the same request; `aggregateByActor` applies it again over whatever comes back.
-      topics: [source.topic0.toLowerCase() as Hex, ...topicFilterArray(source)],
-    });
+    // Filtered by the node, and sent raw to make sure of it: these sources are busy contracts, and
+    // every non-matching log downloaded is payload the run pays for and then discards.
+    // `aggregateByActor` applies both the signature and the filter again over whatever comes back.
+    const logs = (await client.request({
+      method: "eth_getLogs",
+      params: [logRequest(source.source, source.topic0, source, chunk.from, chunk.to)],
+    })) as RawLog[];
 
     harvestLogTimestamps(logs, timestamps);
 
     for (const log of logs) {
       matched.push({
-        topics: log.topics as readonly Hex[],
+        topics: log.topics,
         data: log.data,
-        blockNumber: log.blockNumber!,
+        blockNumber: BigInt(log.blockNumber),
       });
     }
   }
@@ -281,6 +291,8 @@ async function main(): Promise<void> {
     transport: http(rpcUrl, {
       timeout: RPC_TIMEOUT,
       batch: {batchSize: RPC_BATCH_SIZE, wait: 8},
+      retryCount: RPC_RETRY_COUNT,
+      retryDelay: RPC_RETRY_DELAY,
     }),
   }) as PublicClient;
 
@@ -300,7 +312,11 @@ async function main(): Promise<void> {
 
   const account = pk ? privateKeyToAccount(pk) : undefined;
   const wallet = account
-    ? createWalletClient({account, transport: http(rpcUrl), chain: publicClient.chain})
+    ? createWalletClient({
+        account,
+        transport: http(rpcUrl, {retryCount: RPC_RETRY_COUNT, retryDelay: RPC_RETRY_DELAY}),
+        chain: publicClient.chain,
+      })
     : undefined;
 
   console.log(`Chain ${chainId} at ${rpcUrl}`);

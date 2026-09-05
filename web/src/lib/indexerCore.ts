@@ -1,5 +1,11 @@
 import {getAddress, encodeAbiParameters, type Hex} from "viem";
-import {AMOUNT_MODE, effectiveScale, matchesTopicFilter, type EventSource} from "./kpiSource";
+import {
+  AMOUNT_MODE,
+  effectiveScale,
+  matchesTopicFilter,
+  topicFilterArray,
+  type EventSource,
+} from "./kpiSource";
 import type {AttributionLookup} from "./attributionWindows";
 
 /**
@@ -119,8 +125,15 @@ type RawTotals = Map<
  * on chain at all", where attribution is not the question. It is a required argument rather than an
  * optional one so that opting out is a visible decision at the call site instead of an omission.
  *
- * @param logs Matched logs for one KPI, in any order.
- * @param source Event source describing how to read an actor and an amount out of a log.
+ * ## The event is checked here, not assumed
+ *
+ * `topics[0]` is compared against the source's own signature, so a log of some other event the
+ * contract emits is skipped rather than read for an actor. Requesting one signature is not enough:
+ * viem's `getLogs` has no raw `topics` parameter, so an object passing one narrows nothing.
+ *
+ * @param logs Logs from the KPI's source contract, in any order.
+ * @param source Event source describing which event to keep, and how to read an actor and an amount
+ *               out of it.
  * @param attribution Per-action attribution, or null to keep every log.
  * @returns Per-referral totals keyed by lowercased address.
  */
@@ -134,6 +147,7 @@ export function aggregateByActor(
   const ordered = [...logs].sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : 1));
 
   for (const log of ordered) {
+    if (log.topics[0]?.toLowerCase() !== source.topic0.toLowerCase()) continue;
     if (!matchesTopicFilter(log, source)) continue;
 
     const referral = actorFromTopic(log, source.actorTopic);
@@ -453,6 +467,51 @@ export function logScanKey(source: EventSource, fromBlock: bigint, toBlock: bigi
     fromBlock,
     toBlock,
   ].join("|");
+}
+
+/** A log as `eth_getLogs` returns it, before its quantities are read. */
+export type RawLog = {
+  topics: readonly Hex[];
+  data: Hex;
+  blockNumber: Hex;
+  blockTimestamp?: Hex;
+};
+
+/** An `eth_getLogs` request parameter object, in the shapes the JSON-RPC method itself takes. */
+export type LogRequest = {
+  address: `0x${string}`;
+  fromBlock: Hex;
+  toBlock: Hex;
+  topics: (Hex | Hex[] | null)[];
+};
+
+/**
+ * Builds the `eth_getLogs` request for one event over one block range.
+ *
+ * Sent through `client.request` rather than viem's `getLogs`, whose parameters have no `topics`
+ * field — an object passing one is filtered by neither the node nor viem, and the watched contracts
+ * are busy enough that the difference is most of the payload.
+ *
+ * @param address Contract whose logs are wanted.
+ * @param topic0 Event signature hash to match.
+ * @param source Event source carrying the indexed-topic filter, or null when there is none.
+ * @param fromBlock First block of the range.
+ * @param toBlock Last block of the range.
+ * @returns The request's single parameter object.
+ */
+export function logRequest(
+  address: `0x${string}`,
+  topic0: Hex,
+  source: EventSource | null,
+  fromBlock: bigint,
+  toBlock: bigint,
+): LogRequest {
+  return {
+    address,
+    fromBlock: `0x${fromBlock.toString(16)}`,
+    toBlock: `0x${toBlock.toString(16)}`,
+    topics: [topic0.toLowerCase() as Hex, ...(source ? topicFilterArray(source) : [])],
+  };
 }
 
 /**
