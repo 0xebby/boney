@@ -348,7 +348,7 @@ prevent.
 
 ## Running the stack
 
-Generated files are generated: `web/src/lib/abis/*` comes from `pnpm abis` and
+`web/src/lib/abis/*` comes from `pnpm abis` and
 `web/src/lib/deployments.ts` from `pnpm deployments <chainId>`, read out of Foundry's broadcast
 artifacts. Neither is hand-edited, which is why live addresses are not written down anywhere.
 
