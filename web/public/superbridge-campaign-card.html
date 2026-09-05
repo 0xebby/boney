@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1240">
+<title>SuperBridge — Boneyard Campaign Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Boneyard tokens, lifted verbatim from web/src/app/globals.css. */
+:root {
+  color-scheme: dark;
+  --plane: #0a0a09;
+  --surface-1: #121110;
+  --surface-2: #1b1a17;
+  --surface-hover: #24221d;
+  --text-primary: #ffe9a3;
+  --text-secondary: #d6c489;
+  --text-muted: #9a8f63;
+  --brand: #ffc800;
+  --brand-dim: #b38c00;
+  --gridline: #2a2721;
+  --baseline: #3a352b;
+  --border: rgba(255, 200, 0, 0.14);
+  --border-strong: rgba(255, 200, 0, 0.28);
+  --status-good: #35c135;
+  --seq-100: #fdf0c4;
+  --seq-250: #f7d97a;
+  --seq-400: #e8b93d;
+  --seq-450: #d99e00;
+  --seq-550: #b07c00;
+  --seq-600: #8a6000;
+  --seq-700: #5c3f00;
+  --track: #2a2721;
+  --sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Bagel Fat One", "Space Grotesk", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 32px 24px 56px;
+  background:
+    radial-gradient(1100px 520px at 22% -12%, rgba(255, 200, 0, 0.07), transparent 62%),
+    var(--plane);
+  font-family: var(--sans);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  width: 1180px;
+  margin: 0 auto;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); }
+
+/* ── header ─────────────────────────────────────────────── */
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 26px 30px 24px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-dim);
+}
+
+.eyebrow .dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--brand-dim);
+}
+
+h1 {
+  margin: 9px 0 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1.04;
+  letter-spacing: 0.005em;
+  color: var(--brand);
+}
+
+.head .lede {
+  margin: 9px 0 0;
+  max-width: 56ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.head-right {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 11px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid rgba(53, 193, 53, 0.4);
+  border-radius: 999px;
+  background: rgba(53, 193, 53, 0.09);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--status-good);
+}
+
+.pill .beacon {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-good);
+  box-shadow: 0 0 0 3px rgba(53, 193, 53, 0.18);
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 3px 14px;
+  font-size: 11px;
+  text-align: right;
+}
+
+.meta dt { color: var(--text-muted); }
+.meta dd { margin: 0; color: var(--text-secondary); }
+
+/* ── headline figures ───────────────────────────────────── */
+.figures {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border-bottom: 1px solid var(--border);
+}
+
+.figure {
+  padding: 20px 22px 18px;
+  border-right: 1px solid var(--border);
+}
+
+.figure:last-child { border-right: 0; }
+
+.figure .label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.figure .value {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 34px;
+  line-height: 1;
+  color: var(--brand);
+}
+
+.figure .unit {
+  margin-left: 5px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.figure .hint {
+  display: block;
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* ── escrow bar ─────────────────────────────────────────── */
+.escrow {
+  padding: 18px 30px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.escrow-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.escrow h2 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--brand);
+}
+
+.escrow .split {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.escrow .split b { color: var(--text-primary); font-weight: 600; }
+
+.bar {
+  height: 9px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+  display: flex;
+}
+
+.bar > span { height: 100%; }
+
+.legend {
+  display: flex;
+  gap: 20px;
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: baseline;
+}
+
+/* ── sections and tables ────────────────────────────────── */
+.section { padding: 22px 30px 24px; border-bottom: 1px solid var(--border); }
+.section:last-of-type { border-bottom: 0; }
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.section-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--brand);
+}
+
+.section-head p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+table { width: 100%; border-collapse: collapse; }
+
+thead th {
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--baseline);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+}
+
+thead th.num, tbody td.num { text-align: right; }
+
+tbody td {
+  padding: 11px 10px;
+  border-bottom: 1px solid var(--gridline);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr.quiet td { color: var(--text-muted); }
+
+td .addr {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-primary);
+}
+
+tbody tr.quiet td .addr { color: var(--text-secondary); }
+
+td .rankmark {
+  display: inline-block;
+  width: 15px;
+  margin-right: 7px;
+  color: var(--brand);
+  font-size: 12px;
+}
+
+td b { color: var(--text-primary); font-weight: 600; }
+td .paid { color: var(--brand); font-weight: 600; }
+td .zero { color: var(--text-muted); }
+
+.meter {
+  display: block;
+  width: 100%;
+  max-width: 120px;
+  height: 4px;
+  margin: 5px 0 0 auto;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.meter > span { display: block; height: 100%; border-radius: 999px; }
+
+.tag {
+  display: inline-block;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── KPI ladder cards ───────────────────────────────────── */
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+.kpi {
+  padding: 16px 17px 17px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+
+.kpi.dormant { background: var(--surface-1); }
+
+.kpi-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.kpi h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.kpi .count {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--brand);
+}
+
+.kpi.dormant .count { color: var(--text-muted); }
+
+.kpi .watches {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.kpi .watches .addr {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.ladder { margin-top: 13px; display: flex; flex-direction: column; gap: 6px; }
+
+.rung {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.rung .box {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border: 1px solid var(--baseline);
+  border-radius: 2px;
+}
+
+.rung.hit { color: var(--text-secondary); }
+.rung.hit .box { background: var(--seq-450); border-color: var(--seq-450); }
+.rung .reward { margin-left: auto; font-variant-numeric: tabular-nums; }
+.rung.hit .reward { color: var(--brand); font-weight: 600; }
+
+/* ── roster ─────────────────────────────────────────────── */
+.roster { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 26px; }
+
+.roster-col table { width: 100%; }
+
+/* ── footer ─────────────────────────────────────────────── */
+footer {
+  padding: 18px 30px 22px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+footer h2 {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--brand-dim);
+}
+
+.prov {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 5px 16px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.prov dt { color: var(--text-muted); }
+.prov dd { margin: 0; color: var(--text-secondary); }
+.prov dd .addr { font-family: var(--mono); font-size: 10.5px; color: var(--text-primary); }
+
+.mark {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 15px;
+  padding-top: 13px;
+  border-top: 1px solid var(--gridline);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mark .wordmark {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 17px;
+  color: var(--brand);
+}
+
+/* ── this card only: the payout figure is six digits wide ── */
+.figure.tight .value { font-size: 28px; }
+
+/* ── a plain note, for a finding that is not a table ── */
+.note {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--seq-450);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.note b { color: var(--text-primary); font-weight: 600; }
+
+</style>
+</head>
+<body>
+<main class="card">
+<header class="head">
+  <div>
+    <div class="eyebrow">
+      <span>Boneyard campaign report</span>
+      <span class="dot"></span>
+      <span>Base Sepolia</span>
+      <span class="dot"></span>
+      <span>Campaign #2</span>
+    </div>
+    <h1>SuperBridge</h1>
+    <p class="lede">
+      Five promoters brought seventeen wallets onto SuperBridge, and 1,100 verified deposits and
+      withdrawals followed &mdash; 13.2 WETH of volume behind them, and 450,000 bUSD already released
+      from escrow. Every figure below is read from the campaign contract itself.
+    </p>
+  </div>
+  <div class="head-right">
+    <span class="pill"><span class="beacon"></span>Active</span>
+    <dl class="meta">
+      <dt>Opened</dt><dd>30 Aug 2026</dd>
+      <dt>Closes</dt><dd>30 Sep 2026</dd>
+      <dt>Attribution</dt><dd>30-day window</dd>
+      <dt>Promoter gate</dt><dd>5,000 BoneyScore</dd>
+    </dl>
+  </div>
+</header>
+
+<section class="figures">
+  <div class="figure">
+    <span class="label">Promoters</span>
+    <span class="value tnum">5</span>
+    <span class="hint">joined and holding a promoter id</span>
+  </div>
+  <div class="figure">
+    <span class="label">Referrals</span>
+    <span class="value tnum">17</span>
+    <span class="hint">wallets signed to a promoter, all live</span>
+  </div>
+  <div class="figure">
+    <span class="label">Credited actions</span>
+    <span class="value tnum">1,100</span>
+    <span class="hint">550 deposits and 550 withdrawals</span>
+  </div>
+  <div class="figure">
+    <span class="label">Volume</span>
+    <span class="value tnum">13.20<span class="unit">WETH</span></span>
+    <span class="hint">deposited by referred wallets</span>
+  </div>
+  <div class="figure tight">
+    <span class="label">Paid out</span>
+    <span class="value tnum">450,000<span class="unit">bUSD</span></span>
+    <span class="hint">settled to promoters, on chain</span>
+  </div>
+</section>
+
+<section class="escrow">
+  <div class="escrow-top">
+    <h2>Escrow</h2>
+    <span class="split"><b>450,000</b> of <b>1,000,000 bUSD</b> released &mdash; 45% of the pool</span>
+  </div>
+  <div class="bar">
+    <span style="width: 45%; background: var(--seq-450);"></span>
+    <span style="width: 55%; background: var(--seq-700);"></span>
+  </div>
+  <div class="legend">
+    <span><i style="background: var(--seq-450);"></i>Paid to promoters &middot; 450,000 bUSD</span>
+    <span><i style="background: var(--seq-700);"></i>Still escrowed &middot; 550,000 bUSD</span>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <h2>Promoters</h2>
+    <p>Ordered by bUSD earned. Every count is the promoter&rsquo;s credited progress, summed across their referrals.</p>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Promoter</th>
+        <th class="num">BoneyScore<br><span style="font-weight:400;letter-spacing:0.04em;text-transform:none">at join</span></th>
+        <th class="num">Referrals</th>
+        <th class="num">Deposits</th>
+        <th class="num">Withdrawals</th>
+        <th class="num">Volume<br><span style="font-weight:400;letter-spacing:0.04em;text-transform:none">WETH</span></th>
+        <th class="num">Earned</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="addr">0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8</span></td>
+        <td class="num tnum">24,620</td>
+        <td class="num tnum"><b>6</b></td>
+        <td class="num tnum"><b>219</b><span class="meter"><span style="width: 100%; background: var(--seq-400);"></span></span></td>
+        <td class="num tnum"><b>219</b><span class="meter"><span style="width: 100%; background: var(--seq-400);"></span></span></td>
+        <td class="num tnum"><b>4.92</b><span class="meter"><span style="width: 100%; background: var(--seq-400);"></span></span></td>
+        <td class="num tnum paid">150,000 bUSD</td>
+      </tr>
+      <tr>
+        <td><span class="addr">0x450E4775967AC00657A35eAe13A7a4caA06760A0</span></td>
+        <td class="num tnum">24,522</td>
+        <td class="num tnum"><b>4</b></td>
+        <td class="num tnum"><b>165</b><span class="meter"><span style="width: 75%; background: var(--seq-450);"></span></span></td>
+        <td class="num tnum"><b>165</b><span class="meter"><span style="width: 75%; background: var(--seq-450);"></span></span></td>
+        <td class="num tnum"><b>4.20</b><span class="meter"><span style="width: 85%; background: var(--seq-450);"></span></span></td>
+        <td class="num tnum paid">150,000 bUSD</td>
+      </tr>
+      <tr>
+        <td><span class="addr">0x1Ed6E96eE267325560FB7D2c1fba20021E95Baac</span></td>
+        <td class="num tnum">18,116</td>
+        <td class="num tnum"><b>3</b></td>
+        <td class="num tnum"><b>165</b><span class="meter"><span style="width: 75%; background: var(--seq-550);"></span></span></td>
+        <td class="num tnum"><b>165</b><span class="meter"><span style="width: 75%; background: var(--seq-550);"></span></span></td>
+        <td class="num tnum"><b>4.08</b><span class="meter"><span style="width: 83%; background: var(--seq-550);"></span></span></td>
+        <td class="num tnum paid">150,000 bUSD</td>
+      </tr>
+      <tr>
+        <td><span class="addr">0xc27a65590409a88e4722Ba53895D111EA3b3cd44</span></td>
+        <td class="num tnum">12,816</td>
+        <td class="num tnum"><b>4</b></td>
+        <td class="num tnum"><b>1</b><span class="meter"><span style="width: 2%; background: var(--seq-600);"></span></span></td>
+        <td class="num tnum"><b>1</b><span class="meter"><span style="width: 2%; background: var(--seq-600);"></span></span></td>
+        <td class="num tnum zero">0</td>
+        <td class="num tnum"><span class="tag">no rung cleared</span></td>
+      </tr>
+      <tr class="quiet">
+        <td><span class="addr">0xc7dF188878C319c46294b6C655865Ca999375c5f</span></td>
+        <td class="num tnum">24,417</td>
+        <td class="num tnum">0</td>
+        <td class="num tnum">0</td>
+        <td class="num tnum">0</td>
+        <td class="num tnum">0</td>
+        <td class="num tnum"><span class="tag">joined 4 Sep</span></td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="note">
+    The three promoters at the top have cleared <b>every rung of every ladder</b> &mdash; 150,000 bUSD
+    each, the most this campaign can pay one promoter. Their deposit counts sit at 165 to 219 against a
+    top rung of 100, so further activity from their referrals is credited on chain but earns nothing
+    until new tiers are added.
+  </p>
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <h2>What the campaign counts</h2>
+    <p>Three KPIs, all reading Base Sepolia&rsquo;s canonical WETH predeploy. Every rung pays the promoter who cleared it.</p>
+  </div>
+  <div class="kpis">
+
+    <div class="kpi">
+      <div class="kpi-top">
+        <h3>Deposits</h3>
+        <span class="count tnum">550</span>
+      </div>
+      <p class="watches">
+        <span class="addr">0x4200&hellip;0006</span> &mdash; WETH, Base&rsquo;s canonical predeploy<br>
+        <code style="font-family: var(--mono); font-size: 10.5px;">Deposit(&hellip;)</code>, one credit per log, keyed on the depositing wallet
+      </p>
+      <div class="ladder">
+        <div class="rung hit"><span class="box"></span>25 deposits<span class="reward">5,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>50 deposits<span class="reward">10,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>75 deposits<span class="reward">15,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>100 deposits<span class="reward">20,000 bUSD &middot; 3&times;</span></div>
+      </div>
+    </div>
+
+    <div class="kpi">
+      <div class="kpi-top">
+        <h3>Withdrawals</h3>
+        <span class="count tnum">550</span>
+      </div>
+      <p class="watches">
+        <span class="addr">0x4200&hellip;0006</span> &mdash; WETH, the same predeploy<br>
+        <code style="font-family: var(--mono); font-size: 10.5px;">Withdrawal(&hellip;)</code>, one credit per log, keyed on the withdrawing wallet
+      </p>
+      <div class="ladder">
+        <div class="rung hit"><span class="box"></span>25 withdrawals<span class="reward">5,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>50 withdrawals<span class="reward">10,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>75 withdrawals<span class="reward">15,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>100 withdrawals<span class="reward">20,000 bUSD &middot; 3&times;</span></div>
+      </div>
+    </div>
+
+    <div class="kpi">
+      <div class="kpi-top">
+        <h3>Deposit volume</h3>
+        <span class="count tnum">13.20</span>
+      </div>
+      <p class="watches">
+        <span class="addr">0x4200&hellip;0006</span> &mdash; WETH, the same predeploy<br>
+        <code style="font-family: var(--mono); font-size: 10.5px;">Deposit(&hellip;)</code>, summing the amount rather than counting logs &mdash; 0.01 WETH per credited unit
+      </p>
+      <div class="ladder">
+        <div class="rung hit"><span class="box"></span>0.10 WETH<span class="reward">5,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>0.20 WETH<span class="reward">10,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>0.30 WETH<span class="reward">15,000 bUSD &middot; 3&times;</span></div>
+        <div class="rung hit"><span class="box"></span>0.40 WETH<span class="reward">20,000 bUSD &middot; 3&times;</span></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <h2>Referrals</h2>
+    <p>Seventeen wallets signed an attribution to a promoter. All seventeen are still inside their 30-day window &mdash; the earliest expires 29 September, a day before the campaign closes.</p>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Referral wallet</th>
+        <th>Signed</th>
+        <th class="num">Deposits</th>
+        <th class="num">Withdrawals</th>
+        <th class="num">Volume<br><span style="font-weight:400;letter-spacing:0.04em;text-transform:none">WETH</span></th>
+        <th>Attributed to</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><span class="addr">0x3fdcedebf2119a7342547472f1679d67e555a2a3</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.52</b></td><td class="mono" style="font-size: 11px;">0x9840&hellip;b2f8</td></tr>
+      <tr><td><span class="addr">0x79c963ad6e0bda1a0826dd4f2d10a0dfcb0fa2ac</span></td><td>30 Aug</td><td class="num tnum"><b>54</b></td><td class="num tnum"><b>54</b></td><td class="num tnum"><b>1.51</b></td><td class="mono" style="font-size: 11px;">0x9840&hellip;b2f8</td></tr>
+      <tr><td><span class="addr">0x314464cf0ac30168881b1b20cac8099982d335d1</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.47</b></td><td class="mono" style="font-size: 11px;">0x450E&hellip;60A0</td></tr>
+      <tr><td><span class="addr">0x3f790301a643a8770df82bfc5bcb89389cac6191</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.45</b></td><td class="mono" style="font-size: 11px;">0x1Ed6&hellip;Baac</td></tr>
+      <tr><td><span class="addr">0x5ae96df858ed87f98a34b177bd306c829316e727</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.39</b></td><td class="mono" style="font-size: 11px;">0x450E&hellip;60A0</td></tr>
+      <tr><td><span class="addr">0x0c99648d97915001db71ab2e74acf4cfa4bb06b7</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.36</b></td><td class="mono" style="font-size: 11px;">0x1Ed6&hellip;Baac</td></tr>
+      <tr><td><span class="addr">0x3a49b254ff5cfba10185ac7e7d92c1005a22eea1</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.34</b></td><td class="mono" style="font-size: 11px;">0x450E&hellip;60A0</td></tr>
+      <tr><td><span class="addr">0xebb868cf46f55766cc31b72bfa7dbd7b8d07f4c3</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.34</b></td><td class="mono" style="font-size: 11px;">0x9840&hellip;b2f8</td></tr>
+      <tr><td><span class="addr">0x73776691bc25b1860664b644a110d86c1afa86ad</span></td><td>30 Aug</td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>55</b></td><td class="num tnum"><b>1.27</b></td><td class="mono" style="font-size: 11px;">0x1Ed6&hellip;Baac</td></tr>
+      <tr><td><span class="addr">0x98bef22956549f6ab41db8828db539c185ea3f1b</span></td><td>30 Aug</td><td class="num tnum"><b>28</b></td><td class="num tnum"><b>28</b></td><td class="num tnum"><b>0.28</b></td><td class="mono" style="font-size: 11px;">0x9840&hellip;b2f8</td></tr>
+      <tr><td><span class="addr">0x5a597273ee3312116abcc6b4824d6be89448055c</span></td><td>30 Aug</td><td class="num tnum"><b>27</b></td><td class="num tnum"><b>27</b></td><td class="num tnum"><b>0.27</b></td><td class="mono" style="font-size: 11px;">0x9840&hellip;b2f8</td></tr>
+      <tr><td><span class="addr">0xe94c77df556d5d53ffc0b123e465ff0916f74884</span></td><td>31 Aug</td><td class="num tnum"><b>1</b></td><td class="num tnum"><b>1</b></td><td class="num tnum zero">0</td><td class="mono" style="font-size: 11px;">0xc27a&hellip;cd44</td></tr>
+      <tr class="quiet"><td><span class="addr">0x0b5bfad00beef6793cbdd0a7d63dd245996bc422</span></td><td>30 Aug</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="mono" style="font-size: 11px;">0x9840&hellip;b2f8</td></tr>
+      <tr class="quiet"><td><span class="addr">0xd572ab30163c4e7ae7c186ec016e3bd0686e4958</span></td><td>30 Aug</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="mono" style="font-size: 11px;">0x450E&hellip;60A0</td></tr>
+      <tr class="quiet"><td><span class="addr">0x3ce2660eefb9940c72120428c73d866e7fb60e5a</span></td><td>30 Aug</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="mono" style="font-size: 11px;">0xc27a&hellip;cd44</td></tr>
+      <tr class="quiet"><td><span class="addr">0x98405c5776a63547e7cb16000ba04ca53d9fb2f8</span> <span class="tag">promoter</span></td><td>30 Aug</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="mono" style="font-size: 11px;">0xc27a&hellip;cd44</td></tr>
+      <tr class="quiet"><td><span class="addr">0xc27a65590409a88e4722ba53895d111ea3b3cd44</span> <span class="tag">self</span></td><td>31 Aug</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="num tnum">0</td><td class="mono" style="font-size: 11px;">0xc27a&hellip;cd44</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <h2>Where these numbers come from</h2>
+  <dl class="prov">
+    <dt>Campaign contract</dt>
+    <dd><span class="addr">0x0a01B03EBaCBb553AD5b269297921F32D261C45F</span></dd>
+    <dt>Project wallet</dt>
+    <dd><span class="addr">0xba954e89ce301415964e9405f09f4cc7c668976a</span></dd>
+    <dt>Escrow token</dt>
+    <dd>bUSD &mdash; &ldquo;Boney Test USD&rdquo;, the testnet stablecoin &middot; <span class="addr">0x2755562471B5f6239722ab164d126260F4D8dCc2</span></dd>
+    <dt>Watched contract</dt>
+    <dd>WETH &middot; <span class="addr">0x4200000000000000000000000000000000000006</span></dd>
+    <dt>Network</dt>
+    <dd>Base Sepolia &middot; chain 84532</dd>
+    <dt>Read at</dt>
+    <dd>Block 46,361,334 &mdash; 4 Sep 2026, 03:02 UTC</dd>
+    <dt>Method</dt>
+    <dd>
+      Every count and payout is <span class="addr">totalProgress</span>,
+      <span class="addr">progressOf</span>, <span class="addr">settledTiersOf</span> and
+      <span class="addr">paidOut</span> read straight off the campaign contract, then cross-checked
+      against the Boneyard subgraph&rsquo;s 81 independent credit events. The two agree exactly, to the
+      credit, and the settled rungs add up to the 450,000 bUSD the contract says it has paid.
+    </dd>
+    <dt>How a credit lands</dt>
+    <dd>
+      Only the project or the oracle coordinator may report, and the contract credits nothing but the
+      increase over a wallet&rsquo;s last total &mdash; a replay is a no-op and a lower total reverts. Which
+      promoter earns it is resolved against the attribution registry at report time, and a wallet that
+      changed promoter mid-span is refused rather than guessed at.
+    </dd>
+  </dl>
+  <div class="mark">
+    <span class="wordmark">boneyard</span>
+    <span>Escrowed, performance-based campaigns &mdash; the contract pays the promoter when the chain says they earned it.</span>
+  </div>
+</footer>
+</main>
+</body>
+</html>

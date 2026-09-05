@@ -11,7 +11,7 @@ export type BlockTimestamps = Map<bigint, bigint>;
 
 /** A log as the node returned it, before its fields are read. */
 export type TimestampedLog = {
-  blockNumber?: bigint | null;
+  blockNumber?: bigint | number | string | null;
   blockTimestamp?: bigint | number | string | null;
 };
 

@@ -66,7 +66,7 @@ web/.data/
 # are a working recipe for standing up a funded campaign and moving its KPIs without anyone doing the
 # work: `fund-test-wallets.ts` sends testnet ETH and ERC-20s out of the attestor key, the two seeds
 # create and fund campaigns, and the rest emit the exact event a KPI credits — a WETH deposit, a Sygma
-# GMP deposit, a Uniswap V3 swap, an approve→fund→activate driven through the UI.
+# GMP deposit, a Uniswap V3 swap, a GYND stake, an approve→fund→activate driven through the UI.
 #
 # No secret is involved; the only embedded keys are the well-known Anvil accounts. What should not be
 # public is the recipe. The protocol's own two reporting halves stay tracked — `indexer.ts` and
@@ -83,6 +83,7 @@ web/scripts/drive-event-kpi.mjs
 web/scripts/sygma-deposit.ts
 web/scripts/uniswap-swap.ts
 web/scripts/gyndore-swap.ts
+web/scripts/gyndore-stake.ts
 
 # Every .md except the one GitHub renders on the repo page. The rest is working material — the
 # protocol spec, internal reviews, plans, launch notes, agent instructions — and this repo is public.

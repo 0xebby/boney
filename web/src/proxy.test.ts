@@ -29,12 +29,25 @@ describe("proxy", () => {
     expect(locationOf("/DOCS")).toBe("/docs");
   });
 
-  it.each(["/Discover", "/Create", "/My", "/Promoters", "/Campaign/12"])(
-    "repairs %s, since every route is typeable, not just /docs",
-    (path) => {
-      expect(locationOf(path)).toBe(path.toLowerCase());
-    },
-  );
+  it.each([
+    "/Discover",
+    "/Create",
+    "/My",
+    "/Card",
+    "/Promoters",
+    "/Leaderboard",
+    "/Campaign/12",
+  ])("repairs %s, since every route is typeable, not just /docs", (path) => {
+    expect(locationOf(path)).toBe(path.toLowerCase());
+  });
+
+  /**
+   * The share surface is the one route that arrives typed or pasted rather than clicked, so a
+   * capitalised `/B` is the likeliest miscasing of all — and the wallet after it must survive.
+   */
+  it("repairs the shared card's segment without touching the wallet", () => {
+    expect(locationOf("/B/0xAbCdEf0123")).toBe("/b/0xAbCdEf0123");
+  });
 
   it("leaves a correctly cased route alone rather than redirecting it in a loop", () => {
     expect(locationOf("/docs")).toBeNull();

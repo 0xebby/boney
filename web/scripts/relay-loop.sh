@@ -24,8 +24,8 @@ INTERVAL="${1:-120}"
 #
 # Only the **gated** KPIs belong here. Relaying an ungated one is pointless: with `verifier == 0x0` the
 # campaign credits the reported figure as-is, so there is no ceiling to raise. Venus, Sdy Labs and
-# SuperBridge are ungated throughout and never belong here; Gyndore gates all three of its KPIs, so its
-# three entries are the whole list. The empty-list branch below stays for a fixture reseed, where a
+# SuperBridge are ungated throughout and never belong here; Gyndore and Uniswap gate all three of
+# theirs, so those six are the whole list. The empty-list branch below stays for a fixture reseed, where a
 # stale address must be removed before the new one exists.
 #
 # Addresses change with every `DeployBoney` + reseed, and a stale one is silent: the relayer reports
@@ -34,13 +34,18 @@ INTERVAL="${1:-120}"
 # Keep any KPI that watches the escrow token *out* of this list. Its `Transfer` events include things
 # that are not user actions — the referral's own self-transfers, tier payouts leaving the EscrowVault,
 # the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
-# observed ceiling, which unlocks the next tier, which pays out again. Gyndore pays in GYND and no
-# Gyndore KPI watches GYND's `Transfer`, so its three are safe to list.
+# observed ceiling, which unlocks the next tier, which pays out again. Both campaigns below pay in a
+# token none of their own KPIs watch — Gyndore in GYND, Uniswap in bUSD against pool, USDC and WETH
+# events — so all six are safe to list.
 TARGETS=(
   # Gyndore Testnet, seeded 2026-08-31: swaps, GYND stakes, LP mints.
   0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:0
   0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:1
   0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:2
+  # Uniswap, seeded 2026-09-04: pool swaps, USDC volume into the pool, WETH deposits.
+  0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b:0
+  0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b:1
+  0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b:2
 )
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then

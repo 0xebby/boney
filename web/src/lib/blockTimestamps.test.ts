@@ -29,6 +29,12 @@ describe("harvestLogTimestamps", () => {
     expect(into.get(BigInt(7))).toBe(BigInt(1014));
   });
 
+  it("reads a hex-quantity block number, as a raw eth_getLogs result carries it", () => {
+    const into: BlockTimestamps = new Map();
+    harvestLogTimestamps([{blockNumber: "0x2c0b2ea", blockTimestamp: "0x3f6"}], into);
+    expect(into.get(BigInt(46_183_146))).toBe(BigInt(1014));
+  });
+
   it("reads a decimal-string and a number timestamp", () => {
     const into: BlockTimestamps = new Map();
     harvestLogTimestamps(

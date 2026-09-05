@@ -40,13 +40,8 @@ import {
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, EventMetricKpiVerifierAbi, AttributionRegistryAbi} from "../src/lib/abis";
 import {getDeployment} from "../src/lib/chains";
-import {
-  decodeEventSource,
-  matchesTopicFilter,
-  topicFilterArray,
-  type EventSource,
-} from "../src/lib/kpiSource";
-import {blockChunks} from "../src/lib/indexerCore";
+import {decodeEventSource, matchesTopicFilter, type EventSource} from "../src/lib/kpiSource";
+import {blockChunks, logRequest, type RawLog} from "../src/lib/indexerCore";
 import {
   attributionLookup,
   buildAttributionWindows,
@@ -162,23 +157,19 @@ async function fetchLogs(
 
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
-    const logs = await client.getLogs({
-      address,
-      fromBlock: chunk.from,
-      toBlock: chunk.to,
-      topics: [
-        topic0.toLowerCase() as Hex,
-        ...(source ? topicFilterArray(source) : []),
-      ],
-    });
+    // Sent raw rather than through viem's `getLogs`, whose parameters have no `topics` field: this
+    // is what makes the node do the narrowing. What comes back is checked again below.
+    const logs = (await client.request({
+      method: "eth_getLogs",
+      params: [logRequest(address, topic0, source, chunk.from, chunk.to)],
+    })) as RawLog[];
 
     harvestLogTimestamps(logs, timestamps);
 
     for (const log of logs) {
       if (log.topics[0]?.toLowerCase() !== topic0.toLowerCase()) continue;
       if (source && !matchesTopicFilter(log, source)) continue;
-      if (log.blockNumber === null) continue;
-      out.push({topics: log.topics, data: log.data, blockNumber: log.blockNumber});
+      out.push({topics: log.topics, data: log.data, blockNumber: BigInt(log.blockNumber)});
     }
   }
   if (chunks.length > 0) progressDone();
