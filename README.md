@@ -1,31 +1,25 @@
-# Boney
+# Boneyard
 
-**Escrow and verification for performance-based collaborations.**
+**marketplace for verifiable web3 growth**
 
 A project locks a reward pool in a vault, declares what counts as progress, and the vault pays
-promoters automatically as verified, attributed progress crosses thresholds. Nobody approves a payout.
-Nobody can move the goalposts after the work is done.
+promoters automatically as verified, attributed progress crosses thresholds. 
 
-The first application is a KOL marketplace — projects hiring creators to drive on-chain activity — but
-nothing in the contracts knows about marketing. A campaign is "escrow + a measurable objective + a
-payout ladder", which is also the shape of a grant milestone, a bug bounty, an affiliate program and a
-gaming quest.
+Nobody needs to approves a payout. Nobody can move the goalposts after the work is done.
 
-Foundry contracts at the repo root, a Next 16 app in `web/`, and two reporting processes — the
-project's indexer and Boney's relayer — that feed every KPI number to the chain.
 
 ## What it replaces
 
 Web3 growth deals settle on trust and screenshots. Each failure is replaced with a mechanism rather
 than a policy:
 
-| Instead of | Boney uses |
+| Instead of | Boneyard uses |
 |---|---|
 | Paying upfront for promises | Escrow that releases only against verified progress |
 | Metrics reported by the party being judged on them | Cumulative on-chain reports, capped at an independent observer's reading |
 | Claimed attribution | Attribution the end user signs, which expires |
 | Handing over social accounts to qualify | Attested numeric reputation — the chain stores `(wallet, schemaId) => number` |
-| Waiting on manual approval | Settlement inline, in the same transaction as the report |
+| Waiting on manual approval | Auto-settlement, in the same transaction as the report |
 
 ## The core loop
 
@@ -55,14 +49,12 @@ than a policy:
 ```
 
 Step 6 is one transaction. There is no separate claim step: settlement runs inline at the end of every
-crediting report, so by the time anyone calls the public `settle`, the ladder is already caught up. That
-entry point is permissionless and correct, but dormant by construction.
+crediting report, so by the time anyone calls the public `settle`, the ladder is already caught up.
 
 ## Architecture
 
 Ten deployed contracts in three tiers: a facade nobody has to use, six protocol modules, and three KPI
-verification adapters. `Campaign` is the eleventh, deployed per campaign by the registry rather than
-once at setup.
+verification adapters. `Campaign` is the eleventh, deployed per campaign.
 
 ```
                       ┌───────────────────────────────┐
@@ -103,7 +95,7 @@ once at setup.
 | Contract | Responsibility |
 |---|---|
 | `Campaign` | One per campaign. Immutable config, KPIs and tiers; resolves attribution, credits deltas, walks the tier ladder inline |
-| `CampaignRegistry` | Factory, directory, and the vault's registrar — the only account that may bind a campaign to a token. Enforces name uniqueness |
+| `CampaignRegistry` | Factory, directory, and the vault's registrar — the only account that may bind a campaign to a token. Enforces project name uniqueness |
 | `EscrowVault` | Custody only. Tracks `campaign => (token, balance)` on an internal ledger; only a campaign spends its own entry |
 | `AttributionRegistry` | One live touch per `(campaign, user)` plus the full history, so a report resolves who held a wallet at each action's block |
 | `ReputationRegistry` | `(wallet, schemaId) => (value, updatedAt)`, and a weighted score over the fresh ones |
@@ -114,8 +106,6 @@ once at setup.
 | `TouchWindowVerifier` | Stateless attribution-timing lens, for off-chain window reads. **Not** to be wired as a KPI's verifier |
 | `Boney` | Facade. Resolves ids, batches approvals, assembles paginated views. Holds no funds and no privileged role |
 
-The facade being untrusted is load-bearing: because no module trusts it, replacing it — or running
-several in parallel for different frontends — needs no migration of escrow or campaign state.
 
 There is deliberately no protocol-wide owner that can touch escrow. `EscrowVault`'s only authority is
 binding a campaign to a token; the governor and the schema registrar are governance over *scoring* and
@@ -140,23 +130,26 @@ struct RewardTier { uint256 threshold; uint256 reward; }
 ```
 
 `kind` is a label for the UI; what a KPI actually *means* is its `params` event source and its verifier.
-A `Custom` KPI must name one (`CustomKpiNeedsVerifier`). Tiers are per-promoter, per-KPI, with strictly
-ascending thresholds, at most `MAX_TIERS_PER_KPI = 32` each.
+
+A `Custom` KPI must name one (`CustomKpiNeedsVerifier`). 
+
+Tiers are per-promoter, per-KPI, with strictly ascending thresholds, at most `MAX_TIERS_PER_KPI = 32` each.
 
 **Reports are cumulative.** `reportUserAction(kpiIndex, user, newTotal, evidence)` states a user's
 running total, not a delta, so a replayed or duplicated report is a no-op: the campaign credits
-`newTotal - alreadyCredited` and returns early when that is zero. Evidence is `Types.Action[]`
+`newTotal - alreadyCredited` and returns early when that is zero. 
+
+Evidence is `Types.Action[]`
 (`{blockNumber, timestamp, amount}`) in ascending block order, bounded by `MAX_EVIDENCE_ACTIONS = 256`,
 so each action is attributed at its own block rather than all of them at report time.
 
 Settlement then walks the ladder in the same transaction and releases from the vault directly to the
-promoter. Rewards draw from one shared pool, first-come. If the pool cannot cover a crossed tier the
-campaign pays what remains and emits `PoolExhausted(shortfall)` — it never reverts, because reverting
+promoter. 
+
+Rewards draw from one shared pool, first-come. If the pool cannot cover a crossed tier the
+campaign pays what remains and emits `PoolExhausted(shortfall)`, it never reverts, because reverting
 would let one exhausted tier block reporting for everybody. `paidOut <= rewardPool` holds by
 construction.
-
-Aggregate KPIs (TVL, volume) have no per-user proof, so they advance campaign totals for display and
-pay nobody.
 
 ## Verification
 
@@ -165,9 +158,10 @@ enforces is that a project's claim is capped at an independent observer's readin
 
 **A verifier may only ever shrink a claim.** `Campaign` reverts `VerifierOvercredit(credited, max)` on
 any adapter returning more than was claimed, independently of what the adapter does. So a malicious or
-buggy adapter cannot mint progress — and it cannot redirect the payee either: it can deny a promoter a
-delta they did not earn, but not award that delta to whoever did. The uncredited portion stays
-uncredited, and a corrected report can land later.
+buggy adapter cannot mint progress and it cannot redirect the payee either: it can deny a promoter a
+delta they did not earn, but not award that delta to whoever did. 
+
+The uncredited portion stays uncredited, and a corrected report can land later.
 
 A campaign should point `KpiSpec.verifier` at `GuardedKpiVerifier`. It **always** computes Boney's value
 from `EventMetricKpiVerifier`, and optionally cross-checks a second verifier per KPI:
@@ -180,9 +174,10 @@ CAP:    return min(projectValue, boneyValue)
 AGREE:  revert VerifierDisagreement(...) past toleranceBps, else return boneyValue
 ```
 
-`AGREE` is for a project independently measuring the *same* quantity — divergence past tolerance should
-surface as an actionable error, not quietly take the smaller number. `CAP` is for layering a stricter
-lens on a *different* quantity, where every legitimate report would diverge by construction. Both fail
+`AGREE` is for a project independently measuring the *same* quantity  divergence past tolerance should
+surface as an actionable error, not quietly take the smaller number. 
+
+`CAP` on the other hand is for layering a stricter lens on a *different* quantity, where every legitimate report would diverge by construction. Both fail
 closed: an unconfigured KPI reverts `NotConfigured(campaign, kpiIndex)` rather than passing ungated.
 
 ### Two keys, two processes
@@ -196,10 +191,8 @@ On a gated KPI a claim is credited at the smaller of the two, so one process doi
 would make the cap a formality.
 
 > **Both must run.** The indexer alone leaves every progress bar at zero: a claim capped against an
-> unreported observed total credits nothing, and it does not revert — it *succeeds* and credits nothing.
-> The relayer alone credits nothing either, because nobody is claiming. This is the single most common
-> "why is nothing happening" cause, and the reason `pnpm dev:up` blocks on one synchronous relay pass
-> before it starts the indexer.
+> unreported observed total credits nothing, and it does not revert it *succeeds* and credits nothing.
+> The relayer alone credits nothing either, because nobody is claiming.
 
 ## Attribution
 
@@ -216,21 +209,25 @@ struct Touch {
 ```
 
 EIP-712 under domain `"Boney Attribution"` / version `"1"`, bound to the chain id and the
-`AttributionRegistry` address. Anyone may relay it — the signature is the authority, so the end user
+`AttributionRegistry` address. Anyone may relay it, the signature is the authority, so the end user
 never pays gas and never transacts with Boney directly.
 
 - **`promoterId = keccak256(abi.encode(campaign, promoter))`**, namespaced by registrant, so an id from
   one campaign cannot farm attribution in another and no squatter can deny a campaign an id.
+  
 - **LAST_TOUCH is ordered by the signed `signedAt`, not by relay order**, because relayers are
   adversarial. A touch signed no later than the stored one reverts `TouchNotNewer`, so holding a
   signature back and relaying it late wins nothing.
+  
 - **The registry enforces the campaign's own bounds on chain**, not in the client: it reads the
   campaign's `attributionWindow`, `endTime` and `status`, caps the touch at
   `min(campaign.attributionWindow, maxTouchDuration)`, and refuses a touch for a closed campaign.
+  
 - **Credit is resolved per action, at that action's own block.** A report carrying evidence asks who
   held the user at each action's block and tallies oldest-first, so activity predating a touch goes to
-  whoever held the wallet at the time — or to nobody — rather than to whoever holds the touch when the
+  whoever held the wallet at the time or to nobody, rather than to whoever holds the touch when the
   report happens to land. A promoter who knows the reporting cadence has nothing to farm.
+  
 - **Without evidence, an ambiguous report is refused rather than guessed.** If more than one promoter
   held the user since the last report closed, `reportUserAction` reverts `AmbiguousAttribution`. The fix
   is to resend it with evidence.
@@ -282,8 +279,9 @@ Deposits work in every state because they are a vault call, not a campaign call.
 
 **Reporting closes exactly where reclaim opens, and the two can never both be open.** A report is
 accepted while `Active`, or while `Ended` and `block.timestamp <= endedAt + CLAIM_GRACE`; reclaim
-requires `Cancelled`, or `Ended` and `block.timestamp > endedAt + CLAIM_GRACE`. Those are exact
-complements, so escrow is never reclaimable while credit is still owed and a report can never land
+requires `Cancelled`, or `Ended` and `block.timestamp > endedAt + CLAIM_GRACE`. 
+
+Those are exact complements, so escrow is never reclaimable while credit is still owed and a report can never land
 against a pool the project already emptied.
 
 The grace window exists mainly so **withheld reports can still land**: a project that stops reporting
@@ -307,37 +305,12 @@ by accident — `"Aave"`, `"aave"` and `"Aave "` read as one name to a person. T
 **The contracts are not audited.** These are the assumptions they cannot remove, stated plainly. None of
 them lets anyone move escrow; all of them bound how much a reported *number* is worth.
 
-| You are trusting | For what | If it is wrong |
-|---|---|---|
-| The **project** key | Reporting per-user progress at all | Promoters earn nothing. Withholding is indistinguishable from having earned nothing, which is why the oracle path exists |
-| The **relayer** key | Reporting the totals it actually observed | It can only lower the cap, so the failure mode is unpaid work, not overpayment. Under-reporting is not detectable on chain |
-| The **verifier owner** | `setKpiConfig` naming the same event the KPI's `params` name | The cap sits at 0 and every report silently credits nothing. `pnpm relay` refuses to run on drift; nothing on chain checks it |
-| The **attestor set** | The figures they sign about a wallet | A fabricated score clears a `minReputation` gate. It buys campaign membership, never a payout |
-| The **schema registrar** | Weights, freshness windows and ceilings | Scores move under promoters. Existing members keep membership, but a tightened window can put a gate out of reach |
-| The **governor** | Disputing only dishonest oracle reports | An honest reporter is slashed, or a dishonest report lands unchallenged. The governor cannot credit anyone directly |
-| The **escrow token** | Behaving like an ERC-20 | The vault's internal ledger absorbs fee-on-transfer and rebase behaviour, but a token that can freeze transfers can strand a payout |
-
-What the protocol deliberately does not do:
-
-- **It does not measure anything itself.** Every KPI number originates off chain; the chain enforces
-  `min(claim, observed)` and nothing more. Two parties under-reporting in the same direction agree, and
-  agreement is all the chain can see.
-- **It does not redirect credit.** A verifier can deny a delta; it cannot hand that delta to whoever
-  earned it.
-- **It does not credit aggregate metrics to individuals.** TVL and volume advance campaign totals for
-  display and pay nobody.
-- **It does not know social identity.** Only `(wallet, schemaId) => number`.
-- **It has no fee switch, treasury or governance module.**
-- **A gated KPI whose relayer is behind is a silent no-op, not a revert.** The transaction succeeds and
-  credits nothing. This is the most common way a live campaign appears broken.
-
 Everything that loops is bounded, so no payout path can exceed the block gas limit and brick payouts for
 promoters who already did the work: `MAX_KPIS` 32, `MAX_TIERS_PER_KPI` 32, `MAX_EVIDENCE_ACTIONS` 256,
 `MAX_SCHEMAS` 64, `MAX_ATTESTATIONS` 16, `MAX_NAME_BYTES` 32.
 
 There are no proxies and no upgrade path. `Campaign` is fully immutable after construction; the vault's
 `registrar` and the coordinator's `campaignRegistry` are write-once; `CampaignRegistry` is append-only.
-Changing `CLAIM_GRACE` — a `constant` compiled into `Campaign` — means a full redeploy.
 
 ## Build & test
 
@@ -395,13 +368,11 @@ pnpm report-window      # derive a campaign's reporting block bounds
 ```
 
 `pnpm dev:up` exists because the order matters: it health-checks the reputation stub, starts `next dev`,
-runs one relay pass **synchronously**, and only then runs the indexer. Both scanners take `--dry-run`,
-which needs no key and is the right first move against an unfamiliar deployment. Both are safe to run
+runs one relay pass **synchronously**, and only then runs the indexer. 
+
+Both scanners take `--dry-run`, which needs no key and is the right first move against an unfamiliar deployment. Both are safe to run
 repeatedly — the relayer is stateless with its checkpoint on chain, and the indexer's totals are
 cumulative, so a repeated pass reports the same figure and the contract returns early.
-
-`pnpm typecheck` and `pnpm build` load the whole Next graph and peak around 8 GB. On a constrained
-machine, prefer `pnpm test` plus scoped `eslint`.
 
 Two operational facts worth knowing before debugging an RPC: Base's public endpoint rejects
 `eth_getLogs` ranges wider than 2000 blocks outright, and `sepolia.base.org` 502s roughly one call in
@@ -431,48 +402,10 @@ which is a worse failure than a long window. `script/SeedExpiry.s.sol` asserts t
 its longest campaign before spending gas, so a registry deployed with a short cap fails that seed rather
 than truncating it.
 
-The reputation freshness windows are **not** shortened either: a shortened window would expire seeded
-attestations mid-session and drop wallets below their campaign gates, which reads as a broken reputation
-gate rather than an expired score.
-
 Campaign `endTime` is a per-fixture choice rather than a constant. `SeedLocal`, `SeedGated` and
 `SeedEventKpi` run 30–60 days out, putting expiry out of reach of a testing session; the Base Sepolia
 fixture (`script/SeedDemo.s.sol`) instead expires campaigns at 24 hours and 3/5/7/10/14 days, so the
 window-closed → `end()` → grace → `reclaimUnspent` path is reachable without warping a chain.
-
-### Reseeding the demo fixture
-
-`SeedDemo` is a **whole-fixture** seed, not an append: it asserts `campaignCount() == 0`, because
-`CampaignRegistry` is append-only and `cancel()` is reachable only from `Pending`, so an activated
-campaign can never be retired. `minReputation` is immutable too, so changing a gate is also a reseed.
-Replacing the fixture therefore means redeploying, in this order:
-
-```bash
-# 1. fresh contracts
-PRIVATE_KEY=0x… forge script script/DeployBoney.s.sol:DeployBoney --rpc-url … --broadcast --slow
-# 2. point the app at them
-cd web && pnpm deployments 84532
-# 3. schemas + dev wallet score — MUST precede step 4
-PRIVATE_KEY=0x… REPUTATION_ADDRESS=0x… \
-  forge script script/SeedDevRep.s.sol:SeedDevRep --rpc-url … --broadcast --slow
-# 4. the six campaigns
-PRIVATE_KEY=0x… REGISTRY_ADDRESS=0x… VAULT_ADDRESS=0x… ATTRIBUTION_ADDRESS=0x… TOKEN_ADDRESS=0x… \
-  forge script script/SeedDemo.s.sol:SeedDemo --rpc-url … --broadcast --slow
-```
-
-Step 3 is not optional. `DeployBoney` registers no reputation schemas, so a fresh `ReputationRegistry`
-scores every wallet 0 **and** reports `maxScore() == 0` — and `Campaign`'s constructor rejects any
-`minReputation` above that ceiling with `UnreachableReputation`, so step 4's gated campaigns cannot even
-be created until the schemas exist. `SeedDevRep` registers `ETHOS_SCORE`/`X_REACH`/`X_FOLLOWERS` at
-weights 7/3/0, fixing `maxScore()` at 28,000, and restores the dev wallet's 24,620 score, asserting that
-total rather than assuming it.
-
-Three of the six campaigns are gated, placed around that score: 10,000 (cleared comfortably), 24,000
-(cleared by 620, so a decayed record drops the wallet below it) and 26,000 (not clearable by that wallet,
-so `InsufficientReputation` and the gate-blocked UI stay reachable). The 24-hour campaign is deliberately
-ungated — it is the one a tester reaches for to watch an expiry. `TOKEN_ADDRESS` is an existing mock bUSD
-rather than a fresh one, so the fixture does not add another rival token for the pool totals to split
-across.
 
 ## Repository layout
 
