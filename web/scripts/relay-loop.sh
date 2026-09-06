@@ -5,10 +5,6 @@
 # gated KPI's ceiling stays at 0 until this has run. A report that lands first succeeds and credits
 # nothing, with no revert to surface it. This is the "just press the button" prerequisite.
 #
-# Each cycle costs at most one transaction per KPI: `reportBatch` when there is creditable activity,
-# `advanceCheckpoint` when there are new blocks but nothing creditable, and nothing at all when no new
-# blocks have appeared. On Base's 2s blocks the middle case is the common one.
-#
 # Usage: RPC=<url> ./scripts/relay-loop.sh [--once] [interval_seconds]
 #
 # `--once` runs a single pass and exits, which is what `dev-up.sh` needs: the indexer must not report
@@ -36,7 +32,7 @@ INTERVAL="${1:-120}"
 # the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
 # observed ceiling, which unlocks the next tier, which pays out again. Both campaigns below pay in a
 # token none of their own KPIs watch — Gyndore in GYND, Uniswap in bUSD against pool, USDC and WETH
-# events — so all six are safe to list.
+# events: so all six are safe to list.
 TARGETS=(
   # Gyndore Testnet, seeded 2026-08-31: swaps, GYND stakes, LP mints.
   0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:0

@@ -5,7 +5,8 @@
  *                        [--no-profile 0xa,0xb] [--unclaimed 0xa,0xb]
  *
  * Why this exists: `/api/attest` refuses any wallet without a *claimed* Ethos profile, and no test
- * wallet has one — not the anvil accounts, not a fresh MetaMask account on Base Sepolia. So the
+ * wallet has one
+ * So the
  * interesting half of the flow (sign three attestations, submit them, watch the BoneyScore land)
  * is unreachable in a browser against live Ethos, which answers 404 for every address you own.
  *
@@ -18,13 +19,11 @@
  *   KAITO_API=http://127.0.0.1:8787/smart
  *
  * Values are derived from the address, not random, so a wallet keeps the same score across restarts
- * — otherwise a re-verify would silently change the number under test, and the on-chain history
- * would stop matching what the stub reports. The spread is wide on purpose: addresses land across
+ * The spread is wide on purpose: addresses land across
  * the whole rank ladder, so the directory and rank badges have something to show.
  *
  * Only ever bound to loopback. The Next server fetches these URLs server-side from the same host,
- * so nothing else needs to reach it, and a stub that mints reputation should not be listening on a
- * LAN interface.
+ * so nothing else needs to reach it.
  */
 
 import {createServer, type IncomingMessage, type ServerResponse} from "node:http";

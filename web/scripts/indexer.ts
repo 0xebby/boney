@@ -3,29 +3,16 @@
  *
  * Usage: pnpm index [--rpc <url>] [--campaign <address>] [--from-block N] [--dry-run]
  *
- * This is the piece `BoneyDocs.md:118` assumes when it calls `KpiKind` "a hint for indexers and
- * UIs" — the thing that reads it. A campaign declares what it measures in `KpiSpec.params` (see
- * `lib/kpiSource.ts`); this reads those logs, works out who did what, and reports it.
- *
- * Deliberately thin. Everything that can be *wrong* — actor extraction, scaling, cumulative
- * totals, what is worth sending — lives in `lib/indexerCore.ts` where fixture logs prove it. This
- * file is RPC pagination, key handling, and transaction sending.
- *
  * Two properties worth stating plainly:
- *
- *  - **It cannot credit strangers.** Only a wallet that signed an EIP-712 touch can be credited, and
- *    every action is resolved against who held that wallet at the action's own block. Indexing all
- *    traffic on a contract and crediting it is not a thing this can do, by construction.
  *  - **Reports are cumulative and idempotent.** `newTotal` is a running total over the referral's whole
  *    attributed history, not a delta, and a re-run over the same range decides to send nothing. There
  *    is deliberately no cursor: a range shallower than that history would produce a window-scoped total
  *    that `Campaign` compares against a lifetime watermark and silently ignores. The range is instead
- *    bounded by attribution — it starts just after the campaign's first touch, since nothing earlier is
+ *    bounded by attribution: it starts just after the campaign's first touch, since nothing earlier is
  *    creditable to anybody.
  *
  * Trust model: with `verifier == address(0)` the campaign credits the reported number as-is. This
- * indexer is honest but unverified on chain — a state-reading `IKpiVerifier` would bound it, and
- * is the natural next step.
+ * indexer is honest but unverified on chain: a state-reading `IKpiVerifier` would bound it.
  */
 import {readFileSync, existsSync} from "node:fs";
 import {resolve, dirname} from "node:path";
@@ -77,8 +64,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(here, "../..");
 
 /**
- * Base's public endpoint rejects wider `eth_getLogs` ranges outright:
- * `-32602: query exceeds max block range 2000`. Observed against sepolia.base.org, not guessed.
+ * Base's public endpoint rejects wider `eth_getLogs` ranges.
  */
 const MAX_LOG_RANGE = BigInt(2_000);
 
@@ -95,11 +81,7 @@ const onlyCampaign = arg("--campaign")?.toLowerCase();
 const fromBlockFlag = arg("--from-block");
 const dryRun = process.argv.includes("--dry-run");
 
-/**
- * `PRIVATE_KEY` from the repo-root `.env`.
- *
- * Foundry loads that file itself, but this is a plain node script, so it has to read it too.
- */
+
 function envPrivateKey(): Hex | undefined {
   if (process.env.PRIVATE_KEY) return process.env.PRIVATE_KEY as Hex;
   const path = resolve(REPO_ROOT, ".env");
@@ -112,8 +94,7 @@ function envPrivateKey(): Hex | undefined {
 }
 
 /**
- * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
- * pass costs the limiter this many times less than one request per call would.
+ * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request.
  */
 const RPC_BATCH_SIZE = 100;
 
@@ -127,9 +108,7 @@ const READ_CONCURRENCY = 300;
 const RPC_TIMEOUT = 60_000;
 
 /**
- * Retries per request. A public endpoint rate-limits partway through a long pass rather than at its
- * start, and the pass has no checkpoint of its own to resume from, so every request has to outlast
- * the limiter's window.
+ * Retries per request.
  */
 const RPC_RETRY_COUNT = 6;
 
@@ -161,7 +140,6 @@ async function fetchLogs(
 
     // Filtered by the node, and sent raw to make sure of it: these sources are busy contracts, and
     // every non-matching log downloaded is payload the run pays for and then discards.
-    // `aggregateByActor` applies both the signature and the filter again over whatever comes back.
     const logs = (await client.request({
       method: "eth_getLogs",
       params: [logRequest(source.source, source.topic0, source, chunk.from, chunk.to)],
@@ -205,10 +183,6 @@ async function fetchLogs(
  * the blocks behind it, so the contract cannot tell that a figure includes activity from before the
  * campaign existed or from a spell nobody was attributed for — with `verifier == address(0)` it credits
  * the number as-is. Only this filter stands between a wide scan and a wrong credit.
- *
- * Scanned from the oldest touch that could still cover creditable work rather than from the protocol's
- * deployment: a touch expires at most `effectiveMaxDuration` after it is stored, and activity before
- * the campaign's start credits nobody, so anything older covers nothing this campaign will pay for.
  *
  * One log scan for the whole campaign rather than a read per referral, and it also answers "was this
  * referral ever attributed at all" — absent from the history means dropped, which matches `Campaign`
@@ -411,8 +385,7 @@ async function main(): Promise<void> {
       const signature = catalogSignature(source.topic0) ?? source.topic0;
       console.log(`\n${label} — ${signature} on ${source.source}`);
 
-      // Pre-flight against the contract's own guards, so a skip prints a reason instead of
-      // burning gas on a revert. Each mirrors a named error in Campaign.reportUserAction.
+      // Pre-flight against the contract's own guards, Each mirrors a named error in Campaign.reportUserAction.
       const now = BigInt(Math.floor(Date.now() / 1000));
       if (Number(status) !== 1) {
         console.log(`  skipped: campaign is not Active — onlyActive would revert`);
@@ -425,7 +398,7 @@ async function main(): Promise<void> {
         continue;
       }
       if (spec.aggregate) {
-        console.log(`  skipped: aggregate KPI — AggregateKpi would revert (see decision D7)`);
+        console.log(`  skipped: aggregate KPI — AggregateKpi would revert`);
         skipped++;
         continue;
       }
