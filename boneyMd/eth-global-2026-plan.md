@@ -76,6 +76,11 @@ Re-signing is the only remedy and it is the referral's action, not the project's
 
 decision :Touches will have to resign attribution once initial window expires.
 
+or maybe make re-sign default to prev promoter before pool addition and deadline extension unless ref explicitly choses a different promoter
+
+
+also, how many extensions are allowed and what is the minimum /max pool addition ? 
+
 **A tier settled while the pool was empty stays settled.** `_settle` advances `_settledTiers` past a
 tier even when `PoolExhausted` fired and the payout was short.
 
@@ -87,7 +92,9 @@ record `_shortfall[promoterId][kpiIndex] += reward - tierPay` when a tier pays s
 outstanding shortfalls first inside `_settle` once escrow allows. Without it, document the gap
 explicitly rather than letting a judge find it.
 
-decision: pay shortfall from added pool.
+decision: pay shortfall from added pool. Add claim shortfall btn once pool addition is successful 
+
+only enabled for promoters who are owed shortfall dues to pool exhaustion .
 
 ### Web + subgraph
 
