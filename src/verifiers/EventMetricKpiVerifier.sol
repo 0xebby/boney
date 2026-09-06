@@ -6,6 +6,7 @@ import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {IEventMetricKpiVerifier} from "../interfaces/IEventMetricKpiVerifier.sol";
 
 /// @title EventMetricKpiVerifier
+/// @boney's relayer
 /// @notice Caps a campaign's claimed KPI total against an independently observed on-chain metric,
 ///         computed off-chain by a trusted relayer that scans event logs via `eth_getLogs`.
 /// @dev The relayer pushes observed totals ahead of time, so `verify` is a stored-value lookup and
@@ -23,12 +24,10 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @param scale Divisor applied to a user's observed total inside `verify`, so the compared figure
     ///        is denominated the way the project denominates it. 0 is read as 1. Mirrors the indexer's
     ///        `scale` in `web/src/lib/kpiSource.ts`. `verifiedTotals` holds the raw, unscaled metric.
-    /// @param windowStartBlock Earliest block worth scanning — typically where attribution begins.
+    /// @param windowStartBlock Earliest block worth scanning = where attribution begins.
     /// @param windowEndBlock Latest block the relayer may report up to. See `setKpiConfig`.
     /// @param configured Set once `setKpiConfig` has run; nothing may be reported or verified first.
-    /// @param epoch Generation of this config, bumped when `setKpiConfig` changes what is watched. Part
-    ///        of every total's storage key, so a bump abandons every total observed under the previous
-    ///        config.
+    /// @param epoch Generation of this config, bumped when `setKpiConfig` changes what is watched.
     struct KpiConfig {
         address targetContract;
         string eventSignature;
