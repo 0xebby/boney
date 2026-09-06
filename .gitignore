@@ -12,7 +12,8 @@ broadcast
 
 *.md
 !/README.md
-boneyMd/
+boneyMd/*
+!/boneyMd/eth-global-2026-plan.md
 
 /*.html
 
@@ -45,9 +46,3 @@ web/scripts/sygma-deposit.ts
 web/scripts/uniswap-swap.ts
 web/scripts/gyndore-swap.ts
 web/scripts/gyndore-stake.ts
-
-*.md
-!/README.md
-boneyMd/
-
-.claude/

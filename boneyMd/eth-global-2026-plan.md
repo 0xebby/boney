@@ -376,19 +376,20 @@ relayer all predate the event.
 - **Commit per coherent change, not per feature section.** The five features landing as five commits
   is exactly the shape the version-control rule warns about. §0 forces the contract work into one
   change set, not into one commit.
-- **`*.md` is gitignored** except `/README.md`, so this plan — the planning artifact judges are told
-  to look for — cannot be committed as things stand. See Open questions.
+- **`*.md` and `boneyMd/*` are gitignored** except `/README.md` and this plan, which is tracked at
+  `boneyMd/eth-global-2026-plan.md` by an explicit negation. Every other doc in `boneyMd/` stays
+  untracked. See Open questions.
 - **AI attribution needs a tracked file.** This plan was written with Claude Code and so was much of
   `web/`. A submission-time `AI_USAGE.md` naming the files and the direction given is the cheapest way
-  to satisfy attribution, and it needs the same gitignore exception as the README.
+  to satisfy attribution, and it needs the same gitignore exception this plan has.
 
 ## Open questions
 
-- **Where the spec artifacts live.** ETHGlobal requires the planning artifacts in the submission repo;
-  `.gitignore` excludes every `.md` but `/README.md` because this repo is public and the excluded set
-  holds `boneyMd/findings.md` (unfixed high-severity bugs) and `testing.md` (throwaway Base Sepolia
-  keys). Narrowing the rule to those two, or adding `!/eth-global-2026-plan.md` and `!/AI_USAGE.md`
-  alongside the README exception, both work. Decide before the submission, not on the last day.
+- **Where the spec artifacts live.** Every doc now lives in `boneyMd/`, which `.gitignore` excludes
+  wholesale because this repo is public and the excluded set holds `boneyMd/findings.md` (unfixed
+  high-severity bugs) and `boneyMd/testing.md` (throwaway Base Sepolia keys). This plan is negated
+  back in by name; `AI_USAGE.md` needs the same line. Decide before the submission, not on the last
+  day.
 - **Robinhood testnet**: chain id, public RPC, explorer URL pattern, faucet, Chainlink Automation
   support. Everything in feature 5's last section is blocked on these five facts.
 - **Tier shortfalls after a top-up** — in or out? It is the strongest fairness argument in feature 1 and
@@ -402,6 +403,7 @@ relayer all predate the event.
 
 ---
 
-`*.md` is gitignored here except `/README.md`, so this file is untracked. That was deliberate while
-it was working material; ETHGlobal now requires it in the submission repo. First Open question above.
+`*.md` and `boneyMd/*` are gitignored except `/README.md` and this file, which `.gitignore` negates by
+name because ETHGlobal requires it in the submission repo. Every other doc in `boneyMd/` is untracked
+working material.
 

@@ -22,7 +22,7 @@ import {Types} from "../src/libraries/Types.sol";
 ///
 ///      ## Why this exists
 ///
-///      `boneyCardPlan.md` calls it the stage-2 blocker. The card's history half counts campaigns,
+///      `boneyMd/boneyCardPlan.md` calls it the stage-2 blocker. The card's history half counts campaigns,
 ///      projects, referrals, tiers and protocol types, and the live deployment could not exercise it:
 ///      one project address is behind all nine campaigns, so "projects worked with" is 1 for every
 ///      wallet and "first repeat project" is unreachable. That is why distinct projects is a milestone
