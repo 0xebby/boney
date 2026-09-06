@@ -75,3 +75,31 @@ push the eth global plan too
 ```
 push
 ```
+
+```
+for automated reporting, open zepplin accessManager role library will be used to grant reporter roles
+and general role settings across boney protocol
+```
+
+```
+what's the clearance level on sandbox registry?
+```
+
+```
+run this function creditedToOf(address user, uint256 kpiIndex, bytes32 promoterId) for campaign :
+0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc and promoter
+0xe66c624a3a47ded994a32279dac457f83cc5ddf879b02d7f8e3cbbc1a01b7a15 for kpiIndexes 1 &2 find and run
+view for progress of same promoter for same campaign
+```
+
+```
+KPI 2 is zero everywhere, not just for this promoter: totalProgress(2) is 0 and no Credit row exists
+at that index for any promoter. That's the known Gyndore LP KPI whose actor topic carries a tokenId
+rather than a wallet, so it can never match a user. a filter to user adress could have solved this?
+recreate the form info used during the creation of this campaign
+```
+
+```
+if unguarded kpis accepts reports as is from projects , kpis should be guarded by default so
+boneyverify always takes precedence in every hosted campaign reporting
+```
