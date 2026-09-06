@@ -3,28 +3,20 @@
 Five additions, planned against the code as it stands on `boneypoints` (read 2026-09-05). Each section
 says what exists today, what changes, what breaks, and how it is verified.
 
-Baseline: 7 campaigns on registry `0x3e0a2fc4…` (Base Sepolia), Gyndore and Uniswap gated, the other
-five ungated. **Do not quote SuperBridge or Venus totals in a demo** — both carry pre-2026-09-04
-indexer inflation (~1.9× and smaller); Sdy Labs and the two gated campaigns measured clean.
-
----
-
 ## 0. The constraint that orders everything
 
 Campaign configuration is immutable and `CampaignRegistry` mints each campaign with `new Campaign`.
 Three of the five features change `Campaign.sol`. Every redeploy carries a fixed tax:
 
-- `pnpm abis` (no type-level link — skipping it fails at runtime, not at build)
+- `pnpm abis` (no type-level link)
 - `pnpm deployments <chainId>`
 - subgraph redeploy + a new version label in `NEXT_PUBLIC_SUBGRAPH_URL`
-- `web/src/lib/campaignGuide.ts` `CATALOG` re-key — it is keyed by campaign address and fails silently
+- `web/src/lib/campaignGuide.ts` `CATALOG` re-key.
 - `web/scripts/relay-loop.sh` `TARGETS` addresses
 - `SeedDevRep` before any gated seed, or `UnreachableReputation` blocks creation
 
 **So: land all contract work in one change set, one redeploy, one reseed.** Features 2, 3 and 4 then
 build on a single stable deployment. Doing the contract features separately triples the tax.
-
----
 
 ## 1. Fair campaign extensions and reward top-ups
 
@@ -36,7 +28,7 @@ bounds reports to `[startTime, endTime]`; once `Ended`, `_requireReportWindow` s
 `rewardPool - paidOut`. `EscrowVault.deposit(campaign, amount)` is already additive and callable by
 anyone, and `reclaimUnspent` returns the whole vault balance after grace.
 
-So a top-up **already lands in escrow today and can never be paid out** — `rewardPool` is the ceiling.
+So a top-up **already lands in escrow today and can never be paid out** ;`rewardPool` is the ceiling.
 
 ### Changes
 
@@ -49,13 +41,15 @@ untouched.
 - `topUp(uint256 amount)` — project only, pulls through `escrowVault.deposit`, raises `rewardPool`,
   emits `PoolIncreased(oldPool, newPool)`. Assert vault balance ≥ `rewardPool - paidOut` afterwards.
 - **No setter for `_kpis`, `_tiers`, `minReputation`, `startTime` or `token`.** They have none today;
-  the guarantee is enforced by absence, which is the strongest form of it. Add a test that reads every
+  the guarantee is enforced by absence. Add a test that reads every
   tier threshold and reward before and after `extend` + `topUp` and asserts equality, so the
-  guarantee is asserted rather than assumed.
+  guarantee is asserted.
 
 **The verifier window has to move in the same call.** `EventMetricKpiVerifier.setKpiConfig` re-run
 with only a later `windowEndBlock` deliberately leaves `lastScannedBlock` and every stored total
-alone — extension is already designed for. But it is `onlyOwner` (the protocol), not the project, and
+alone.
+
+But it is `onlyOwner` (the protocol), not the project, and
 `resolveScanRange` clamps at `windowEndBlock`, so an extension without it leaves a gated KPI's
 ceiling frozen: reports keep succeeding and crediting nothing, the same silence as running the
 indexer before the relayer. Two options:
@@ -73,23 +67,33 @@ indexer before the relayer. Two options:
 
 **Extending `endTime` does not extend existing touches.** Each touch expires at
 `min(campaign.attributionWindow, MAX_TOUCH_DURATION)` from signing, and activity nobody held is
-dropped rather than credited to nobody. A campaign extended by a week will have referrals whose touch
-lapsed on day two; their later actions are unattributed and silently uncreditable. The extend
-confirmation must say so and should count how many live touches expire before the new end. Re-signing
-is the only remedy and it is the referral's action, not the project's.
+dropped rather than credited to nobody.
+
+A campaign extended by a week will have referrals whose touch
+lapsed on day two; their later actions are unattributed and silently uncreditable.
+
+Re-signing is the only remedy and it is the referral's action, not the project's.
+
+decision :Touches will have to resign attribution once initial window expires.
 
 **A tier settled while the pool was empty stays settled.** `_settle` advances `_settledTiers` past a
-tier even when `PoolExhausted` fired and the payout was short. A top-up therefore pays *future* tiers
-and never the promoter who crossed a tier during the drought — which is precisely the unfairness this
-feature claims to fix. Recommended addition (small, and the most defensible thing in the feature):
+tier even when `PoolExhausted` fired and the payout was short.
+
+A top-up therefore pays *future* tiers and never the promoter who crossed a tier during the drought — which is precisely the unfairness this
+feature claims to fix.
+
+Recommended addition (small, and the most defensible thing in the feature):
 record `_shortfall[promoterId][kpiIndex] += reward - tierPay` when a tier pays short, and pay
 outstanding shortfalls first inside `_settle` once escrow allows. Without it, document the gap
 explicitly rather than letting a judge find it.
 
+decision: pay shortfall from added pool.
+
 ### Web + subgraph
 
-`useWriteCampaign` gains the two intents and `lib/txErrors.ts` the new reverts (extend it, never
-surface a raw revert string). An extend/top-up panel on the project's own campaign page. The subgraph
+`useWriteCampaign` gains the two intents and `lib/txErrors.ts` the new reverts .
+
+An extend/top-up panel on the project's own campaign page. The subgraph
 indexes `Extended` and `PoolIncreased` onto the existing `Campaign` entity, which currently treats
 both fields as fixed.
 
@@ -122,6 +126,8 @@ available, and only one of them needs logs:
   raw, `observedProgressOf` scaled. An hourly upkeep needs no log access at all: it reports the gap
   between `observedProgressOf(campaign, kpi, user)` and `Campaign.userCreditedOf(user, kpi)`.
 
+decision : leaning towards log-trigged upkeep with chainlink.
+
 That second observation is the whole feature. **Ungated KPIs have no observed total, so the sweeper
 cannot see them** — so gate every KPI in the ETHGlobal fixture with `GuardedKpiVerifier`, which is
 also the standing fix for the inflation class that hit SuperBridge and Venus.
@@ -148,8 +154,9 @@ batch entrypoint from feature 3. Three prerequisites:
 **Log-trigger upkeep (the better live demo).** One upkeep per gated KPI, filtered on that KPI's own
 `topic0` at its `targetContract`. `checkLog` pulls the actor out of `topics[actorTopic]` (the on-chain
 mirror of `indexerCore`'s actor decode), reads `promoterAt(campaign, user, log.blockNumber, now)`, and
-returns a single-action evidence report; `performUpkeep` sends `reportUserAction`. Credit appears on
-screen seconds after the user's transaction, which is a far stronger demo than an hourly tick.
+returns a single-action evidence report; `performUpkeep` sends `reportUserAction`.
+
+Credit appears on screen seconds after the user's transaction, which is a far stronger demo than an hourly tick.
 
 **What stays manual, said plainly.** The relayer remains the ceiling authority, so `relay-loop.sh`
 keeps running. Automation automates the project's *claim*, not Boney's *observation* — making the
@@ -182,8 +189,9 @@ Ship this **with** feature 2 — they share one entrypoint.
 
 `ReportPanel.tsx` (765 lines) plans one selected KOL at a time through `lib/reporting.ts`:
 `buildKolTargets` is "one row in the KOL dropdown", `planKolReport` spreads an amount across that
-KOL's live referrals, `planObservedReport` is the honest path. The campaign-wide version already
-exists in `scripts/indexer.ts` — but it sends **one `writeContract` per referral per KPI**, inside
+KOL's live referrals, `planObservedReport` is the honest path.
+
+The campaign-wide version already exists in `scripts/indexer.ts` — but it sends **one `writeContract` per referral per KPI**, inside
 `for (const total of totals.values())`.
 
 ### Changes
@@ -213,6 +221,8 @@ loses older touches.
 promoter each delta lands on (`tallyByPromoter`), then one confirmation. Keep the per-KOL panel as the
 fallback for an over-large batch or a single blocked item. Copy stays terse — no explanatory second
 sentences.
+
+decision : torn on a possible unbounded loop issue for when promoters list grows
 
 ### Verification
 
@@ -254,7 +264,9 @@ and `web/public/superbridge-campaign-card.html`, both 1240px with Boneyard token
 
 **One honest constraint on what a project card may claim.** The subgraph rebuilds credited and settled
 state exactly but observes only 5 of 15 KPIs, and two campaigns' observed totals are inflated. So the
-card renders *credited and paid* figures — which are exact — and not observed KPI progress.
+card renders *credited and paid* figures which are exact and not observed KPI progress.
+
+decision : update subgraph logic to return more accurate numbers .
 
 ### Verification
 
@@ -271,8 +283,7 @@ the OG image renders at its declared size by hitting the route (headless chromiu
 `lib/chains.ts` already lists `anvil`, `sepolia`, `baseSepolia`, `mainnet` in `SUPPORTED_CHAINS`, and
 `DEPLOYMENTS` already carries a **complete env-driven Sepolia slot** (`NEXT_PUBLIC_SEPOLIA_BONEY` …
 `NEXT_PUBLIC_SEPOLIA_START_BLOCK`). `rpcUrlFor` and `explorerAddressUrl` handle it, and `wagmi.ts`
-includes it. `GENERATED_DEPLOYMENTS` is spread last so a real deploy overrides the env slot. Sepolia is
-therefore a deploy-and-seed exercise, not a code change.
+includes it. `GENERATED_DEPLOYMENTS` is spread last so a real deploy overrides the env slot.
 
 ### Per chain, in order
 
@@ -285,6 +296,8 @@ therefore a deploy-and-seed exercise, not a code change.
 4. **Reputation does not travel.** Attestations are per-chain and must be re-submitted through
    `/api/attest` + one tx per weighted schema on that chain. Confirm `AttestationVerifier`'s EIP-712
    domain separator includes the chain id before assuming a signature can't be replayed across chains.
+
+decision : CREATE2 deployment so boney can have same determinstic addresses across EVM chains.
 
 ### Single-valued globals that must become per-chain
 
@@ -315,15 +328,15 @@ store on `chains[0]`.
 
 ## Sequencing
 
-| Order | Work | Demoable on its own? |
-| --- | --- | --- |
-| 1 | **One `Campaign` change set**: mutable `endTime`/`rewardPool`, `extend`, `topUp`, `authorizedReporters`, `reportUserActions`, optional tier shortfalls. Verifier: `extendWindow` + observed-user enumeration. `forge test` green. | no |
-| 2 | Redeploy + reseed once, gating **every** KPI. Then the full tax list from §0. | — |
-| 3 | Batch reporting UI (feature 3). Highest visible payoff per hour, reuses `indexerCore` wholesale. | yes |
-| 4 | Extend + top-up panel (feature 1's web half). | yes |
-| 5 | `BoneyUpkeep` + registration on Base Sepolia (feature 2). Log-trigger first — it demos better than the hourly sweep. | yes |
-| 6 | Project BoneyCards (feature 4). Pure `web/`, no chain risk, safe to run in parallel with 5. | yes |
-| 7 | Ethereum Sepolia deploy + seed, then the new chain (feature 5). | yes |
+| Order | Work                                                                                                                                                                                                                                                      | Demoable on its own? |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| 1     | **One `Campaign` change set**: mutable `endTime`/`rewardPool`, `extend`, `topUp`, `authorizedReporters`, `reportUserActions`, optional tier shortfalls. Verifier: `extendWindow` + observed-user enumeration. `forge test` green. | no                   |
+| 2     | Redeploy + reseed once, gating**every** KPI. Then the full tax list from §0.                                                                                                                                                                       | —                   |
+| 3     | Batch reporting UI (feature 3). Highest visible payoff per hour, reuses`indexerCore` wholesale.                                                                                                                                                         | yes                  |
+| 4     | Extend + top-up panel (feature 1's web half).                                                                                                                                                                                                             | yes                  |
+| 5     | `BoneyUpkeep` + registration on Base Sepolia (feature 2). Log-trigger first — it demos better than the hourly sweep.                                                                                                                                   | yes                  |
+| 6     | Project BoneyCards (feature 4). Pure`web/`, no chain risk, safe to run in parallel with 5.                                                                                                                                                              | yes                  |
+| 7     | Ethereum Sepolia deploy + seed, then the new chain (feature 5).                                                                                                                                                                                           | yes                  |
 
 Nothing after step 2 touches Solidity, so steps 3–7 can be reordered or dropped without a redeploy.
 That is the point of the ordering: the irreversible work happens once, early, with tests.
@@ -379,31 +392,6 @@ relayer all predate the event.
 - **`*.md` and `boneyMd/*` are gitignored** except `/README.md` and this plan, which is tracked at
   `boneyMd/eth-global-2026-plan.md` by an explicit negation. Every other doc in `boneyMd/` stays
   untracked. See Open questions.
-- **AI attribution needs a tracked file.** This plan was written with Claude Code and so was much of
-  `web/`. A submission-time `AI_USAGE.md` naming the files and the direction given is the cheapest way
+- **AI attribution needs a tracked file.** This plan was written with Claude Code.
+- A submission-time `AI_USAGE.md` naming the files and the direction given is the cheapest way
   to satisfy attribution, and it needs the same gitignore exception this plan has.
-
-## Open questions
-
-- **Where the spec artifacts live.** Every doc now lives in `boneyMd/`, which `.gitignore` excludes
-  wholesale because this repo is public and the excluded set holds `boneyMd/findings.md` (unfixed
-  high-severity bugs) and `boneyMd/testing.md` (throwaway Base Sepolia keys). This plan is negated
-  back in by name; `AI_USAGE.md` needs the same line. Decide before the submission, not on the last
-  day.
-- **Robinhood testnet**: chain id, public RPC, explorer URL pattern, faucet, Chainlink Automation
-  support. Everything in feature 5's last section is blocked on these five facts.
-- **Tier shortfalls after a top-up** — in or out? It is the strongest fairness argument in feature 1 and
-  the most invasive change to `_settle`.
-- **`MAX_BATCH_REPORTS`** — gas-measure a worst-case item (new tier + several transfers) before fixing
-  the bound.
-- **`attributionWindow` on extension** — it is immutable and each touch is separately capped by
-  `MAX_TOUCH_DURATION`, so extending a campaign cannot lengthen a live touch. Decide whether the extend
-  flow prompts referrals to re-sign, or whether the campaign page just reports the expiry count.
-- **Event date** — the sequencing above is in relative days; pin it once the schedule is known.
-
----
-
-`*.md` and `boneyMd/*` are gitignored except `/README.md` and this file, which `.gitignore` negates by
-name because ETHGlobal requires it in the submission repo. Every other doc in `boneyMd/` is untracked
-working material.
-
