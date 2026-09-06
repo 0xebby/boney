@@ -22,18 +22,18 @@ library Types {
         OnboardAnActiveUser,
         SignUps,
         Downloads,
-        Withdraw
-        CreatePool
-        ProvideLiquidity
-        RemoveLiquidity
-        Redeem
-        Claim
-        Burn
-        Repay
-        Borrow
-        Lend
-        Vote
-        Referral          
+        Withdraw,
+        CreatePool,
+        ProvideLiquidity,
+        RemoveLiquidity,
+        Redeem,
+        Claim,
+        Burn,
+        Repay,
+        Borrow,
+        Lend,
+        Vote,
+        Referral
     }
 
     /// @notice Campaign lifecycle.
