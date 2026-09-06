@@ -54,7 +54,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
     uint64 public immutable startTime;
     /// @notice End of that window. Past it, anyone may `end()` the campaign.
     uint64 public immutable endTime;
-    /// @notice Recommended touch TTL for frontends when asking a user to sign an attribution.
     /// @dev Advisory. The hard cap on touch lifetime lives in `AttributionRegistry`.
     uint64 public immutable attributionWindow;
     /// @notice Minimum reputation score a promoter needs to join. 0 disables the gate.
@@ -131,15 +130,15 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
         if (cfg.attributionWindow == 0) revert InvalidWindow();
 
-        // Reverts EmptyName / NameTooLong / InvalidNameChar. Uniqueness is CampaignRegistry's.
+        /// @dev Reverts EmptyName / NameTooLong / InvalidNameChar. Uniqueness is CampaignRegistry's.
         Names.validate(cfg.name);
 
         // Reject a gate no wallet could clear.
-        uint256 cap = type(uint256).max;
+        uint256 reputationCap = type(uint256).max;
         try IReputationRegistry(reputationRegistry_).maxScore() returns (uint256 reported) {
-            cap = reported;
+            reputationCap = reported;
         } catch {}
-        if (cfg.minReputation > cap) revert UnreachableReputation(cfg.minReputation, cap);
+        if (cfg.minReputation > reputationCap) revert UnreachableReputation(cfg.minReputation, reputationCap);
 
         if (kpis_.length == 0) revert NoKpis();
         if (kpis_.length > MAX_KPIS) revert TooManyKpis(kpis_.length, MAX_KPIS);
@@ -161,7 +160,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
             uint256 previous;
             for (uint256 j; j < t.length; ++j) {
                 if (t[j].reward == 0) revert ZeroTierReward(i, j);
-                // Thresholds must ascend strictly.
+                // @dev Thresholds must ascend strictly.
                 if (t[j].threshold <= previous) revert TiersNotAscending(i, j);
                 previous = t[j].threshold;
             }
@@ -187,6 +186,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         reputationRegistry = IReputationRegistry(reputationRegistry_);
         oracleCoordinator = oracleCoordinator_;
 
+        /// @dev all campaigns default to pending until activation via escrow funding.
         status = Types.CampaignStatus.Pending;
     }
 
@@ -304,7 +304,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
             if (current == address(0)) revert NoAttribution(user);
 
             // A switch inside the unreported span would hand one promoter's work to another, and with
-            // no per-action timing there is nothing to place the work by. Refused rather than guessed.
+            // no per-action timing there is nothing to place the work by.
             bytes32 sole = attributionRegistry.soleAttributionSince(
                 address(this), user, _lastReportBlock[user][kpiIndex]
             );
@@ -325,7 +325,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (verifiedTotal <= already) return;
 
         if (evidence.length == 0) {
-            uint256 credited = verifiedTotal - already;
+            uint256 credited = (verifiedTotal - already);
             _userCredited[user][kpiIndex] = verifiedTotal;
             _applyCredit(user, kpiIndex, currentId, current, credited);
             _settle(current, currentId, kpiIndex);
@@ -341,7 +341,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ///      is cumulative, so the per-promoter tally is recomputed in full and only the part above
     ///      `_creditedTo` is applied — a replay credits nothing, and a report the verifier's ceiling
     ///      cut short finishes on the next one without moving credit off its promoter.
-    /// @param user The end user being reported.
+    /// @param user The end user who's actions is being reported.
     /// @param kpiIndex Index of the KPI being credited.
     /// @param already Amount already credited for this pair, across every promoter.
     /// @param verifiedTotal Cumulative ceiling this report may credit up to.
