@@ -288,7 +288,7 @@ contract SeedHistory is Script {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](2);
         kpis[0] = _kpi(Types.KpiKind.Bridge);
         kpis[1] = Types.KpiSpec({
-            kind: Types.KpiKind.Volume,
+            kind: Types.KpiKind.GenerateVolume,
             verifier: address(0),
             target: 1_000_000,
             aggregate: true,
@@ -315,7 +315,7 @@ contract SeedHistory is Script {
     function _telemetry() internal returns (address campaign) {
         uint256 pool = 15_000 * unit;
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](1);
-        kpis[0] = _kpi(Types.KpiKind.withdraw);
+        kpis[0] = _kpi(Types.KpiKind.Withdraw);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](1);
         tiers[0] = _tiers(pool, 4, 8, 16);
