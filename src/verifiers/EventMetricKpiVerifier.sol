@@ -6,7 +6,6 @@ import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {IEventMetricKpiVerifier} from "../interfaces/IEventMetricKpiVerifier.sol";
 
 /// @title EventMetricKpiVerifier
-/// @boney's relayer
 /// @notice Caps a campaign's claimed KPI total against an independently observed on-chain metric,
 ///         computed off-chain by a trusted relayer that scans event logs via `eth_getLogs`.
 /// @dev The relayer pushes observed totals ahead of time, so `verify` is a stored-value lookup and

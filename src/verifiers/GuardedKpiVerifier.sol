@@ -102,7 +102,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
         }
 
         uint256 diff = boneyValue > projectValue ? (boneyValue - projectValue) : (projectValue - boneyValue);
-        uint256 base = boneyValue > projectValue ? (boneyValue : projectValue);
+        uint256 base = boneyValue > projectValue ? boneyValue : projectValue;
         uint256 allowed = (base * cfg.toleranceBps) / MAX_TOLERANCE;
         if (diff > allowed) revert VerifierDisagreement(projectValue, boneyValue, diff, allowed);
 
