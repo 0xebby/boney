@@ -1,5 +1,13 @@
+import {defineChain} from "viem";
 import {anvil, sepolia, baseSepolia, mainnet} from "viem/chains";
 import {GENERATED_DEPLOYMENTS} from "./deployments";
+
+export const localPlayground = defineChain({
+  id: 31338,
+  name: "Boney Anvil Playground",
+  nativeCurrency: {name: "Ether", symbol: "ETH", decimals: 18},
+  rpcUrls: {default: {http: ["http://127.0.0.1:8546"]}},
+});
 
 /**
  * Chain and deployment configuration.
@@ -11,6 +19,7 @@ import {GENERATED_DEPLOYMENTS} from "./deployments";
 
 export const SUPPORTED_CHAINS = {
   anvil: anvil.id,
+  localPlayground: localPlayground.id,
   sepolia: sepolia.id,
   baseSepolia: baseSepolia.id,
   mainnet: mainnet.id,
@@ -153,6 +162,8 @@ export function rpcUrlFor(chainId: number): string | undefined {
   switch (chainId) {
     case anvil.id:
       return process.env.NEXT_PUBLIC_ANVIL_RPC ?? "http://127.0.0.1:8545";
+    case localPlayground.id:
+      return process.env.NEXT_PUBLIC_ANVIL_PLAYGROUND_RPC ?? "http://127.0.0.1:8546";
     case baseSepolia.id:
       return (
         process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode.com"

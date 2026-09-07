@@ -15,7 +15,6 @@ broadcast
 !/README.md
 boneyMd/*
 !/boneyMd/eth-global-2026-plan.md
-!/boneyMd/prompts.md
 !/boneyMd/feature-*.md
 
 /*.html

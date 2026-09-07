@@ -105,9 +105,6 @@ type FieldBone = {x: number; y: number; rotate: number; scale: number};
 /** Tile of the page field's primary layer, in CSS pixels. */
 const FIELD_TILE = 360;
 
-/** Tile of the offset layer, whose different size and origin break the primary tile's rhythm. */
-const DRIFT_TILE = 260;
-
 /** Rendered stroke width of every field bone, in CSS pixels. */
 const FIELD_HAIRLINE = 1.6;
 
@@ -115,11 +112,6 @@ const FIELD_BONES: FieldBone[] = [
   {x: 30, y: 60, rotate: -18, scale: 0.34},
   {x: 215, y: 205, rotate: 37, scale: 0.26},
   {x: 60, y: 265, rotate: -8, scale: 0.2},
-];
-
-const DRIFT_BONES: FieldBone[] = [
-  {x: 60, y: 140, rotate: 62, scale: 0.22},
-  {x: 150, y: 60, rotate: -42, scale: 0.17},
 ];
 
 /**
@@ -143,7 +135,7 @@ function fieldBone(bone: FieldBone, key: number) {
 /**
  * The page background — the card's watermark bone, scattered as a wallpaper.
  *
- * Two tiling layers of the same outline at five sizes and angles, brand-stroked at 6% and 3.6%.
+ * One tiling layer of the outline at three sizes and angles, brand-stroked at 3.5%.
  * Fixed to the viewport, so it holds still while content scrolls, and dropped entirely under
  * `prefers-contrast: more` and in print. Every opaque surface above it covers it, so it reads in the
  * gutters and between cards.
@@ -152,7 +144,7 @@ export function BoneField() {
   return (
     <svg
       aria-hidden
-      className="pointer-events-none fixed inset-0 -z-10 opacity-[0.06] contrast-more:hidden print:hidden"
+      className="pointer-events-none fixed inset-0 -z-10 opacity-[0.035] contrast-more:hidden print:hidden"
     >
       <defs>
         <g id="bone-field-outline" fill="none" stroke="var(--brand)">
@@ -172,19 +164,9 @@ export function BoneField() {
           {FIELD_BONES.map(fieldBone)}
         </pattern>
 
-        <pattern
-          id="bone-field-drift"
-          width={DRIFT_TILE}
-          height={DRIFT_TILE}
-          patternUnits="userSpaceOnUse"
-          patternTransform="translate(90 40)"
-        >
-          {DRIFT_BONES.map(fieldBone)}
-        </pattern>
       </defs>
 
       <rect width="100%" height="100%" fill="url(#bone-field)" />
-      <rect width="100%" height="100%" fill="url(#bone-field-drift)" opacity="0.6" />
     </svg>
   );
 }

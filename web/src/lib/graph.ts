@@ -1,4 +1,4 @@
-import {baseSepolia} from "./chains";
+import {baseSepolia, localPlayground} from "./chains";
 
 /**
  * The subgraph transport — a typed POST to `boney-indexer`, and the rules for when its answer may be
@@ -30,7 +30,7 @@ import {baseSepolia} from "./chains";
  * Base Sepolia only. This matters more than it looks: `wagmi.ts` lists anvil first, so a browser with
  * no wallet connected reads chain 31337, and a local fixture has no indexer behind it.
  */
-export const SUBGRAPH_CHAINS: readonly number[] = [baseSepolia.id];
+export const SUBGRAPH_CHAINS: readonly number[] = [baseSepolia.id, localPlayground.id];
 
 /**
  * The Studio query endpoint.
@@ -43,7 +43,9 @@ export const SUBGRAPH_CHAINS: readonly number[] = [baseSepolia.id];
  */
 export function subgraphUrl(chainId: number | undefined): string | undefined {
   if (chainId === undefined || !SUBGRAPH_CHAINS.includes(chainId)) return undefined;
-  const url = process.env.NEXT_PUBLIC_SUBGRAPH_URL?.trim();
+  const url = chainId === localPlayground.id
+    ? process.env.NEXT_PUBLIC_LOCAL_SUBGRAPH_URL?.trim()
+    : process.env.NEXT_PUBLIC_SUBGRAPH_URL?.trim();
   return url ? url : undefined;
 }
 
