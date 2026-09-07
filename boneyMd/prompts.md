@@ -9,6 +9,9 @@ Verbatim log of the prompts given in this repo, oldest first.
 ```
 add all md files to boneymd and update references
 ```
+Log the latest user prompt before committing the requested prompt log.
+```
+```
 
 ```
 gitignore netlify.toml .gas-snapshot .indexer-state.json KPI_EVENT_SOURCING.html and back envs then
@@ -171,4 +174,48 @@ commit and ask for approval
 
 ```
 good
+```
+
+```
+for this: Regenerate ABIs and deployment artifacts after the contract shape is finalized, then redeploy and reseed once with the other contract features. i need a seperate playground , since registryis append only, plan this and let's see a way to work in isolation first
+```
+
+```
+will this work with my relayer, indexer stubs and subgraph
+```
+
+```
+local Graph Node would work with anvil?
+```
+
+```
+add this plan to feature 1 md
+```
+
+```
+write a end to test ran against anvil chain and report everything including findings and errors in a dedicated md
+```
+
+```
+setup docker and retry
+```
+
+```
+installed docker but this:  docker run hello-world
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+ebby@beast:~/boney$ 
+```
+
+## 2026-09-07
+
+```
+Remaining Feature 1 gaps and next test requirements seed a gyndore campaign mock for the local anvil setup and test the new extend/top up feature... report everything and update prompt.md
+```
+
+```
+you just seeded new campaigns ? meaning all already existing campaigns on front end are gone? i said mock on anvil!
+```
+
+```
+commit as is , just prompts.md from the mds
 ```

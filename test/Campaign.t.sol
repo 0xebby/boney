@@ -276,6 +276,60 @@ contract CampaignTest is Test {
         assertEq(depleted.paidOut(), 8_000 ether);
     }
 
+    function test_UserReportsBeforeAndAfterExtensionThenTopUpRepaysShortfall() public {
+        Campaign extended = _createCampaignWithPool(6_000 ether);
+        _fund(extended, 6_000 ether);
+        vm.prank(project);
+        extended.activate();
+
+        bytes32 id = _join(extended, kol);
+        _touch(extended, userPk, user, id, 7 days);
+        _report(extended, project, user, 10);
+        assertEq(extended.progressOf(kol, 0), 10);
+        assertEq(extended.paidOut(), 1_000 ether);
+
+        uint64 newEndTime = endTime + extended.initialDuration() / 2;
+        vm.prank(project);
+        extended.extend(newEndTime);
+        assertEq(extended.endTime(), newEndTime);
+
+        _report(extended, project, user, 100);
+        assertEq(extended.progressOf(kol, 0), 100);
+        assertEq(extended.paidOut(), 6_000 ether);
+        assertEq(extended.shortfallOf(kol, 0), 2_000 ether);
+
+        token.mint(project, 2_000 ether);
+        vm.startPrank(project);
+        token.approve(address(extended), 2_000 ether);
+        extended.topUp(2_000 ether);
+        vm.stopPrank();
+
+        vm.prank(kol);
+        extended.claimShortfall(0);
+        assertEq(extended.shortfallOf(kol, 0), 0);
+        assertEq(extended.paidOut(), 8_000 ether);
+    }
+
+    function test_TopUp_rejectsAmountBelowRecordedShortfall() public {
+        Campaign depleted = _createCampaignWithPool(6_000 ether);
+        _fund(depleted, 6_000 ether);
+        vm.prank(project);
+        depleted.activate();
+
+        bytes32 id = _join(depleted, kol);
+        _touch(depleted, userPk, user, id, 7 days);
+        _report(depleted, project, user, 100);
+
+        assertEq(depleted.shortfallOf(kol, 0), 2_000 ether);
+
+        token.mint(project, 1_500 ether);
+        vm.startPrank(project);
+        token.approve(address(depleted), 1_500 ether);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.ShortfallUnfunded.selector, 1_500 ether, 2_000 ether));
+        depleted.topUp(1_500 ether);
+        vm.stopPrank();
+    }
+
     function test_TopUp_rejectsBeforeDepletion() public {
         _activate(campaign);
         token.mint(project, 2_000 ether);
