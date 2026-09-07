@@ -22,20 +22,12 @@ import {CAMPAIGN_STATUS} from "@/lib/types";
 /**
  * Turns a chain revert into a sentence a user can act on.
  *
- * Every write in this app simulates before it signs, so a failed action arrives as a named custom
- * error with its arguments — `WrongStatus(3)`, `InsufficientReputation(24620, 50000)`,
- * `TouchNotNewer(1786133189, 1786133200)`. Those names are precise and completely opaque: they say
- * nothing about what the user should do differently. This module is the one place that translates
- * them, so the copy lives next to the argument formatting instead of being re-invented at each
- * call site.
- *
  * Two strings come back, not one. `message` is the sentence; `detail` keeps the raw
- * `Name(args)` so a user reporting a problem can paste something exact. Never drop `detail` —
- * a humanised message that turns out to be the wrong guess is unreportable without it.
+ * `Name(args)` so a user reporting a problem can paste something exact.
  */
 
 export type TxErrorCopy = {
-  /** Plain-language sentence, safe to show as the only thing on screen. */
+  /** Plain-language sentence. */
   message: string;
   /** `ErrorName(arg, arg)` as the chain returned it. Absent for non-revert failures. */
   detail?: string;
@@ -43,11 +35,6 @@ export type TxErrorCopy = {
 
 /**
  * Error entries from every contract in the protocol, not just the one being called.
- *
- * A revert can originate below the contract the UI addressed: `Campaign.activate` reads escrow, so
- * an `EscrowVault` error surfaces from a call simulated against `CampaignAbi`. viem can only name
- * an error whose selector is in the ABI it was handed, so it returns raw hex for those. Decoding
- * against the union recovers the name instead of showing the user four bytes.
  */
 const ERROR_ABI: Abi = dedupeErrors(
   (
@@ -80,7 +67,7 @@ function dedupeErrors(entries: Abi): Abi {
 
 // ── argument formatting ──────────────────────────────────────────
 
-/** A `Types.CampaignStatus` index as its name. Out-of-range stays numeric rather than lying. */
+/** A `Types.CampaignStatus` index as its name. */
 function statusName(value: unknown): string {
   const index = Number(value);
   return CAMPAIGN_STATUS[index] ?? `status ${String(value)}`;
@@ -94,10 +81,6 @@ function at(value: unknown): string {
 
 /**
  * The offending byte from `InvalidNameChar`, shown only when it is printable.
- *
- * The rejected byte is frequently a control character or one piece of a multi-byte sequence, and
- * rendering that raw produces a mojibake glyph the user cannot match to anything they typed. Better
- * to say nothing than to point at the wrong character.
  */
 function nameChar(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -114,9 +97,6 @@ function count(value: unknown): string {
 
 /**
  * A BoneyScore, always exact.
- *
- * Deliberately not `count`: "your score is 24.6K, this needs 50K" rounds away the thing the user
- * is trying to judge — how far off they are. A score is a target to close, so it gets every digit.
  */
 function score(value: unknown): string {
   const n = Number(value);
@@ -144,19 +124,11 @@ function kpiLabel(value: unknown): string {
 
 /**
  * One entry per custom error the protocol can revert with.
- *
- * Each returns a sentence that names the cause *and* the way out, because "AlreadyJoined" tells a
- * user nothing they can do. Token amounts are deliberately never printed: these arguments are base
- * units and this module has no decimals to scale them by, so a raw `1000000000000000000` would be
- * worse than the qualitative statement. The exact values stay in `detail`.
- *
- * Overloaded names (`NotProject`, `InvalidSignature`, `UnknownCampaign` exist with two shapes)
- * branch on `args.length` rather than getting two entries, since the map is keyed by name alone.
  */
 const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   // ── Campaign: lifecycle ──
   WrongStatus: ([actual]) =>
-    `This campaign is ${statusName(actual)}, which doesn't allow that action. Reload — someone may have changed its status.`,
+    `This campaign is ${statusName(actual)}, which doesn't allow that action. Reload.`,
   NotProject: (args) =>
     args.length === 2
       ? `Only the project that created this campaign can do that. Connected as ${addr(args[1])}, expected ${addr(args[0])}.`
@@ -177,7 +149,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   AlreadyJoined: () => "This wallet is already promoting the campaign.",
   NotJoined: () => "This wallet isn't promoting the campaign yet.",
   InsufficientReputation: ([current, required]) =>
-    `Your BoneyScore is ${score(current)}, and this campaign requires ${score(required)}. Build reputation or pick a campaign with a lower bar.`,
+    `Your BoneyScore is ${score(current)}, and this campaign requires ${score(required)}. Build reputation or pick a campaign with a lower minimum boneyscore.`,
   UnreachableReputation: ([required, max]) =>
     `The minimum BoneyScore of ${score(required)} is above the highest score anyone can reach (${score(max)}). Lower the requirement.`,
 
@@ -192,7 +164,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   AmbiguousAttribution: ([user, kpiIndex]) =>
     `${addr(user)} switched promoter since the last ${kpiLabel(kpiIndex)} report, so a report with no per-action evidence can't say whose work this is. Report from observed actions instead.`,
   NonMonotonic: () =>
-    "That report moves a total backwards. Progress can only go up — the chain already has a higher figure.",
+    "That report moves a total backwards. Progress can only go up.",
   VerifierOvercredit: () =>
     "The verifier tried to credit more than the reported amount. Nothing was recorded.",
   TooManyActions: ([provided, max]) =>
@@ -220,7 +192,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
 
   // ── Campaign: naming ──
   NameTooLong: ([got, max]) =>
-    `That campaign name is ${count(got)} bytes — the limit is ${count(max)}. Note that accented and emoji characters cost more than one byte each.`,
+    `That campaign name is ${count(got)} bytes — the limit is ${count(max)}.`,
   InvalidNameChar: ([index, char]) =>
     `The campaign name has a character it can't use at position ${Number(index) + 1}${nameChar(char)}. Letters, digits, spaces and basic punctuation only.`,
   NameTaken: ([takenName, existing]) =>
@@ -252,7 +224,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
 
   // ── Escrow ──
   InsufficientBalance: () =>
-    "Escrow doesn't hold enough for that withdrawal. Someone may have reclaimed or paid out since this page loaded.",
+    "Escrow doesn't hold enough for that withdrawal.",
   CampaignNotRegistered: () => "This campaign has no escrow account yet.",
   AlreadyRegistered: () => "This campaign already has an escrow account.",
   ZeroAmount: () => "Enter an amount above zero.",
@@ -324,9 +296,6 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
 
 /**
  * Failures that never reach the contract — the wallet, the node, or the network refused first.
- *
- * Matched against viem's `shortMessage` and `message` because these arrive as prose, not as typed
- * errors. Order matters: the first match wins, so the specific patterns come before the broad ones.
  */
 const NODE_FAILURES: {test: RegExp; message: string}[] = [
   {
@@ -383,9 +352,6 @@ const NODE_FAILURES: {test: RegExp; message: string}[] = [
 
 /**
  * The sentence for a decoded custom error.
- *
- * Exported so the same copy can be reused anywhere an error name is already known — a read-side
- * decode, a test, a static explanation — without going through a viem error object.
  */
 export function humanizeContractError(name: string, args: readonly unknown[] = []): TxErrorCopy {
   const detail = args.length > 0 ? `${name}(${args.map(formatArg).join(", ")})` : `${name}()`;
@@ -404,10 +370,6 @@ function formatArg(value: unknown): string {
 
 /**
  * Turns any thrown value from a write path into user-facing copy.
- *
- * Tries three things in order: the custom error viem already named, the raw revert bytes decoded
- * against every protocol ABI (which catches reverts from contracts the call didn't address), and
- * finally the prose patterns for wallet- and node-level failures.
  */
 export function describeTxError(err: unknown): TxErrorCopy {
   if (err instanceof BaseError) {
@@ -453,10 +415,6 @@ function rawDataOf(err: BaseError): Hex | undefined {
 
 /**
  * Decodes revert bytes against the union of protocol errors.
- *
- * Returns undefined rather than throwing on an unrecognised selector: an error from a token or a
- * verifier this app doesn't ship an ABI for should fall through to the prose matching, not crash
- * the handler that was trying to explain a failure.
  */
 function decodeUnknownRevert(data: Hex | undefined): TxErrorCopy | undefined {
   if (!data || data === "0x" || data.length < 10) return undefined;

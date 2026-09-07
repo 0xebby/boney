@@ -1,3 +1,4 @@
+
 # ETHGlobal 2026 — Boneyard plan
 
 Five additions, planned against the code as it stands on `boneypoints` (read 2026-09-05). Each section
@@ -74,12 +75,11 @@ lapsed on day two; their later actions are unattributed and silently uncreditabl
 
 Re-signing is the only remedy and it is the referral's action, not the project's.
 
-decision :Touches will have to resign attribution once initial window expires.
+decision :remove bound on touch duration and only weak bound is before a referal re-signs for a different promoter
 
-or maybe make re-sign default to prev promoter before pool addition and deadline extension unless ref explicitly choses a different promoter
-
-
-also, how many extensions are allowed and what is the minimum /max pool addition ? 
+- reward top up can only happen if current pool is exhausted by atleast 90%
+- top has to be atleast 20% of initial so projects don't top up dust just to extend window and amount must be sufficient to credit shortfalls exactly or with excess remaining
+- max extension = initial duration/2
 
 **A tier settled while the pool was empty stays settled.** `_settle` advances `_settledTiers` past a
 tier even when `PoolExhausted` fired and the payout was short.
@@ -92,7 +92,7 @@ record `_shortfall[promoterId][kpiIndex] += reward - tierPay` when a tier pays s
 outstanding shortfalls first inside `_settle` once escrow allows. Without it, document the gap
 explicitly rather than letting a judge find it.
 
-decision: pay shortfall from added pool. Add claim shortfall btn once pool addition is successful 
+decision: pay shortfall from added pool. Add claim shortfall btn once pool addition is successful
 
 only enabled for promoters who are owed shortfall dues to pool exhaustion .
 
@@ -209,10 +209,9 @@ The campaign-wide version already exists in `scripts/indexer.ts` — but it send
 possibly several ERC20 transfers.
 
 No per-item `try`/`catch`. The planner already mirrors every named revert off chain (`decideReport`,
-plus the guard set `indexer.ts` enumerates before spending gas), so a bad item is a planner bug rather
-than a runtime case, and one revert failing the batch is the honest semantic for "report everything I
-just showed you". Multicall3 is not an option — it would make `msg.sender` the multicall, and
-`reportUserAction` gates on `project`.
+plus the guard set `indexer.ts` enumerates before spending gas).
+
+Multicall3 is not an option — it would make `msg.sender` the multicall, and`reportUserAction` gates on `project`.
 
 **Browser-side planning already exists.** `lib/indexerCore.ts` is browser-importable, so the same
 `logRequest` → `aggregateByActor` → `AttributionLookup` → `decideReport` → `encodeActions` chain the
@@ -226,10 +225,7 @@ loses older touches.
 
 **UI.** One "Report all qualifying activity" button, a preview table of referral × KPI → delta with the
 promoter each delta lands on (`tallyByPromoter`), then one confirmation. Keep the per-KOL panel as the
-fallback for an over-large batch or a single blocked item. Copy stays terse — no explanatory second
-sentences.
-
-decision : torn on a possible unbounded loop issue for when promoters list grows
+fallback for an over-large batch or a single blocked item.
 
 ### Verification
 

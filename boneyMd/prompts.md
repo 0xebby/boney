@@ -103,3 +103,16 @@ recreate the form info used during the creation of this campaign
 if unguarded kpis accepts reports as is from projects , kpis should be guarded by default so
 boneyverify always takes precedence in every hosted campaign reporting
 ```
+
+---
+
+## 2026-09-07
+
+```
+hey, load up your skills and reread boneyMd/eth-global-2026-plan.md for updated decisions and plan
+for feature addition 1, find points where my decision on 1 would break the code
+```
+
+```
+update prompt md , commit all uncommitted work and i will push
+```
