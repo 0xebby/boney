@@ -26,50 +26,6 @@ First contract iteration implemented on 2026-09-07.
 - The extension ceiling is cumulative, not reset by each successive call.
 - Existing KPI definitions and tier ladders remain unchanged by extension and top-up.
 
-## Isolated playground
-
-The hosted registry is append-only, so Feature 1 redeployment and reseeding must not happen on the
-existing Base Sepolia registry. Use a fresh local deployment instead:
-
-- Anvil on RPC port `8546` with chain id `31338`.
-- `DeployBoney` followed by `SeedLocal` against the fresh registry.
-- A separate generated deployment output and frontend process on port `3002`.
-- A playground seed containing an active campaign with a nearly exhausted pool, an owed shortfall,
-	and an extendable reporting window.
-- A reset command that clears only playground Anvil and Graph Node/Postgres state.
-
-The current `seed-local.ts` treats only chain id `31337` as Anvil, so playground mode needs an
-explicit local flag or local-RPC detection before using the deterministic Anvil keys on `31338`.
-
-### Off-chain processes
-
-- Ethos stub is chain-independent and can be reused.
-- The relayer CLI and indexer accept an explicit playground RPC and campaign address.
-- `relay-loop.sh` currently contains hardcoded Base Sepolia targets; playground mode needs a target
-	file or environment-provided `campaign:kpi` list.
-- `dev-up.sh` currently assumes Base Sepolia and needs a playground mode before it can orchestrate
-	the local RPC, relayer, indexer, and frontend together.
-
-### Local Graph Node
-
-Graph Node can index the playground through a separate local manifest:
-
-- Configure an Ethereum network named `localhost` with Anvil's RPC URL.
-- Use playground contract addresses and the deployment block in `subgraph.yaml`.
-- Keep the Base Sepolia manifest and Studio deployment unchanged.
-- Start from the deployment block so `CampaignCreated` events spawn all dynamic campaign templates.
-- Add `Extended` and `PoolIncreased` handlers when the subgraph exposes Feature 1 state.
-- Run Postgres and IPFS with Graph Node; after resetting Anvil, recreate their data so stale entities
-	from old contract addresses cannot survive.
-
-The local Graph Node is for indexing and GraphQL integration checks. Direct RPC remains the primary
-contract behavior check, and the hosted subgraph is never repointed at the playground.
-
-The first isolated end-to-end run is documented in
-`boneyMd/feature-1-anvil-e2e-report.md`. It found an EIP-170 deployment-size blocker, missing
-31338 frontend chain registration, a seed harness assumption limited to 31337, and the need for
-explicit verifier configuration before relaying.
-
 ## Deferred next slice
 
 - Synchronize `EventMetricKpiVerifier.windowEndBlock` when a campaign extends. The preferred design is a registered-campaign `extendWindow` entrypoint and a campaign call across gated KPIs.
@@ -82,4 +38,4 @@ explicit verifier configuration before relaying.
 
 `forge fmt src/interfaces/ICampaign.sol src/campaign/Campaign.sol test/Campaign.t.sol`
 
-`forge test --match-contract CampaignTest` -> 77 passed, including Feature 1 fuzz coverage.
+`forge test --match-contract CampaignTest` -> 74 passed.
