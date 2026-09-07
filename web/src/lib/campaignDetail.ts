@@ -38,6 +38,9 @@ export type CampaignDetail = {
   name: string;
   token: `0x${string}`;
   rewardPool: bigint;
+  initialRewardPool: bigint;
+  /** Whether the deployed campaign exposes the Feature 1 extension and top-up getters. */
+  feature1Supported: boolean;
   paidOut: bigint;
   remainingPool: bigint;
   /**
@@ -50,6 +53,7 @@ export type CampaignDetail = {
   escrowBalance: bigint;
   startTime: bigint;
   endTime: bigint;
+  maximumEndTime: bigint;
   /** When `end()`/`cancel()` was actually called; 0 while the campaign is still open. */
   endedAt: bigint;
   attributionWindow: bigint;
@@ -162,6 +166,22 @@ export async function fetchCampaignDetail(
     at<`0x${string}`>("escrowVault"),
   ]);
 
+  // These getters were added after the first deployment. Older campaigns still expose the original
+  // config, so preserve the detail page by deriving the equivalent values when a getter is absent.
+  const readFeatureGetter = async <T>(fn: string, fallback: T) => {
+    try {
+      return {value: await at<T>(fn), supported: true};
+    } catch {
+      return {value: fallback, supported: false};
+    }
+  };
+  const [initialPoolResult, maximumEndResult] = await Promise.all([
+    readFeatureGetter("initialRewardPool", rewardPool),
+    readFeatureGetter("maximumEndTime", endTime + (endTime - startTime) / BigInt(2)),
+  ]);
+  const initialRewardPool = initialPoolResult.value;
+  const maximumEndTime = maximumEndResult.value;
+
   // Escrow balance is what `activate` (NotFunded) and `reclaimUnspent` (NothingToReclaim)
   // actually check — it is not derivable from `remainingPool`, which is the accounting figure
   // `rewardPool - paidOut` and stays at the full pool on a campaign that was never funded.
@@ -182,11 +202,14 @@ export async function fetchCampaignDetail(
     name,
     token,
     rewardPool,
+    initialRewardPool,
+    feature1Supported: initialPoolResult.supported && maximumEndResult.supported,
     paidOut,
     remainingPool,
     escrowBalance: escrowBalance as bigint,
     startTime: BigInt(startTime),
     endTime: BigInt(endTime),
+    maximumEndTime: BigInt(maximumEndTime),
     endedAt: BigInt(endedAt),
     attributionWindow: BigInt(attributionWindow),
     minReputation,

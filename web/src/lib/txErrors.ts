@@ -144,6 +144,18 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   ClaimWindowOpen: ([until]) =>
     `Promoters can still claim until ${at(until)}. Unspent funds can only be reclaimed after that.`,
   NothingToReclaim: () => "There's nothing left in escrow to reclaim.",
+  ExtensionNotForward: ([current]) =>
+    `The new campaign deadline must be later than ${at(current)}.`,
+  ExtensionTooLarge: ([maximum]) =>
+    `That extension exceeds the campaign's maximum deadline of ${at(maximum)}.`,
+  TopUpTooEarly: ([paidOut, required]) =>
+    `The campaign has paid ${count(paidOut)} of the ${count(required)} required before a top-up is allowed.`,
+  TopUpTooSmall: ([provided, required]) =>
+    `That top-up provides ${count(provided)}, but at least ${count(required)} is required.`,
+  ShortfallUnfunded: ([provided, required]) =>
+    `The available escrow (${count(provided)}) does not cover the outstanding shortfall of ${count(required)}.`,
+  OutstandingShortfall: ([amount]) =>
+    `${count(amount)} remains owed to promoters and must be claimed before funds can be reclaimed.`,
 
   // ── Campaign: joining ──
   AlreadyJoined: () => "This wallet is already promoting the campaign.",

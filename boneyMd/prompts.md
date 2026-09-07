@@ -115,4 +115,60 @@ for feature addition 1, find points where my decision on 1 would break the code
 
 ```
 update prompt md , commit all uncommitted work and i will push
+
+let's get the first iteration of feature 1 with suggestions in motion and make a md file for each feature we work on for ease of tracking.
+```
+
+```
+you know to add all future promps to prompts.md
+```
+
+```
+good: let's get the first iteration of feature 1 with suggestions in motion and make a md file for each feature we work on for ease of tracking.
+```
+
+```
+let's add more natspec to new function additions
+```
+
+```
+let's fuzz test new contract functions
+```
+
+```
+run the fuzz with multiple invariants, does frontend have the extend /top up btn? start server so i can eyeball
+```
+
+```
+commit contract work first and i must approve commit messages
+```
+
+```
+approved commit message
+```
+
+```
+go on with frontend work
+```
+
+```
+no Extend or Top Up buttons exist yet. The ABI and error mappings are present, but UI write controls are still deferred. let's fix
+```
+
+```
+ContractFunctionExecutionError: The contract function "initialRewardPool" reverted. Contract Call:
+address: 0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc function: initialRewardPool() Docs:
+https://viem.sh/docs/contract/readContract Version: viem@2.55.10
+```
+
+```
+from front end
+```
+
+```
+commit and ask for approval
+```
+
+```
+good
 ```
