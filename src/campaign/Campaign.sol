@@ -2,6 +2,8 @@
 pragma solidity ^0.8.30;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ICampaign} from "../interfaces/ICampaign.sol";
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {IReputationRegistry} from "../interfaces/IReputationRegistry.sol";
@@ -14,6 +16,8 @@ import {Names} from "../libraries/Names.sol";
 /// @notice One performance campaign: escrowed rewards released automatically as attributed KPI
 ///         progress crosses per-promoter thresholds.
 contract Campaign is ICampaign, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     /// @notice Window after a campaign ends during which promoters may still settle earned tiers,
     ///         before the project can reclaim what is left.
     /// @dev [bscoretest] Protocol value is 7 days.
@@ -24,6 +28,10 @@ contract Campaign is ICampaign, ReentrancyGuard {
     uint256 public constant MAX_KPIS = 32;
     /// @notice Maximum number of reward tiers per KPI.
     uint256 public constant MAX_TIERS_PER_KPI = 32;
+    /// @notice Maximum extension numerator against the initial campaign duration.
+    uint256 public constant MAX_EXTENSION_NUMERATOR = 1;
+    /// @notice Maximum extension denominator against the initial campaign duration.
+    uint256 public constant MAX_EXTENSION_DENOMINATOR = 2;
 
     /// @notice Maximum number of evidence actions a single report may carry.
     /// @dev Bounds the segment walk in `reportUserAction`. The off-chain reporter folds same-block
@@ -48,12 +56,18 @@ contract Campaign is ICampaign, ReentrancyGuard {
     string public name;
     /// @notice ERC20 used for escrow and payouts.
     address public immutable token;
-    /// @notice Total escrow required before activation, and the ceiling on all payouts.
-    uint256 public immutable rewardPool;
+    /// @notice Current escrow ceiling on all payouts.
+    uint256 private _rewardPool;
+    /// @notice Initial reward pool used for top-up limits.
+    uint256 public immutable initialRewardPool;
     /// @notice Start of the window in which reports are accepted.
     uint64 public immutable startTime;
     /// @notice End of that window. Past it, anyone may `end()` the campaign.
-    uint64 public immutable endTime;
+    uint64 private _endTime;
+    /// @notice Initial reporting duration used to bound extensions.
+    uint64 public immutable initialDuration;
+    /// @notice Absolute reporting deadline after the maximum allowed extension.
+    uint64 public immutable maximumEndTime;
     /// @dev Advisory. The hard cap on touch lifetime lives in `AttributionRegistry`.
     uint64 public immutable attributionWindow;
     /// @notice Minimum reputation score a promoter needs to join. 0 disables the gate.
@@ -91,6 +105,10 @@ contract Campaign is ICampaign, ReentrancyGuard {
     mapping(address => mapping(uint256 => mapping(bytes32 => uint256))) private _creditedTo;
     /// @dev kpiIndex => campaign-level total.
     mapping(uint256 => uint256) private _totalProgress;
+    /// @dev promoter => kpiIndex => unpaid reward from pool exhaustion.
+    mapping(address => mapping(uint256 => uint256)) private _shortfall;
+    /// @dev Total unpaid rewards across all promoters and KPIs.
+    uint256 private _totalShortfall;
 
     /// @dev Restricts a call to the campaign's project.
     modifier onlyProject() {
@@ -175,9 +193,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
         project = cfg.project;
         name = cfg.name;
         token = cfg.token;
-        rewardPool = cfg.rewardPool;
+        _rewardPool = cfg.rewardPool;
+        initialRewardPool = cfg.rewardPool;
         startTime = cfg.startTime;
-        endTime = cfg.endTime;
+        _endTime = cfg.endTime;
+        initialDuration = cfg.endTime - cfg.startTime;
+        maximumEndTime =
+            cfg.endTime + uint64(initialDuration * MAX_EXTENSION_NUMERATOR / MAX_EXTENSION_DENOMINATOR);
         attributionWindow = cfg.attributionWindow;
         minReputation = cfg.minReputation;
 
@@ -197,11 +219,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function activate() external onlyProject {
         if (status != Types.CampaignStatus.Pending) revert WrongStatus(status);
         uint256 balance = escrowVault.balanceOf(address(this));
-        if (balance < rewardPool) revert NotFunded(balance, rewardPool);
-        if (block.timestamp >= endTime) revert OutsideWindow(startTime, endTime);
+        if (balance < _rewardPool) revert NotFunded(balance, _rewardPool);
+        if (block.timestamp >= _endTime) revert OutsideWindow(startTime, _endTime);
 
         _setStatus(Types.CampaignStatus.Active);
-        emit Activated(startTime, endTime);
+        emit Activated(startTime, _endTime);
     }
 
     /// @inheritdoc ICampaign
@@ -221,7 +243,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
             revert WrongStatus(status);
         }
-        if (msg.sender != project && block.timestamp < endTime) revert OutsideWindow(startTime, endTime);
+        if (msg.sender != project && block.timestamp < _endTime) {
+            revert OutsideWindow(startTime, _endTime);
+        }
 
         endedAt = uint64(block.timestamp);
         _setStatus(Types.CampaignStatus.Ended);
@@ -234,6 +258,78 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         endedAt = uint64(block.timestamp);
         _setStatus(Types.CampaignStatus.Cancelled);
+    }
+
+    /// @inheritdoc ICampaign
+    /// @dev The maximum deadline is fixed from the initial campaign duration and is not extended by
+    ///      subsequent calls.
+    function extend(uint64 newEndTime) external onlyProject {
+        if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
+            revert WrongStatus(status);
+        }
+        if (newEndTime <= _endTime) revert ExtensionNotForward(_endTime, newEndTime);
+
+        if (newEndTime > maximumEndTime) revert ExtensionTooLarge(maximumEndTime, newEndTime);
+
+        uint64 oldEndTime = _endTime;
+        _endTime = newEndTime;
+        emit Extended(oldEndTime, newEndTime);
+    }
+
+    /// @inheritdoc ICampaign
+    /// @dev Pulls tokens from the project through the campaign's escrow account and raises the pool
+    ///      by the amount the vault actually credits. Any recorded shortfall must be fully covered.
+    function topUp(uint256 amount) external onlyProject nonReentrant {
+        if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
+            revert WrongStatus(status);
+        }
+
+        uint256 requiredPaidOut = (_rewardPool * 90) / 100;
+        if (paidOut < requiredPaidOut) revert TopUpTooEarly(paidOut, requiredPaidOut);
+
+        uint256 minimum = (initialRewardPool * 20) / 100;
+        if (amount < minimum) revert TopUpTooSmall(amount, minimum);
+
+        IERC20 poolToken = IERC20(token);
+        uint256 before = poolToken.balanceOf(address(this));
+        poolToken.safeTransferFrom(project, address(this), amount);
+        uint256 received = poolToken.balanceOf(address(this)) - before;
+        if (received < minimum) revert TopUpTooSmall(received, minimum);
+
+        poolToken.forceApprove(address(escrowVault), received);
+        uint256 escrowBefore = escrowVault.balanceOf(address(this));
+        escrowVault.deposit(address(this), received);
+        uint256 deposited = escrowVault.balanceOf(address(this)) - escrowBefore;
+        if (deposited < _totalShortfall) revert ShortfallUnfunded(deposited, _totalShortfall);
+
+        uint256 oldRewardPool = _rewardPool;
+        _rewardPool += deposited;
+        emit PoolIncreased(oldRewardPool, _rewardPool);
+    }
+
+    /// @inheritdoc ICampaign
+    /// @dev Callable by the owed promoter after a top-up. A partial payment leaves the remainder
+    ///      recorded for a later claim.
+    function claimShortfall(uint256 kpiIndex) external nonReentrant {
+        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        if (
+            status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused
+                && status != Types.CampaignStatus.Ended
+        ) revert WrongStatus(status);
+
+        uint256 amount = _shortfall[msg.sender][kpiIndex];
+        if (amount == 0) revert NothingToReclaim();
+
+        uint256 available = _rewardPool - paidOut;
+        uint256 payout = amount > available ? available : amount;
+        if (payout == 0) revert ShortfallUnfunded(available, amount);
+
+        bytes32 promoterId = _promoterIdOf[msg.sender];
+        _shortfall[msg.sender][kpiIndex] = amount - payout;
+        _totalShortfall -= payout;
+        paidOut += payout;
+        escrowVault.release(msg.sender, payout);
+        emit ShortfallPaid(promoterId, msg.sender, kpiIndex, payout);
     }
 
     /// @dev Transitions the campaign to a new status and emits the state change.
@@ -534,7 +630,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         while (next < ladder.length && progress >= ladder[next].threshold) {
             uint256 reward = ladder[next].reward;
-            uint256 remaining = rewardPool - paidOut;
+            uint256 remaining = _rewardPool - paidOut;
             uint256 tierPay = reward > remaining ? remaining : reward;
 
             // Marked settled even when the pool cannot cover it.
@@ -545,7 +641,12 @@ contract Campaign is ICampaign, ReentrancyGuard {
                 escrowVault.release(promoter, tierPay);
             }
             emit TierSettled(promoterId, promoter, kpiIndex, next, tierPay);
-            if (tierPay < reward) emit PoolExhausted(reward - tierPay);
+            if (tierPay < reward) {
+                uint256 shortfall = reward - tierPay;
+                _shortfall[promoter][kpiIndex] += shortfall;
+                _totalShortfall += shortfall;
+                emit PoolExhausted(shortfall);
+            }
 
             unchecked {
                 ++next;
@@ -558,6 +659,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @dev Cancelled campaigns return funds immediately; Ended campaigns wait out `CLAIM_GRACE`.
     function reclaimUnspent() external nonReentrant onlyProject {
+        if (_totalShortfall != 0) revert OutstandingShortfall(_totalShortfall);
         if (status == Types.CampaignStatus.Ended) {
             uint64 until = endedAt + CLAIM_GRACE;
             if (block.timestamp <= until) revert ClaimWindowOpen(until);
@@ -574,8 +676,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @dev Reverts unless the current block timestamp is inside the campaign window.
     function _requireWindow() private view {
-        if (block.timestamp < startTime || block.timestamp > endTime) {
-            revert OutsideWindow(startTime, endTime);
+        if (block.timestamp < startTime || block.timestamp > _endTime) {
+            revert OutsideWindow(startTime, _endTime);
         }
     }
 
@@ -613,9 +715,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
             project: project,
             name: name,
             token: token,
-            rewardPool: rewardPool,
+            rewardPool: _rewardPool,
             startTime: startTime,
-            endTime: endTime,
+            endTime: _endTime,
             attributionWindow: attributionWindow,
             minReputation: minReputation
         });
@@ -699,7 +801,27 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @notice Rewards still available in the shared pool.
     /// @return The unpaid remainder of the reward pool.
     function remainingPool() external view returns (uint256) {
-        return rewardPool - paidOut;
+        return _rewardPool - paidOut;
+    }
+
+    /// @inheritdoc ICampaign
+    /// @return The current reward pool ceiling, including successful top-ups.
+    function rewardPool() public view returns (uint256) {
+        return _rewardPool;
+    }
+
+    /// @inheritdoc ICampaign
+    /// @return The current reporting deadline, including successful extensions.
+    function endTime() public view returns (uint64) {
+        return _endTime;
+    }
+
+    /// @notice Unpaid reward caused by a depleted pool.
+    /// @param promoter Promoter owed the reward.
+    /// @param kpiIndex KPI whose tier was underpaid.
+    /// @return Outstanding shortfall.
+    function shortfallOf(address promoter, uint256 kpiIndex) external view returns (uint256) {
+        return _shortfall[promoter][kpiIndex];
     }
 
     /// @notice The campaign's project.

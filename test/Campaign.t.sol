@@ -152,6 +152,14 @@ contract CampaignTest is Test {
         return Campaign(addr);
     }
 
+    function _createCampaignWithPool(uint256 pool) internal returns (Campaign) {
+        Types.CampaignConfig memory cfg = _defaultConfig(0);
+        cfg.rewardPool = pool;
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(cfg, _defaultKpis(), _defaultTiers());
+        return Campaign(addr);
+    }
+
     function _fund(Campaign c, uint256 amount) internal {
         token.mint(project, amount);
         vm.startPrank(project);
@@ -204,6 +212,78 @@ contract CampaignTest is Test {
         assertEq(campaign.remainingPool(), POOL);
         assertEq(vault.tokenOf(address(campaign)), address(token), "registered with vault");
         assertTrue(registry.isCampaign(address(campaign)));
+    }
+
+    function test_Extend_updatesDeadlineAndPreservesTiers() public {
+        _activate(campaign);
+        Types.RewardTier[] memory before = campaign.tiers(0);
+        uint64 newEndTime = endTime + campaign.initialDuration() / 2;
+
+        vm.prank(project);
+        campaign.extend(newEndTime);
+
+        assertEq(campaign.endTime(), newEndTime);
+        assertEq(campaign.tiers(0)[0].threshold, before[0].threshold);
+        assertEq(campaign.tiers(0)[0].reward, before[0].reward);
+        assertEq(campaign.config().rewardPool, POOL);
+    }
+
+    function test_Extend_rejectsBeyondHalfInitialDuration() public {
+        _activate(campaign);
+        uint64 maximum = endTime + campaign.initialDuration() / 2;
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.ExtensionTooLarge.selector, maximum, maximum + 1));
+        campaign.extend(maximum + 1);
+    }
+
+    function test_Extend_rejectsEndedCampaign() public {
+        _activate(campaign);
+        vm.prank(project);
+        campaign.end();
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Ended));
+        campaign.extend(endTime + 1);
+    }
+
+    function test_TopUp_replenishesPoolAndPaysShortfall() public {
+        Campaign depleted = _createCampaignWithPool(6_000 ether);
+        token.mint(project, 6_000 ether);
+        vm.startPrank(project);
+        token.approve(address(vault), 6_000 ether);
+        vault.deposit(address(depleted), 6_000 ether);
+        depleted.activate();
+        vm.stopPrank();
+
+        bytes32 id = _join(depleted, kol);
+        _touch(depleted, userPk, user, id, 7 days);
+        _report(depleted, project, user, 100);
+
+        assertEq(depleted.paidOut(), 6_000 ether);
+        assertEq(depleted.shortfallOf(kol, 0), 2_000 ether);
+
+        token.mint(project, 2_000 ether);
+        vm.startPrank(project);
+        token.approve(address(depleted), 2_000 ether);
+        depleted.topUp(2_000 ether);
+        vm.stopPrank();
+
+        assertEq(depleted.rewardPool(), 8_000 ether);
+        vm.prank(kol);
+        depleted.claimShortfall(0);
+        assertEq(depleted.shortfallOf(kol, 0), 0);
+        assertEq(depleted.paidOut(), 8_000 ether);
+    }
+
+    function test_TopUp_rejectsBeforeDepletion() public {
+        _activate(campaign);
+        token.mint(project, 2_000 ether);
+        vm.startPrank(project);
+        token.approve(address(campaign), 2_000 ether);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TopUpTooEarly.selector, 0, 9_000 ether));
+        campaign.topUp(2_000 ether);
+        vm.stopPrank();
     }
 
     /// @dev The registry allows creating a campaign that names another address as the project,
@@ -1111,5 +1191,61 @@ contract CampaignTest is Test {
 
         assertGe(campaign.progressOf(kol, 0), first, "progress never decreases");
         assertEq(campaign.progressOf(kol, 0), b);
+    }
+
+    function testFuzz_ExtendWithinMaximumSucceeds(uint64 extension) public {
+        extension = uint64(bound(extension, 1, campaign.initialDuration() / 2));
+
+        _activate(campaign);
+        uint64 newEndTime = endTime + extension;
+
+        vm.prank(project);
+        campaign.extend(newEndTime);
+
+        assertEq(campaign.endTime(), newEndTime);
+        assertLe(campaign.endTime(), campaign.maximumEndTime());
+    }
+
+    function testFuzz_ExtendBeyondMaximumReverts(uint64 extra) public {
+        extra = uint64(bound(extra, 1, 30 days));
+
+        _activate(campaign);
+        uint64 maximumEndTime = campaign.maximumEndTime();
+        uint64 newEndTime = maximumEndTime + extra;
+
+        vm.prank(project);
+        vm.expectRevert(
+            abi.encodeWithSelector(ICampaign.ExtensionTooLarge.selector, maximumEndTime, newEndTime)
+        );
+        campaign.extend(newEndTime);
+    }
+
+    function testFuzz_TopUpPreservesPoolAccounting(uint256 amount) public {
+        amount = bound(amount, 2_000 ether, 100_000 ether);
+
+        Campaign depleted = _createCampaignWithPool(6_000 ether);
+        _fund(depleted, 6_000 ether);
+        vm.prank(project);
+        depleted.activate();
+
+        bytes32 id = _join(depleted, kol);
+        _touch(depleted, userPk, user, id, 7 days);
+        _report(depleted, project, user, 100);
+
+        token.mint(project, amount);
+        vm.startPrank(project);
+        token.approve(address(depleted), amount);
+        depleted.topUp(amount);
+        vm.stopPrank();
+
+        assertEq(depleted.rewardPool(), 6_000 ether + amount);
+        assertEq(depleted.paidOut() + depleted.remainingPool(), depleted.rewardPool());
+
+        vm.prank(kol);
+        depleted.claimShortfall(0);
+
+        assertEq(depleted.shortfallOf(kol, 0), 0);
+        assertEq(depleted.paidOut(), 8_000 ether);
+        assertEq(depleted.remainingPool(), amount - 2_000 ether);
     }
 }
