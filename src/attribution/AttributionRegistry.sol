@@ -156,8 +156,8 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @param campaign The campaign named in the touch.
     /// @param nowTs The current block timestamp, narrowed once by the caller.
     function _requireCampaignOpen(address campaign, uint64 nowTs) private view {
-        (bool okEnd, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
-        if (okEnd && endData.length == 32) {
+        (bool hasEnded, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
+        if (hasEnded && endData.length == 32) {
             // Decoded as uint256, not uint64, so a dirty upper word reads as far-future not a revert.
             uint256 end = abi.decode(endData, (uint256));
             // Zero means "not a campaign", not "already over".

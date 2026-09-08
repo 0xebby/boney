@@ -5,13 +5,11 @@
  *
  * The independent half of KPI verification. `indexer.ts` reports what a *project* claims; this
  * reports what Boney *observed*, and a claim is capped at the smaller of the two. The two are
- * deliberately separate processes with separate keys — a single process doing both would make the
- * cap a formality.
+ * deliberately separate processes with separate keys.
  *
  * Deliberately thin, the same way `indexer.ts` is: decoding, attribution filtering, aggregation and
- * batch planning all live in `lib/relayCore.ts` where fixture logs prove them. This file is RPC
- * pagination, key handling, and transaction sending.
- *
+ * batch planning all live in `lib/relayCore.ts` where fixture logs prove them.
+ * 
  * Three properties worth stating plainly:
  *
  *  - **Stateless.** There is no cursor file. The checkpoint lives on chain (`lastScannedBlock`), so
@@ -77,7 +75,6 @@ const REPO_ROOT = resolve(here, "../..");
 
 /**
  * Base's public endpoint rejects wider `eth_getLogs` ranges outright:
- * `-32602: query exceeds max block range 2000`. Same constant `indexer.ts` uses, same reason.
  */
 const MAX_LOG_RANGE = BigInt(2_000);
 
@@ -251,9 +248,8 @@ async function main(): Promise<void> {
 
   // ── drift guard ────────────────────────────────────────────────
 
-  // The indexer reads its event source from `KpiSpec.params` while this reads `KpiConfig`. If the two
-  // ever name different events the cap sits at 0 and every report is a silent no-op, so it is worth
-  // one comparison at startup rather than a week of "why is progress not moving".
+  // The indexer reads its event source from `KpiSpec.params` while this reads `KpiConfig`. 
+  // If the two ever name different events the cap sits at 0 and every report is a silent no-op.
   const spec = await client.readContract({
     address: campaign,
     abi: CampaignAbi,
@@ -358,9 +354,10 @@ async function main(): Promise<void> {
 
     // Every touch that could still cover creditable work, scanned from before the activity range: a
     // touch can predate the actions it covers, and a window this cannot see would drop activity the
-    // chain would credit. A touch older than `startTime - effectiveMaxDuration` has already lapsed by
-    // the campaign's own start, so it covers nothing. The floor comes from the broadcast receipt rather
-    // than `lib/deployments.ts`, which can lag a redeploy.
+    // chain would credit. 
+    // A touch older than `startTime - effectiveMaxDuration` has already lapsed by
+    // the campaign's own start, so it covers nothing. 
+    // The floor comes from the broadcast receipt rather than `lib/deployments.ts`, which can lag a redeploy.
     const touchFloor = await blockAtTimestamp(
       async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
       earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
@@ -391,8 +388,7 @@ async function main(): Promise<void> {
     }
     const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
 
-    // One read per distinct block, and only for the blocks nothing has supplied yet: the logs
-    // carried their own timestamps, and earlier passes on this chain carried the rest.
+    // One read per distinct block, and only for the blocks nothing has supplied yet.
     const wanted = uniqueBlocks(decoded);
     const missing = missingTimestamps(wanted, blockTimestamps);
     let readSoFar = 0;
