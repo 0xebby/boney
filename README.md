@@ -1,25 +1,26 @@
 # Boneyard
 
-**marketplace for verifiable web3 growth**
+**Onchain growth marketplace that pays promoters for verified project-set KPIs.** 
+
+**Powered by boney protocol smart contracts .**
 
 A project locks a reward pool in a vault, declares what counts as progress, and the vault pays
-promoters automatically as verified, attributed progress crosses thresholds. 
+promoters automatically as verified, attributed progress crosses thresholds.
 
 Nobody needs to approves a payout. Nobody can move the goalposts after the work is done.
-
 
 ## What it replaces
 
 Web3 growth deals settle on trust and screenshots. Each failure is replaced with a mechanism rather
 than a policy:
 
-| Instead of | Boneyard uses |
-|---|---|
-| Paying upfront for promises | Escrow that releases only against verified progress |
-| Metrics reported by the party being judged on them | Cumulative on-chain reports, capped at an independent observer's reading |
-| Claimed attribution | Attribution the end user signs, which expires |
-| Handing over social accounts to qualify | Attested numeric reputation — the chain stores `(wallet, schemaId) => number` |
-| Waiting on manual approval | Auto-settlement, in the same transaction as the report |
+| Instead of                                         | Boneyard uses                                                                   |
+| -------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Paying upfront for promises                        | Escrow that releases only against verified progress                             |
+| Metrics reported by the party being judged on them | Cumulative on-chain reports, capped at an independent observer's reading        |
+| Claimed attribution                                | Attribution the end user signs, which expires                                   |
+| Handing over social accounts to qualify            | Attested numeric reputation — the chain stores`(wallet, schemaId) => number` |
+| Waiting on manual approval                         | Auto-settlement, in the same transaction as the report                          |
 
 ## The core loop
 
@@ -92,20 +93,19 @@ verification adapters. `Campaign` is the eleventh, deployed per campaign.
                                     └──────────────────┘ └──────────────────┘
 ```
 
-| Contract | Responsibility |
-|---|---|
-| `Campaign` | One per campaign. Immutable config, KPIs and tiers; resolves attribution, credits deltas, walks the tier ladder inline |
-| `CampaignRegistry` | Factory, directory, and the vault's registrar — the only account that may bind a campaign to a token. Enforces project name uniqueness |
-| `EscrowVault` | Custody only. Tracks `campaign => (token, balance)` on an internal ledger; only a campaign spends its own entry |
-| `AttributionRegistry` | One live touch per `(campaign, user)` plus the full history, so a report resolves who held a wallet at each action's block |
-| `ReputationRegistry` | `(wallet, schemaId) => (value, updatedAt)`, and a weighted score over the fresh ones |
-| `AttestationVerifier` | k-of-n threshold EIP-712 attestations with per-attestor nonces. Handles never touch the chain |
-| `OracleCoordinator` | Staked optimistic reporting. Carries both the aggregate path and the per-user path that credits promoters |
-| `GuardedKpiVerifier` | What a campaign's `KpiSpec.verifier` should point at. Composes Boney's reading with an optional second verifier |
-| `EventMetricKpiVerifier` | Boney's canonical reading, fed by an independent relayer scanning real event logs |
-| `TouchWindowVerifier` | Stateless attribution-timing lens, for off-chain window reads. **Not** to be wired as a KPI's verifier |
-| `Boney` | Facade. Resolves ids, batches approvals, assembles paginated views. Holds no funds and no privileged role |
-
+| Contract                   | Responsibility                                                                                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `Campaign`               | One per campaign. Immutable config, KPIs and tiers; resolves attribution, credits deltas, walks the tier ladder inline                  |
+| `CampaignRegistry`       | Factory, directory, and the vault's registrar — the only account that may bind a campaign to a token. Enforces project name uniqueness |
+| `EscrowVault`            | Custody only. Tracks`campaign => (token, balance)` on an internal ledger; only a campaign spends its own entry                        |
+| `AttributionRegistry`    | One live touch per`(campaign, user)` plus the full history, so a report resolves who held a wallet at each action's block             |
+| `ReputationRegistry`     | `(wallet, schemaId) => (value, updatedAt)`, and a weighted score over the fresh ones                                                  |
+| `AttestationVerifier`    | k-of-n threshold EIP-712 attestations with per-attestor nonces. Handles never touch the chain                                           |
+| `OracleCoordinator`      | Staked optimistic reporting. Carries both the aggregate path and the per-user path that credits promoters                               |
+| `GuardedKpiVerifier`     | What a campaign's`KpiSpec.verifier` should point at. Composes Boney's reading with an optional second verifier                        |
+| `EventMetricKpiVerifier` | Boney's canonical reading, fed by an independent relayer scanning real event logs                                                       |
+| `TouchWindowVerifier`    | Stateless attribution-timing lens, for off-chain window reads.**Not** to be wired as a KPI's verifier                             |
+| `Boney`                  | Facade. Resolves ids, batches approvals, assembles paginated views. Holds no funds and no privileged role                               |
 
 There is deliberately no protocol-wide owner that can touch escrow. `EscrowVault`'s only authority is
 binding a campaign to a token; the governor and the schema registrar are governance over *scoring* and
@@ -131,20 +131,20 @@ struct RewardTier { uint256 threshold; uint256 reward; }
 
 `kind` is a label for the UI; what a KPI actually *means* is its `params` event source and its verifier.
 
-A `Custom` KPI must name one (`CustomKpiNeedsVerifier`). 
+A `Custom` KPI must name one (`CustomKpiNeedsVerifier`).
 
 Tiers are per-promoter, per-KPI, with strictly ascending thresholds, at most `MAX_TIERS_PER_KPI = 32` each.
 
 **Reports are cumulative.** `reportUserAction(kpiIndex, user, newTotal, evidence)` states a user's
 running total, not a delta, so a replayed or duplicated report is a no-op: the campaign credits
-`newTotal - alreadyCredited` and returns early when that is zero. 
+`newTotal - alreadyCredited` and returns early when that is zero.
 
 Evidence is `Types.Action[]`
 (`{blockNumber, timestamp, amount}`) in ascending block order, bounded by `MAX_EVIDENCE_ACTIONS = 256`,
 so each action is attributed at its own block rather than all of them at report time.
 
 Settlement then walks the ladder in the same transaction and releases from the vault directly to the
-promoter. 
+promoter.
 
 Rewards draw from one shared pool, first-come. If the pool cannot cover a crossed tier the
 campaign pays what remains and emits `PoolExhausted(shortfall)`, it never reverts, because reverting
@@ -159,7 +159,7 @@ enforces is that a project's claim is capped at an independent observer's readin
 **A verifier may only ever shrink a claim.** `Campaign` reverts `VerifierOvercredit(credited, max)` on
 any adapter returning more than was claimed, independently of what the adapter does. So a malicious or
 buggy adapter cannot mint progress and it cannot redirect the payee either: it can deny a promoter a
-delta they did not earn, but not award that delta to whoever did. 
+delta they did not earn, but not award that delta to whoever did.
 
 The uncredited portion stays uncredited, and a corrected report can land later.
 
@@ -175,17 +175,17 @@ AGREE:  revert VerifierDisagreement(...) past toleranceBps, else return boneyVal
 ```
 
 `AGREE` is for a project independently measuring the *same* quantity  divergence past tolerance should
-surface as an actionable error, not quietly take the smaller number. 
+surface as an actionable error, not quietly take the smaller number.
 
 `CAP` on the other hand is for layering a stricter lens on a *different* quantity, where every legitimate report would diverge by construction. Both fail
 closed: an unconfigured KPI reverts `NotConfigured(campaign, kpiIndex)` rather than passing ungated.
 
 ### Two keys, two processes
 
-| | Claims | Runs as | Command | Writes to |
-|---|---|---|---|---|
-| **The project** | "Alice made 2 deposits" | `PRIVATE_KEY` | `pnpm index` | `Campaign.reportUserAction` |
-| **Boney** | "we independently observed 2" | `REPORTER_PRIVATE_KEY` | `pnpm relay` | `EventMetricKpiVerifier.reportBatch` |
+|                       | Claims                        | Runs as                  | Command        | Writes to                              |
+| --------------------- | ----------------------------- | ------------------------ | -------------- | -------------------------------------- |
+| **The project** | "Alice made 2 deposits"       | `PRIVATE_KEY`          | `pnpm index` | `Campaign.reportUserAction`          |
+| **Boney**       | "we independently observed 2" | `REPORTER_PRIVATE_KEY` | `pnpm relay` | `EventMetricKpiVerifier.reportBatch` |
 
 On a gated KPI a claim is credited at the smaller of the two, so one process doing both with one key
 would make the cap a formality.
@@ -214,20 +214,16 @@ never pays gas and never transacts with Boney directly.
 
 - **`promoterId = keccak256(abi.encode(campaign, promoter))`**, namespaced by registrant, so an id from
   one campaign cannot farm attribution in another and no squatter can deny a campaign an id.
-  
 - **LAST_TOUCH is ordered by the signed `signedAt`, not by relay order**, because relayers are
   adversarial. A touch signed no later than the stored one reverts `TouchNotNewer`, so holding a
   signature back and relaying it late wins nothing.
-  
 - **The registry enforces the campaign's own bounds on chain**, not in the client: it reads the
   campaign's `attributionWindow`, `endTime` and `status`, caps the touch at
   `min(campaign.attributionWindow, maxTouchDuration)`, and refuses a touch for a closed campaign.
-  
 - **Credit is resolved per action, at that action's own block.** A report carrying evidence asks who
   held the user at each action's block and tallies oldest-first, so activity predating a touch goes to
   whoever held the wallet at the time or to nobody, rather than to whoever holds the touch when the
   report happens to land. A promoter who knows the reporting cadence has nothing to farm.
-  
 - **Without evidence, an ambiguous report is refused rather than guessed.** If more than one promoter
   held the user since the last report closed, `reportUserAction` reverts `AmbiguousAttribution`. The fix
   is to resend it with evidence.
@@ -253,13 +249,13 @@ down to 1-of-1.
 
 ## Lifecycle
 
-| # | Status | Accepts | Notes |
-|---|---|---|---|
-| 0 | `Pending` | escrow deposits, `join()` | The state a campaign is born in. Cancellable |
-| 1 | `Active` | reports, settlement, deposits, `join()` | Reports additionally bounded by `[startTime, endTime]` |
-| 2 | `Paused` | deposits | Reversible halt. Reporting and settlement both stop |
-| 3 | `Ended` | reports and settlement for `CLAIM_GRACE`, then nothing | Terminal |
-| 4 | `Cancelled` | nothing | Terminal. Only reachable from `Pending` |
+| # | Status        | Accepts                                                 | Notes                                                   |
+| - | ------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| 0 | `Pending`   | escrow deposits,`join()`                              | The state a campaign is born in. Cancellable            |
+| 1 | `Active`    | reports, settlement, deposits,`join()`                | Reports additionally bounded by`[startTime, endTime]` |
+| 2 | `Paused`    | deposits                                                | Reversible halt. Reporting and settlement both stop     |
+| 3 | `Ended`     | reports and settlement for`CLAIM_GRACE`, then nothing | Terminal                                                |
+| 4 | `Cancelled` | nothing                                                 | Terminal. Only reachable from`Pending`                |
 
 Deposits work in every state because they are a vault call, not a campaign call.
 
@@ -279,7 +275,7 @@ Deposits work in every state because they are a vault call, not a campaign call.
 
 **Reporting closes exactly where reclaim opens, and the two can never both be open.** A report is
 accepted while `Active`, or while `Ended` and `block.timestamp <= endedAt + CLAIM_GRACE`; reclaim
-requires `Cancelled`, or `Ended` and `block.timestamp > endedAt + CLAIM_GRACE`. 
+requires `Cancelled`, or `Ended` and `block.timestamp > endedAt + CLAIM_GRACE`.
 
 Those are exact complements, so escrow is never reclaimable while credit is still owed and a report can never land
 against a pool the project already emptied.
@@ -368,7 +364,7 @@ pnpm report-window      # derive a campaign's reporting block bounds
 ```
 
 `pnpm dev:up` exists because the order matters: it health-checks the reputation stub, starts `next dev`,
-runs one relay pass **synchronously**, and only then runs the indexer. 
+runs one relay pass **synchronously**, and only then runs the indexer.
 
 Both scanners take `--dry-run`, which needs no key and is the right first move against an unfamiliar deployment. Both are safe to run
 repeatedly — the relayer is stateless with its checkpoint on chain, and the indexer's totals are
@@ -384,15 +380,15 @@ three — use a `publicnode` endpoint for anything sequential.
 protocol values. **Restore the protocol values before merging to main.** Each source constant carries a
 `[bscoretest]` comment naming its protocol value.
 
-| Constant | Protocol | This branch |
-|---|---|---|
-| `Campaign.CLAIM_GRACE` | 7 days | **20 minutes** |
-| `DeployBoney.DISPUTE_WINDOW` | 1 day | **4 minutes** |
-| `DeployBoney.UNSTAKE_DELAY` | 2 days | **10 minutes** |
-| `DeployBoney.MAX_TOUCH_DURATION` | 30 days | 30 days (unchanged — see below) |
-| `attributionWindow` (`SeedLocal`, `SeedGated`, `SeedEventKpi`) | 7–14 days | 30 minutes – 1 hour |
-| `attributionWindow` (every other seed) | — | equal to each campaign's own length |
-| `ETHOS_MAX_AGE` / `REACH_MAX_AGE` (`SeedLocal`, `SeedDevRep`) | 180 / 90 days | 180 / 90 days (unchanged) |
+| Constant                                                               | Protocol      | This branch                         |
+| ---------------------------------------------------------------------- | ------------- | ----------------------------------- |
+| `Campaign.CLAIM_GRACE`                                               | 7 days        | **20 minutes**                |
+| `DeployBoney.DISPUTE_WINDOW`                                         | 1 day         | **4 minutes**                 |
+| `DeployBoney.UNSTAKE_DELAY`                                          | 2 days        | **10 minutes**                |
+| `DeployBoney.MAX_TOUCH_DURATION`                                     | 30 days       | 30 days (unchanged — see below)    |
+| `attributionWindow` (`SeedLocal`, `SeedGated`, `SeedEventKpi`) | 7–14 days    | 30 minutes – 1 hour                |
+| `attributionWindow` (every other seed)                               | —            | equal to each campaign's own length |
+| `ETHOS_MAX_AGE` / `REACH_MAX_AGE` (`SeedLocal`, `SeedDevRep`)  | 180 / 90 days | 180 / 90 days (unchanged)           |
 
 `MAX_TOUCH_DURATION` is deliberately **not** shortened. The registry applies it as
 `min(campaign.attributionWindow, maxTouchDuration)`, and it applies *silently* — a campaign whose window
