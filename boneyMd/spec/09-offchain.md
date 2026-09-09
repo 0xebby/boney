@@ -35,7 +35,9 @@ On an ungated KPI (`verifier == address(0)`) there is no ceiling and the campaig
 ## `pnpm index` — the project's indexer
 
 `web/scripts/indexer.ts`, with all the logic that can be *wrong* in `web/src/lib/indexerCore.ts` where
-fixture logs prove it. The script itself is RPC pagination, key handling, and transaction sending.
+fixture logs prove it. 
+
+The script itself is RPC pagination, key handling, and transaction sending.
 
 ```bash
 pnpm index [--rpc <url>] [--campaign <address>] [--from-block N] [--dry-run]
@@ -44,29 +46,26 @@ pnpm index [--rpc <url>] [--campaign <address>] [--from-block N] [--dry-run]
 **What it does, per campaign per KPI:**
 
 1. Reads `Boney.browseCampaigns(0, 1000)`, then each campaign's `status`, window, `project`, `kpiCount`.
-   Addresses come from the Foundry broadcast receipt (`readBroadcast`), not `lib/deployments.ts`, which
-   can lag a redeploy.
+   Addresses come from the Foundry broadcast receipt (`readBroadcast`).
 2. Decodes `KpiSpec.params` as an event source (`lib/kpiSource.ts`). **A KPI whose params are not an
-   event-source blob is skipped entirely** — which is why running this against a live chain cannot
-   disturb campaigns seeded before the feature existed.
+   event-source blob is skipped entirely**.
 3. Runs pre-flight checks that mirror the contract's own guards, so a skip prints a reason instead of
    burning gas on a revert: not `Active` → `WrongStatus`; outside the window → `OutsideWindow`;
    `aggregate` → `AggregateKpi`; signer is not the `project` → `NotReporter`.
 4. Scans `TouchStored` for the campaign and builds per-user attribution windows
    (`lib/attributionWindows.ts`), the off-chain mirror of `AttributionRegistry.promoterAt`. This comes
    *before* the activity scan, because it decides where that scan starts, and it is resolved **once per
-   campaign** — lazily, so a campaign with no event-sourced KPI never pays for it.
+   campaign**, so a campaign with no event-sourced KPI never pays for it.
 5. Fetches matching logs in `MAX_LOG_RANGE = 2000`-block chunks, from one block after the campaign's
    earliest touch to the head, narrowed node-side by `topic0` and any fixed-topic filter.
 6. Resolves a timestamp for every block holding a matched log — **off the logs themselves** where the
    node supplies one, from a cache shared with the relayer where an earlier pass already paid for it, and
-   only otherwise by reading the block. See *What a pass costs* below.
+   only otherwise by reading the block.
 7. `aggregateByActor` extracts the acting wallet from the configured actor topic, re-applies the topic
    filter, drops any action nobody held attribution for at that action's own block, applies `scale`, and
-   folds per user. Referrals seen acting who were never attributed at all are printed rather than dropped
-   in silence — losing that line would make a busy source look quiet.
+   folds per user. Referrals seen acting who were never attributed at all are printed.
 8. Per user, reads `userCreditedOf`, then `decideReport` decides whether the report is worth sending at
-   all. The *live* touch is deliberately not consulted — a report can pay a promoter whose touch has
+   all, a report can pay a promoter whose touch has
    since been superseded.
 9. Builds evidence: `encodeActions(foldToLimit(actions, MAX_EVIDENCE_ACTIONS = 256))`, for **every** KPI.
    `Campaign` decodes `Types.Action[]` itself to credit each action to whoever held the referral at that
@@ -74,18 +73,7 @@ pnpm index [--rpc <url>] [--campaign <address>] [--from-block N] [--dry-run]
    touch now.
 10. Sends `reportUserAction(kpiIndex, user, newTotal, evidence)`.
 
-**Two properties worth stating plainly:**
-
-- **It cannot credit strangers.** Every action is resolved against who held that wallet at the action's
-  own block, and a touch needs the user's own EIP-712 signature. Indexing all traffic on a contract and
-  crediting it is not a thing this can do, by construction.
-- **Reports are cumulative and idempotent.** `newTotal` is a running total, so a re-run over the same
-  range decides to send nothing. Rescanning costs RPC calls, not double-crediting.
-
-**No cursor — the range is bounded by attribution instead.** `.indexer-state.json` was removed once
-crediting became per-action: a resumed range produces a *window-scoped* total, which `Campaign` compares
-against the lifetime watermark `_userCredited[user][kpiIndex]` and silently ignores. What replaces it is a
-floor that can only exclude blocks nothing could ever have been credited for:
+What replaces it is a floor that can only exclude blocks nothing could ever have been credited for:
 
 | Scan            | Starts at                                                  | Why nothing earlier matters                                                                                                                                           |
 | --------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -103,32 +91,37 @@ scan's start.
 
 ### What a pass costs
 
-A pass covers every event-sourced KPI on every campaign, and two economies are what make that finish at
-all. Both were added 2026-09-02, both are measured on Base Sepolia, and both are shared with the relayer.
+A pass covers every event-sourced KPI on every campaign, and both are shared with the relayer.
 
 **Block timestamps come off the logs.** Attribution resolves at each action's own block, so every decoded
-log needs its block's timestamp — and one `eth_getBlockByNumber` per block does not scale: 10 KPIs over 4
-campaigns wanted 231,620 block timestamps summed, which at the ~42 blocks/s that twelve concurrent reads
-managed is over 90 minutes of block reads on top of the log scans. A public endpoint's limiter ends the
-pass long before that. `eth_getLogs` already answers the question: geth-family nodes put `blockTimestamp`
+log needs its block's timestamp — and one `eth_getBlockByNumber` per block does not scale.
+
+ A public endpoint's limiter ends the pass long before that. 
+
+`eth_getLogs` already answers the question: geth-family nodes put `blockTimestamp`
 on every log and viem passes it through as a bigint, so `blockTimestamps.harvestLogTimestamps` takes it
-from the response the scan already paid for. Over 904 blocks the log-carried value equalled
-`eth_getBlockByNumber().timestamp` on every one, so this is not an approximation. Every KPI now reports
-`0 timestamp read(s) needed`.
+from the response the scan already paid for. 
+
+Over 904 blocks the log-carried value equalled `eth_getBlockByNumber().timestamp` on every one, so this is not an approximation. 
+
+Every KPI now reports`0 timestamp read(s) needed`.
 
 The block read remains as the fallback for nodes that omit the field — **anvil among them** — deduplicated
 against the cache, packed `RPC_BATCH_SIZE = 100` calls to a JSON-RPC request and dispatched
-`READ_CONCURRENCY = 300` blocks at a time. On the same endpoint that fallback runs at ~319 blocks/s
-against ~42 for one request per call: the limiter counts requests, not calls.
+`READ_CONCURRENCY = 300` blocks at a time. 
+
+On the same endpoint that fallback runs at ~319 blocks/s against ~42 for one request per call: the limiter counts requests, not calls.
 
 **The cache outlives the process.** `scripts/timestampCache.ts` keeps one
-`web/.cache/block-timestamps-<chainId>.json` that the indexer and the relayer both read and write — a
-block's timestamp is the same fact whoever asked for it, and the relayer is one invocation per KPI, so an
-in-memory cache would be discarded between passes whose ranges almost entirely overlap. Keyed by chain id,
-capped at 150,000 entries with the lowest blocks dropped first, and written to a temp file then renamed
+`web/.cache/block-timestamps-<chainId>.json` that the indexer and the relayer both read and write.
+
+Keyed by chain id, capped at 150,000 entries with the lowest blocks dropped first, and written to a temp file then renamed
 over the target, because `dev-up.sh` runs a relay loop and an indexer pass concurrently and a half-written
-file reads back as an empty cache. A cached timestamp is wrong only if its block was reorged out, which is
-the assumption the relayer's monotonic checkpoint already rests on. The indexer writes the file after each
+file reads back as an empty cache. 
+
+A cached timestamp is wrong only if its block was reorged out, 
+
+which is the assumption the relayer's monotonic checkpoint already rests on. The indexer writes the file after each
 fresh scan and once more at the end of the pass, since the last thing to gather timestamps need not be a
 scan: a campaign whose touches were never stored costs a block search and then skips every KPI.
 
@@ -136,8 +129,9 @@ scan: a campaign whose touches were never stored costs a block search and then s
 request actually carries — address, `topic0`, the indexed-topic filter, and the block range. `actorTopic`,
 `amountMode` and `scale` are deliberately absent: they change how `aggregateByActor` reads the logs
 afterwards, not which logs the node returns. On the current fixture that collapses 10 event-sourced KPIs
-to 8 distinct scans, about 130 of ~570 chunk requests. The memo is scoped to the **campaign**, not the
-run, because the activity floor is per-campaign and because holding several scans' logs at once is already
+to 8 distinct scans, about 130 of ~570 chunk requests. 
+
+The memo is scoped to the **campaign**, not the run, because the activity floor is per-campaign and because holding several scans' logs at once is already
 the pass's largest allocation.
 
 ### The event-source commitment in `params`
@@ -173,13 +167,16 @@ into the form is left-padded by `normalizeTopicValue` the way the log itself pad
 router is the common case: LiFi's `LiFiGenericSwapCompleted` indexes only a `transactionId`, so the
 reachable proxy is the WETH `Transfer` the router makes to the receiver — `topics[2]` is the user,
 `data` word 0 is the amount to the wei, and pinning `topics[1]` to the router is what separates that
-swap from any other WETH arriving at the same wallet. That is the `router-transfer` preset; the token and
-the sender are the campaign's to set.
+swap from any other WETH arriving at the same wallet. 
 
-**Where it is applied.** `topicFilterArray` builds the `eth_getLogs` topic slots for every scan path —
-the indexer, the relayer, and the browser's `useObservedActions` — so all three narrow node-side
+That is the `router-transfer` preset; the token and the sender are the campaign's to set.
+
+**Where it is applied.** `topicFilterArray` builds the `eth_getLogs` topic slots for every scan path:
+the indexer, the relayer, and the browser's `useObservedActions` so all three narrow node-side
 identically, and it builds them by index because the actor slot and the filter slot may fall in either
-order. `matchesTopicFilter` then applies the same rule again inside `aggregateByActor` over whatever
+order. 
+
+`matchesTopicFilter` then applies the same rule again inside `aggregateByActor` over whatever
 comes back, and a log that does not carry the filtered topic at all fails rather than passes.
 
 `actorTopic` is **1-based over `topics`**, because `topics[0]` is always the signature: an actor at index 0
@@ -189,17 +186,14 @@ case, and the create form's probe surfaces it from a sample log.
 
 The chain does not read this blob as a consensus rule; `Campaign` forwards `params` to the verifier and
 otherwise ignores it. It is a commitment published on chain so the off-chain halves agree on what a
-campaign measures. See [chapter 05](./05-kpi-model.md#params) for the collision with
-`TouchWindowVerifier`.
+campaign measures. See [chapter 05](./05-kpi-model.md#params) for the collision with`TouchWindowVerifier`.
 
 ### Source probing
 
 `kpiSource.probeEventSource` runs at campaign-creation time, advisory only:
 
 1. **Is there code at the address?** `getCode` empty means an EOA or an address nobody deployed to on
-   *this* chain — reported as an **error**, because no amount of promoter effort will move that KPI. This
-   catches the specific trap of the ERC-721 presets shipping `source: address(0)` deliberately (the
-   signature and topic layout are the reusable part; the collection never is).
+   *this* chain — reported as an **error**, because no amount of promoter effort will move that KPI. 
 2. **Has the event fired recently?** One `getLogs` over `PROBE_BLOCK_RANGE = 1900` blocks. A hit proves
    the signature hashes to a topic the contract really emits. A miss proves nothing, so it downgrades to
    a **warning** naming both plausible causes (idle contract, or wrong signature).
@@ -240,10 +234,9 @@ pnpm relay --campaign <address> --kpi <index> [--rpc <url>] [--verifier <address
    Boney verified another, so the cap would sit at 0 and every report would be a silent no-op.
 4. `resolveScanRange` from `checkpointOf`, the configured window, the head, and `CONFIRMATIONS = 5`.
    Nothing new to scan → it says so and exits 0.
-5. Fetches logs in 2000-block chunks — same node-side topic narrowing as the indexer — and
-   `decodeUserEvents` decodes them, reporting how many matched the topic but failed to decode.
+5. Fetches logs in 2000-block chunks and`decodeUserEvents` decodes them, reporting how many matched the topic but failed to decode.
 6. **Attribution filtering.** Scans the campaign's `TouchStored` history — from
-   `startTime - effectiveMaxDuration` as a block, the same floor the indexer uses — and builds the shared
+   `startTime - effectiveMaxDuration` as a block and builds the shared
    attribution windows. `aggregateDeltas` then folds in only the logs whose own block falls inside a
    window that was live at that block. Users with no touch at all are skipped entirely, consistent with
    `Campaign` crediting nobody for them. A block whose timestamp could not be resolved is **excluded**
@@ -257,8 +250,9 @@ pnpm relay --campaign <address> --kpi <index> [--rpc <url>] [--verifier <address
 
 Timestamps work exactly as they do in the indexer, and the same shared cache file backs both: harvested
 from the KPI logs and from the touch logs, deduplicated by `missingTimestamps`, and read from the chain
-only for what neither the logs nor an earlier pass supplied. The cache is written **before** the totals
-reads and the transactions, so a failure in the reporting half still leaves the next pass what the scan
+only for what neither the logs nor an earlier pass supplied. 
+
+The cache is written **before** the totals reads and the transactions, so a failure in the reporting half still leaves the next pass what the scan
 paid for. Reading one block at a time is what originally *broke* this script rather than merely slowing
 it: three Gyndore KPIs wanted 84,750 individual block reads for one pass, a ~34-minute job the endpoint's
 limiter cut off after ~2m20s, leaving the checkpoint stuck for ~30 hours. Both large passes now finish in
@@ -266,7 +260,7 @@ about a minute, spent almost entirely in `eth_getLogs`.
 
 **Why per-user attribution filtering is the trickiest rule:** without it, activity a user performed
 *before* they were ever attributed still credits the promoter who did not cause it. That rule is
-implemented once, in `relayCore.aggregateDeltas`, and shared by the relayer and the browser rather than
+implemented once, in `relayCore.aggregateDeltas`, and shared by the relayer and the browser and not
 reimplemented — see the subgraph note below.
 
 **Why it stays behind the head.** The checkpoint is monotonic on chain and cannot be walked back, so a
@@ -281,7 +275,7 @@ campaign.attributionRegistry() → the registry's TouchStored logs for that camp
 
 The live `touchOf(campaign, user)` is deliberately *not* what the filter reads. It answers "who holds
 this user now", and a run that floored on it would drop every action performed under a touch that has
-since been superseded — exactly the activity the chain still credits to the promoter who drove it.
+since been superseded.
 
 ### `relay-loop.sh` — one invocation per gated KPI
 
@@ -299,16 +293,18 @@ Three things about the list are worth knowing before editing it:
 - **Only gated KPIs belong in it.** An ungated KPI has no ceiling to raise, so relaying it costs a
   transaction and changes nothing.
 - **An empty list is a state, not a misconfiguration.** An all-ungated fixture prints `no gated KPIs` and
-  exits 0; `dev-up.sh` greps for that line rather than starting a background loop whose pid has already
-  exited.
+  exits 0;
 - **Keep any KPI that watches the escrow token out of it.** A payout leaving the `EscrowVault` is a
   `Transfer` too, so it would raise the observed ceiling, which unlocks the next tier, which pays out
-  again. Addresses also change with every redeploy, and a stale one is silent — the relayer reports
+  again.
+- Addresses also change with every redeploy, and a stale one is silent, the relayer reports
   against a dead campaign and the gated KPI simply stays flat.
 
 Each cycle costs at most one transaction per KPI: `reportBatch` when there is creditable activity,
 `advanceCheckpoint` when there are new blocks but nothing creditable, and nothing at all when no new blocks
-have appeared. On Base's 2s blocks the middle case is the common one. Pass output goes through `tee` rather
+have appeared. 
+
+On Base's 2s blocks the middle case is the common one. Pass output goes through `tee` rather
 than command substitution, because a pass now spends about a minute inside `eth_getLogs` per KPI and
 capturing it made a working relayer indistinguishable from a hung one.
 
@@ -341,11 +337,7 @@ under-estimating stops the relayer early and under-credits promoters. `setKpiCon
 precisely so the window can be extended afterwards **without disturbing any stored total or the
 checkpoint**.
 
-The block search is `blockSearch.blockAtTimestamp`, the same one the indexer and relayer use, bounded below
-by the protocol's own deployment block rather than genesis: a binary search over an L2's full height is ~25
-sequential round trips against an endpoint that 502s often enough to matter, and every block before
-deployment is known to be too early. Its probe map is per-run here — this script reads two timestamps and
-exits, so it does not touch the shared on-disk cache.
+The block search is `blockSearch.blockAtTimestamp.`
 
 ---
 
@@ -371,17 +363,19 @@ key, which is why the URL can be a `NEXT_PUBLIC_` variable and be read from the 
 `Kpi.source` / `topic0` / `actorTopic` / `amountMode` / `scale` — and `filterTopic` / `filterValue`, for a
 source that carries no filter — are **null** for a KPI whose params are not an event-source blob: every
 campaign seeded before that feature, and any KPI carrying a `TouchWindowVerifier` lookback instead. Null
-means "nothing observable", not an error.
+means "nothing observable".
 
 The two bookkeeping entities exist because the failure they describe is otherwise invisible.
 `SpawnedSource` dedupes dynamic data sources: two campaigns tracking the same contract with the same
 preset would spawn the same source twice and handle every matching log twice, double-counting silently,
-and graph-node does not dedupe this. `UnsupportedSource` records a KPI whose `topic0` no template
-declares — a project can name any contract and event on chain, a subgraph can only index signatures in its
+and graph-node does not dedupe this. 
+
+`UnsupportedSource` records a KPI whose `topic0` no template declares — a project can name any contract and event on chain, a subgraph can only index signatures in its
 manifest, so an unrecognised shape means that KPI is not observable here and its campaign will look quiet
 forever. Recorded so the gap is queryable rather than mistaken for inactivity: check
-`unsupportedSources` first when a KPI shows no subgraph activity, and `spawnedSources` second — a spawned
-template with **no** rows means a topic-count mismatch rather than a missing template.
+`unsupportedSources` first when a KPI shows no subgraph activity, and `spawnedSources` second — 
+
+a spawned template with **no** rows means a topic-count mismatch rather than a missing template.
 
 ### What it deliberately does not do
 
