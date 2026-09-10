@@ -30,6 +30,7 @@
 
 import {mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
+import {getStore} from "@netlify/blobs";
 import {
   DEFAULT_STUB_WALLETS,
   DEV_STUB_WALLET,
@@ -62,27 +63,57 @@ function storePath(): string {
 }
 
 /**
- * The stored list, or null when there is no usable file.
+ * The stored list, or null when there is no persisted list.
  *
  * Never throws. A missing file is the ordinary first-run state and an unreadable one is the ordinary
  * steady state on a read-only deploy; both mean "fall back to the defaults", which is a working app
  * rather than a crashing one. A file holding anything that is not an array of addresses is treated the
  * same way, because it is editable by hand and a typo there should not take the site down.
  */
-function readStore(): Set<string> | null {
-  try {
-    const parsed = JSON.parse(readFileSync(storePath(), "utf8"));
-    const list = (parsed as {wallets?: unknown})?.wallets;
-    if (!Array.isArray(list)) return null;
+function parseWallets(value: unknown): Set<string> | null {
+  const list = (value as {wallets?: unknown})?.wallets;
+  if (!Array.isArray(list)) return null;
 
-    return new Set(
-      list
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim().toLowerCase())
-        .filter((value) => STUB_ADDRESS_RE.test(value)),
-    );
+  return new Set(
+    list
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => STUB_ADDRESS_RE.test(entry)),
+  );
+}
+
+function readFileStore(): Set<string> | null {
+  try {
+    return parseWallets(JSON.parse(readFileSync(storePath(), "utf8")));
   } catch {
     return null;
+  }
+}
+
+const BLOB_STORE = "stub-wallets";
+const BLOB_KEY = "wallets";
+
+function blobsBacked(): boolean {
+  if (process.env.BONEY_STUB_STORE) return false;
+  const injected = (globalThis as {netlifyBlobsContext?: unknown}).netlifyBlobsContext;
+  return Boolean(process.env.NETLIFY_BLOBS_CONTEXT || injected);
+}
+
+function blobStore(): ReturnType<typeof getStore> {
+  return getStore({name: BLOB_STORE, consistency: "strong"});
+}
+
+type ReadResult = {ok: true; wallets: Set<string> | null} | {ok: false};
+
+async function readPersisted(): Promise<ReadResult> {
+  try {
+    if (blobsBacked()) {
+      const value = await blobStore().get(BLOB_KEY, {type: "json"});
+      return {ok: true, wallets: value === null ? null : parseWallets(value)};
+    }
+    return {ok: true, wallets: readFileStore()};
+  } catch {
+    return {ok: false};
   }
 }
 
@@ -98,14 +129,18 @@ function parseEnvList(): Set<string> {
   );
 }
 
-/** The list in force. The file wins outright; otherwise defaults ∪ env. */
-function resolve(): Set<string> {
-  const stored = readStore();
-  if (stored) return stored;
-
+function fallbackWallets(): Set<string> {
   const wallets = parseEnvList();
   for (const wallet of DEFAULT_STUB_WALLETS) wallets.add(wallet);
   return wallets;
+}
+
+/** The list in force. Persisted storage wins outright; otherwise defaults union env. */
+async function resolve(): Promise<{wallets: Set<string>; readable: boolean; persisted: boolean}> {
+  const result = await readPersisted();
+  if (!result.ok) return {wallets: fallbackWallets(), readable: false, persisted: false};
+  if (result.wallets) return {wallets: result.wallets, readable: true, persisted: true};
+  return {wallets: fallbackWallets(), readable: true, persisted: false};
 }
 
 /**
@@ -115,11 +150,15 @@ function resolve(): Set<string> {
  * that silently did nothing would send someone chasing a score bug instead of a filesystem one;
  * returning false is what lets the route say which it was.
  */
-function persist(wallets: Set<string>): boolean {
+async function persist(wallets: Set<string>): Promise<boolean> {
   const sorted = [...wallets].sort();
   process.env[ENV_KEY] = sorted.join(",");
 
   try {
+    if (blobsBacked()) {
+      await blobStore().setJSON(BLOB_KEY, {wallets: sorted});
+      return true;
+    }
     const path = storePath();
     mkdirSync(dirname(path), {recursive: true});
     writeFileSync(path, `${JSON.stringify({wallets: sorted}, null, 2)}\n`, "utf8");
@@ -136,36 +175,44 @@ function persist(wallets: Set<string>): boolean {
  * somewhere a change can be written back to. Reported by `GET` so the panel can say so without having
  * to attempt a write first.
  */
-export function isStubListPersisted(): boolean {
-  return readStore() !== null;
+export async function isStubListPersisted(): Promise<boolean> {
+  const result = await resolve();
+  return result.persisted;
 }
 
 export type StubWalletUpdate = {wallets: string[]; persisted: boolean};
 
-export function addStubWallet(wallet: string): StubWalletUpdate {
+export async function addStubWallet(wallet: string): Promise<StubWalletUpdate> {
   const normalized = normalizeStubWallet(wallet);
   if (!normalized) throw new Error("Invalid wallet address.");
 
-  const wallets = resolve();
+  const result = await resolve();
+  const wallets = result.wallets;
   wallets.add(normalized);
-  return {wallets: [...wallets].sort(), persisted: persist(wallets)};
+  return {wallets: [...wallets].sort(), persisted: result.readable && (await persist(wallets))};
 }
 
-export function removeStubWallet(wallet: string): StubWalletUpdate {
+export async function removeStubWallet(wallet: string): Promise<StubWalletUpdate> {
   const normalized = normalizeStubWallet(wallet);
   if (!normalized) throw new Error("Invalid wallet address.");
 
-  const wallets = resolve();
+  const result = await resolve();
+  const wallets = result.wallets;
   wallets.delete(normalized);
-  return {wallets: [...wallets].sort(), persisted: persist(wallets)};
+  return {wallets: [...wallets].sort(), persisted: result.readable && (await persist(wallets))};
 }
 
-export function listStubWallets(): string[] {
-  return [...resolve()].sort();
+export async function listStubWallets(): Promise<string[]> {
+  return [...(await resolve()).wallets].sort();
 }
 
-export function isStubbedWallet(wallet: string | undefined): boolean {
+export function isStubbedWallet(wallet: string | undefined, wallets: ReadonlySet<string>): boolean {
   if (!wallet) return false;
   const normalized = normalizeStubWallet(wallet);
-  return normalized ? resolve().has(normalized) : false;
+  return normalized ? wallets.has(normalized) : false;
+}
+
+/** Reads one request's allowlist snapshot. */
+export async function loadStubWallets(): Promise<Set<string>> {
+  return (await resolve()).wallets;
 }
