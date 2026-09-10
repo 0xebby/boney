@@ -27,8 +27,7 @@ export function Card({
  *
  * The title is bold brand yellow, matching table headers in `ui/DataTable` and stat tile labels in
  * `ui/StatTile`: labelling chrome is the one register yellow is safe in here (see the token
- * rationale at the top of `globals.css`). The subtitle stays muted — it is prose describing the
- * section, and yellowing both would flatten the heading against its own description.
+ * rationale at the top of `globals.css`).
  */
 export function CardHeader({
   title,

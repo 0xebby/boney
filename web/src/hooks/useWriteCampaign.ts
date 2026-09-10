@@ -17,12 +17,14 @@ import {useConfirmSignature} from "@/components/SignatureGate";
 import type {SignIntent} from "@/lib/signIntent";
 import {
   createCampaignIntent,
+  extendCampaignIntent,
   fundCampaignIntent,
   joinCampaignIntent,
   lifecycleIntent,
   reportIntent,
   settleIntent,
   storeTouchIntent,
+  topUpCampaignIntent,
   type IntentContext,
   type ReportedCall,
 } from "@/lib/writeIntents";
@@ -302,6 +304,98 @@ export function useFundCampaign() {
   );
 
   return {state, fund, reset, needsApproval};
+}
+
+/** Writes a project-funded Campaign.topUp, approving the campaign when needed. */
+export function useTopUpCampaign() {
+  const {publicClient, walletClient} = useWriteContext();
+  const {state, setState, reset, run} = useTx();
+  const [needsApproval, setNeedsApproval] = useState(false);
+
+  const topUp = useCallback(
+    async (campaign: `0x${string}`, amount: bigint, token: `0x${string}`, ctx?: IntentContext) => {
+      if (!publicClient || !walletClient) {
+        setState({status: "error", message: "Connect a wallet to top up this campaign."});
+        return;
+      }
+
+      const account = walletClient.account;
+      await run(
+        async () => {
+          const allowance = await publicClient.readContract({
+            address: token,
+            abi: IERC20Abi,
+            functionName: "allowance",
+            args: [account.address, campaign],
+          });
+
+          if (allowance < amount) {
+            setNeedsApproval(true);
+            const {request: approveRequest} = await publicClient.simulateContract({
+              account,
+              address: token,
+              abi: IERC20Abi,
+              functionName: "approve",
+              args: [campaign, amount],
+            });
+            const approveHash = await walletClient.writeContract(approveRequest);
+            await publicClient.waitForTransactionReceipt({hash: approveHash});
+          }
+          setNeedsApproval(false);
+
+          const {request} = await publicClient.simulateContract({
+            account,
+            address: campaign,
+            abi: CampaignAbi,
+            functionName: "topUp",
+            args: [amount],
+          });
+          return walletClient.writeContract(request);
+        },
+        undefined,
+        publicClient,
+        topUpCampaignIntent(campaign, amount, ctx),
+      );
+    },
+    [publicClient, walletClient, run, setState],
+  );
+
+  return {state, topUp, reset, needsApproval};
+}
+
+/** Writes a project-authorized Campaign.extend call. */
+export function useExtendCampaign() {
+  const {publicClient, walletClient} = useWriteContext();
+  const {state, setState, reset, run} = useTx();
+
+  const extend = useCallback(
+    async (campaign: `0x${string}`, newEndTime: bigint, ctx?: IntentContext) => {
+      if (!publicClient || !walletClient) {
+        setState({status: "error", message: "Connect a wallet to extend this campaign."});
+        return;
+      }
+
+      const account = walletClient.account;
+      await run(
+        async () => {
+          const {request} = await publicClient.simulateContract({
+            account,
+            address: campaign,
+            abi: CampaignAbi,
+            functionName: "extend",
+            args: [newEndTime],
+          });
+          return walletClient.writeContract(request);
+        },
+        undefined,
+        publicClient,
+        extendCampaignIntent(campaign, newEndTime, ctx),
+      );
+    },
+    [publicClient, walletClient, run, setState],
+  );
+
+  return {state, extend, reset};
 }
 
 // ── lifecycle ────────────────────────────────────────────────────

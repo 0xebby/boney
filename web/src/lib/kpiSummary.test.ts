@@ -50,7 +50,7 @@ describe("summarizeKinds", () => {
 
   it("counts only distinct further kinds", () => {
     const twoOfAKind = summarizeKinds([reported("TokenPurchase"), reported("TokenPurchase")]);
-    const mixed = summarizeKinds([reported("TokenPurchase"), reported("signUps")]);
+    const mixed = summarizeKinds([reported("TokenPurchase"), reported("SignUps")]);
 
     // Two KPIs, one answer to "what does this measure" — a `+1` would promise a second thing.
     expect(twoOfAKind?.extra).toBe(0);
@@ -61,7 +61,7 @@ describe("summarizeKinds", () => {
   });
 
   it("says which KPIs the project reports itself", () => {
-    expect(summarizeKinds([reported("signUps")])?.title).toBe("Sign-ups — reported by the project");
+    expect(summarizeKinds([reported("SignUps")])?.title).toBe("Sign-ups — reported by the project");
   });
 
   it("names a catalogued event and a known protocol in the hover text", () => {

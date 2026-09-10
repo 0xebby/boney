@@ -64,7 +64,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @dev `msg.sender` is the campaign. Permissionless and idempotent; a registration only writes
     ///      the caller's own namespace.
     function registerPromoter(bytes32 promoterId) external {
-        if (promoterId == bytes32(0)) revert ZeroPromoterId();
+        if (promoterId == bytes32(0)) revert InvalidPromoterId();
         if (_registered[msg.sender][promoterId]) return;
 
         _registered[msg.sender][promoterId] = true;
@@ -76,13 +76,13 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         external
     {
         if (user == address(0) || touch.campaign == address(0)) revert ZeroAddress();
-        if (touch.promoterId == bytes32(0)) revert ZeroPromoterId();
+        if (touch.promoterId == bytes32(0)) revert InvalidPromoterId();
 
         uint64 nowTs = uint64(block.timestamp);
         if (touch.signedAt > nowTs) revert TouchNotYetValid(touch.signedAt, nowTs);
         if (touch.expiresAt <= nowTs) revert TouchExpired(touch.expiresAt, nowTs);
 
-        // The campaign's own window binds here, not only in the client that builds the touch.
+        // The campaign's own window binds here.
         uint64 maxExpiresAt = nowTs + _effectiveMaxDuration(touch.campaign);
         if (touch.expiresAt > maxExpiresAt) {
             revert TouchTooLong(touch.expiresAt, maxExpiresAt);
@@ -106,8 +106,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         Touch storage prev = _touches[user][touch.campaign];
         if (touch.signedAt <= prev.signedAt) revert TouchNotNewer(touch.signedAt, prev.signedAt);
 
-        // The promoter already holding a live touch cannot be re-attributed; only a switch or a
-        // lapsed window admits a new one.
+        // The promoter already holding a live touch cannot be re-attributed; only a switch or a lapsed window admits a new one.
         if (prev.expiresAt > nowTs && touch.promoterId == prev.promoterId) {
             revert TouchAlreadyActive(prev.promoterId, prev.expiresAt);
         }
@@ -131,9 +130,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         return _effectiveMaxDuration(campaign);
     }
 
-    /// @dev The campaign's own `attributionWindow`, clamped to this registry's `maxTouchDuration`. A
-    ///      target that does not answer has no window of its own and the global cap stands; the cap is
-    ///      never exceeded.
+    /// @dev The campaign's own `attributionWindow`, clamped to this registry's `maxTouchDuration`.
     /// @param campaign The campaign named in the touch.
     /// @return The longest horizon a touch for that campaign may claim.
     function _effectiveMaxDuration(address campaign) private view returns (uint64) {
@@ -151,13 +148,12 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     }
 
     /// @dev Reverts unless `campaign` can still accrue creditable work. Checks both `endTime` and a
-    ///      terminal status, since a campaign may be ended early or left past its window uncalled. A
-    ///      registrant that answers neither call is unbounded here rather than unusable.
+    ///      terminal status, since a campaign may be ended early or left past its window uncalled.
     /// @param campaign The campaign named in the touch.
     /// @param nowTs The current block timestamp, narrowed once by the caller.
     function _requireCampaignOpen(address campaign, uint64 nowTs) private view {
-        (bool okEnd, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
-        if (okEnd && endData.length == 32) {
+        (bool hasEnded, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
+        if (hasEnded && endData.length == 32) {
             // Decoded as uint256, not uint64, so a dirty upper word reads as far-future not a revert.
             uint256 end = abi.decode(endData, (uint256));
             // Zero means "not a campaign", not "already over".

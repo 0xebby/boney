@@ -117,6 +117,60 @@ export function fundCampaignIntent(
   };
 }
 
+/**
+ * `Campaign.extend` — moving a campaign's reporting deadline.
+ *
+ * @param campaign The campaign's own address.
+ * @param newEndTime New reporting deadline in unix seconds.
+ * @param ctx Human labels for the campaign.
+ * @returns The confirmation copy.
+ */
+export function extendCampaignIntent(
+  campaign: `0x${string}`,
+  newEndTime: bigint,
+  ctx?: IntentContext,
+): SignIntent {
+  return {
+    title: "Extend campaign",
+    summary: "Moves the campaign deadline forward within its fixed extension limit.",
+    rows: [
+      {label: "Campaign", value: campaignValue(campaign, ctx)},
+      {label: "New deadline", value: formatDateTime(Number(newEndTime))},
+    ],
+    important: "Only the reporting window changes. KPI definitions, tiers, and attribution rules stay fixed.",
+    tone: "warning",
+    confirmLabel: "Extend campaign",
+    prompts: ["transaction"],
+  };
+}
+
+/**
+ * `Campaign.topUp` — adding project funds after the pool is depleted.
+ *
+ * @param campaign The campaign's own address.
+ * @param amount Amount in base token units.
+ * @param ctx Human labels for the campaign and token.
+ * @returns The confirmation copy.
+ */
+export function topUpCampaignIntent(
+  campaign: `0x${string}`,
+  amount: bigint,
+  ctx?: IntentContext,
+): SignIntent {
+  return {
+    title: "Top up reward pool",
+    summary: "Adds funds to a depleted campaign pool so future and outstanding rewards can be paid.",
+    rows: [
+      {label: "Campaign", value: campaignValue(campaign, ctx)},
+      amountRow("Amount", amount, ctx?.decimals ?? 18, ctx?.symbol),
+    ],
+    important: "The campaign must be at least 90% paid out, and the top-up must meet its minimum size.",
+    tone: "warning",
+    confirmLabel: "Top up pool",
+    prompts: ["transaction"],
+  };
+}
+
 /** Per-action wording for the project-side lifecycle calls. */
 const LIFECYCLE: Record<
   LifecycleAction,

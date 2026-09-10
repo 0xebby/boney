@@ -34,6 +34,10 @@ HERE="$(pwd -P)"
 RPC="${RPC:-$(command grep -E '^NEXT_PUBLIC_BASE_SEPOLIA_RPC=' .env.local 2>/dev/null | cut -d= -f2- | tr -d '"'"'"' ')}"
 RPC="${RPC:-https://base-sepolia-rpc.publicnode.com}"
 INTERVAL="${INTERVAL:-120}"
+PLAYGROUND="${PLAYGROUND:-0}"
+if [ "$PLAYGROUND" = 1 ]; then
+  RPC="${NEXT_PUBLIC_ANVIL_PLAYGROUND_RPC:-http://127.0.0.1:8546}"
+fi
 
 # Next 16 permits one dev server per directory, and this machine runs other projects' servers.
 # `PORT=3001 ./scripts/dev-up.sh` moves the app when 3000 is already taken.
@@ -196,7 +200,10 @@ start "next dev" "$LOGS/next-dev.log" pnpm dev --port "$PORT"
 waitfor "next dev" "http://localhost:$PORT/" 90 || exit 1
 
 # ---- 3. relay, then 4. indexer -------------------------------------------------------------------
-if [ -n "$RELAYER_KEY" ]; then
+if [ "$PLAYGROUND" = 1 ]; then
+  echo
+  echo "Playground mode — skipping Base Sepolia relay and indexer orchestration."
+elif [ -n "$RELAYER_KEY" ]; then
   export REPORTER_PRIVATE_KEY="$RELAYER_KEY"
   echo "relay: first pass (blocking — the indexer must not report before this lands)…"
   RPC="$RPC" ./scripts/relay-loop.sh --once | tee "$LOGS/relay-once.log"

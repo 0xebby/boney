@@ -33,7 +33,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
         bool configured;
     }
 
-    /// @notice Boney's canonical verifier. Always consulted; never optional.
+    /// @notice Boney's canonical verifier. Always consulted.
     address public immutable boneyVerifier;
 
     /// @dev 100% in basis points; the ceiling on `toleranceBps` and the divisor for it.
@@ -101,7 +101,7 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
             return projectValue < boneyValue ? projectValue : boneyValue;
         }
 
-        uint256 diff = boneyValue > projectValue ? boneyValue - projectValue : projectValue - boneyValue;
+        uint256 diff = boneyValue > projectValue ? (boneyValue - projectValue) : (projectValue - boneyValue);
         uint256 base = boneyValue > projectValue ? boneyValue : projectValue;
         uint256 allowed = (base * cfg.toleranceBps) / MAX_TOLERANCE;
         if (diff > allowed) revert VerifierDisagreement(projectValue, boneyValue, diff, allowed);
