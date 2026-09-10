@@ -7,12 +7,12 @@
  *  - **Reports are cumulative and idempotent.** `newTotal` is a running total over the referral's whole
  *    attributed history, not a delta, and a re-run over the same range decides to send nothing. There
  *    is deliberately no cursor: a range shallower than that history would produce a window-scoped total
- *    that `Campaign` compares against a lifetime watermark and silently ignores. The range is instead
- *    bounded by attribution: it starts just after the campaign's first touch, since nothing earlier is
- *    creditable to anybody.
+ *    that `Campaign` compares against a lifetime watermark and silently ignores. 
+ *    The range is insteadbounded by attribution: it starts just after the campaign's first touch, 
+ *    since nothing earlier is creditable to anybody.
  *
- * Trust model: with `verifier == address(0)` the campaign credits the reported number as-is. This
- * indexer is honest but unverified on chain: a state-reading `IKpiVerifier` would bound it.
+ * Trust model: with `verifier == address(0)` the campaign credits the reported number as-is. 
+ * This indexer is honest but unverified on chain: a state-reading `IKpiVerifier` would bound it.
  */
 import {readFileSync, existsSync} from "node:fs";
 import {resolve, dirname} from "node:path";
@@ -179,13 +179,13 @@ async function fetchLogs(
 /**
  * Who held each of a campaign's referrals, at every block they ever acted in.
  *
- * This is the correctness boundary the block range is not. `reportUserAction` receives a total, never
+ * `reportUserAction` receives a total, never
  * the blocks behind it, so the contract cannot tell that a figure includes activity from before the
  * campaign existed or from a spell nobody was attributed for — with `verifier == address(0)` it credits
  * the number as-is. Only this filter stands between a wide scan and a wrong credit.
  *
  * One log scan for the whole campaign rather than a read per referral, and it also answers "was this
- * referral ever attributed at all" — absent from the history means dropped, which matches `Campaign`
+ * referral ever attributed at all" absent from the history means dropped, which matches `Campaign`
  * skipping actions no promoter held.
  *
  * @param client Public client used for the log scan.

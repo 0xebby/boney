@@ -1,30 +1,7 @@
-/**
- * The bone — the BoneyCard's mark, and the one thing on it that is purely a shape.
- *
- * SVG rather than the 🦴 emoji it replaces, for three reasons that all point the same way: an emoji
- * renders as a different picture on every platform, it is a *font* dependency and so is missing
- * entirely from the headless renderer an OG image is produced by, and it cannot be recoloured to sit
- * on the brand. A path is the same picture in a browser, a screenshot and a share card.
- *
- * ## Nothing here carries information on its own
- *
- * `BoneWatermark` and `BoneField` are `aria-hidden` framing. `BoneLevel` draws notches, but the level
- * is also written out beside them in words — a filled-versus-faded notch is a redundant encoding of a
- * number that is already text, never the only way to read it. That matters most in the state the level is *not*
- * known: an undefined level renders "lvl —" rather than an unfilled row of notches that would read
- * as a confident level 0.
- */
 
 /** Fixed by the level ladder in `lib/boneycard.ts`. Notch count, not a display choice. */
 const NOTCHES = 5;
 
-/**
- * One bone, filled.
- *
- * Four lobes and a shaft, unioned by overlap rather than traced as one outline — every piece carries
- * the same `currentColor` fill, so the seams between them do not render. That is also why this is a
- * silhouette and not a stroked outline: stroking the pieces would draw the seams.
- */
 export function BoneGlyph({className = ""}: {className?: string}) {
   return (
     <svg aria-hidden viewBox="0 0 32 20" className={className} fill="currentColor">
@@ -73,13 +50,7 @@ export function BoneyB({className = ""}: {className?: string}) {
   );
 }
 
-/**
- * The card's background bone — a wireframe watermark, not a container.
- *
- * Drawn as separate stroked pieces on purpose: at 13% opacity the seams read as construction lines,
- * which is the register wanted here. `preserveAspectRatio="slice"` lets it crop rather than squash on
- * a narrow phone, since it is framing and losing an inch of shaft costs nothing.
- */
+
 export function BoneWatermark() {
   return (
     <svg
@@ -132,14 +103,7 @@ function fieldBone(bone: FieldBone, key: number) {
   );
 }
 
-/**
- * The page background — the card's watermark bone, scattered as a wallpaper.
- *
- * One tiling layer of the outline at three sizes and angles, brand-stroked at 3.5%.
- * Fixed to the viewport, so it holds still while content scrolls, and dropped entirely under
- * `prefers-contrast: more` and in print. Every opaque surface above it covers it, so it reads in the
- * gutters and between cards.
- */
+
 export function BoneField() {
   return (
     <svg

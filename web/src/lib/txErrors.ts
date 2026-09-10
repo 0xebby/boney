@@ -227,7 +227,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `This campaign closed at ${at(endTime)}, so referrals can no longer be attributed to it.`,
   CampaignTerminal: ([status]) =>
     `This campaign is ${statusName(status).toLowerCase()}, so referrals can no longer be attributed to it.`,
-  ZeroPromoterId: () => "The referral link is missing its promoter id. Ask for a fresh one.",
+  InvalidPromoterId: () => "The referral link is missing its promoter id. Ask for a fresh one.",
   ZeroWindow: () => "The attribution window can't be zero.",
   InvalidSignature: (args) =>
     args.length === 1

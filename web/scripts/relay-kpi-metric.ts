@@ -3,25 +3,12 @@
  *
  * Usage: pnpm relay --campaign <address> --kpi <index> [--rpc <url>] [--verifier <address>] [--dry-run]
  *
- * The independent half of KPI verification. `indexer.ts` reports what a *project* claims; this
- * reports what Boney *observed*, and a claim is capped at the smaller of the two. The two are
- * deliberately separate processes with separate keys.
+ * The independent half of KPI verification. `indexer.ts` reports what a *project* claims;
+ * reports what Boney *observed*, and a claim is capped at the smaller of the two. 
+ * The two are deliberately separate processes with separate keys.
  *
- * Deliberately thin, the same way `indexer.ts` is: decoding, attribution filtering, aggregation and
- * batch planning all live in `lib/relayCore.ts` where fixture logs prove them.
- * 
- * Three properties worth stating plainly:
- *
- *  - **Stateless.** There is no cursor file. The checkpoint lives on chain (`lastScannedBlock`), so
- *    any instance on any machine resumes exactly where the last one stopped. Losing this host costs
- *    nothing.
- *  - **Bounded on chain.** `reportBatch` rejects a checkpoint past `windowEndBlock`, so even a buggy
- *    run cannot report past the campaign's real reporting close.
- *  - **Retry-safe.** A run split across transactions advances the checkpoint only on the last one, so
- *    a partial failure leaves it untouched and the whole run can simply be repeated.
- *
- * Trust model: whoever holds `REPORTER_PRIVATE_KEY` is trusted to report honestly. This is not a
- * trustless oracle. What it does guarantee is that a project cannot credit itself more than an
+ * Trust model: whoever holds `REPORTER_PRIVATE_KEY` is trusted to report honestly.
+ *  What it does guarantee is that a project cannot credit itself more than an
  * independent observer saw.
  */
 import {readFileSync, existsSync} from "node:fs";
@@ -80,29 +67,23 @@ const MAX_LOG_RANGE = BigInt(2_000);
 
 /**
  * Blocks left between the head and the end of a scan.
- *
- * The checkpoint is monotonic on chain and cannot be walked back, so a checkpoint set on a block that
- * a reorg then discards is permanent damage. Staying a few blocks behind costs one extra run's
- * latency and removes the failure mode.
  */
 const CONFIRMATIONS = BigInt(5);
 
-/** Users per `reportBatch` transaction. Bounded by block gas, not by anything on chain. */
+/** Users per `reportBatch` transaction. Bounded by block gas. */
 const BATCH_SIZE = 200;
 
 /**
- * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
- * pass costs the limiter this many times less than one request per call would.
+ * Calls packed into one JSON-RPC request.
  */
 const RPC_BATCH_SIZE = 100;
 
 /**
- * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests. Wide
- * enough to keep a few requests in flight, narrow enough that a public endpoint answers them.
+ * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests.
  */
 const READ_CONCURRENCY = 300;
 
-/** Per-request ceiling. A loaded public endpoint answers a batch of block reads in a few seconds. */
+/** Per-request ceiling. */
 const RPC_TIMEOUT = 60_000;
 
 function arg(flag: string): string | undefined {
@@ -112,10 +93,6 @@ function arg(flag: string): string | undefined {
 
 /**
  * The relayer's key, read the way `indexer.ts:envPrivateKey` reads the project's.
- *
- * `REPORTER_PRIVATE_KEY` and not `PRIVATE_KEY`: the reporter is meant to be a different account from
- * the project, since the whole point is an independent observation. Falls back to the repo-root
- * `.env` because this is a plain node script and nothing else loads it.
  */
 function reporterKey(): Hex | undefined {
   if (process.env.REPORTER_PRIVATE_KEY) return process.env.REPORTER_PRIVATE_KEY as Hex;
@@ -154,8 +131,6 @@ async function fetchLogs(
 
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
-    // Sent raw rather than through viem's `getLogs`, whose parameters have no `topics` field: this
-    // is what makes the node do the narrowing. What comes back is checked again below.
     const logs = (await client.request({
       method: "eth_getLogs",
       params: [logRequest(address, topic0, source, chunk.from, chunk.to)],
@@ -352,12 +327,7 @@ async function main(): Promise<void> {
       args: [campaign],
     })) as bigint;
 
-    // Every touch that could still cover creditable work, scanned from before the activity range: a
-    // touch can predate the actions it covers, and a window this cannot see would drop activity the
-    // chain would credit. 
-    // A touch older than `startTime - effectiveMaxDuration` has already lapsed by
-    // the campaign's own start, so it covers nothing. 
-    // The floor comes from the broadcast receipt rather than `lib/deployments.ts`, which can lag a redeploy.
+    // Every touch that could still cover creditable work, scanned from before the activity range.
     const touchFloor = await blockAtTimestamp(
       async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
       earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
@@ -411,8 +381,7 @@ async function main(): Promise<void> {
     unattributed = result.unattributed;
   }
 
-  // Stored before the totals reads and the transactions, so a failure past this point still leaves
-  // the next pass the timestamps this one paid for.
+  // Stored before the totals reads and the transactions, so a failure past this point still leaves the next pass the timestamps this one paid for.
   saveTimestampCache(chainId, blockTimestamps);
 
   if (unattributed.length > 0) {
