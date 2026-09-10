@@ -73,11 +73,23 @@ import {
 
 const SECTION_GRID = "lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-x-12";
 
+/*
+  Button register.
+
+  Solid brand is the page's one primary action (Create Campaign), matching the nav's own Create
+  button. Actions that grow the campaign — add a KPI, add a tier — are brand outline: yellow enough
+  to be found at a glance, which a muted dashed box was not, without a second solid block competing
+  with the primary. Neutral outline is for stepping back (Reset, Try again). Removal stays quiet text
+  that only turns critical on hover, so the destructive control is never the loudest thing in a block.
+*/
 const PRIMARY_BUTTON =
-  "inline-flex min-h-10 items-center justify-center rounded-md bg-brand px-4 text-sm font-semibold text-plane transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex min-h-11 items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
 const SECONDARY_BUTTON =
-  "inline-flex min-h-10 items-center justify-center rounded-md border border-hairline-strong px-4 text-sm font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50";
-const TEXT_BUTTON = "text-xs font-medium text-brand hover:underline";
+  "inline-flex min-h-11 items-center justify-center rounded-md border border-hairline-strong px-4 text-sm font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50";
+const BRAND_OUTLINE_BUTTON =
+  "w-full rounded-lg border border-brand bg-brand/5 px-4 py-3 text-sm font-semibold text-brand transition-colors hover:bg-brand/15";
+const BRAND_OUTLINE_SMALL =
+  "inline-flex min-h-8 items-center justify-center rounded-md border border-brand bg-brand/5 px-2.5 text-xs font-semibold text-brand transition-colors hover:bg-brand/15";
 
 export function CreateCampaignPage() {
   const {isConnected} = useAccount();
@@ -444,11 +456,7 @@ export function CreateCampaignPage() {
           ))}
 
           {/* At the end of the list, where the next one would go, rather than a link in a header. */}
-          <button
-            type="button"
-            onClick={addKpi}
-            className="w-full rounded-lg border border-dashed border-hairline-strong px-4 py-3 text-sm font-medium text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink"
-          >
+          <button type="button" onClick={addKpi} className={BRAND_OUTLINE_BUTTON}>
             + Add another KPI
           </button>
         </FormSection>
@@ -634,7 +642,7 @@ function KpiEditor({
   const n = index + 1;
 
   return (
-    <div className="rounded-lg border border-hairline bg-surface-1 p-4 sm:p-5">
+    <div className="rounded-lg border border-hairline-strong bg-surface-1 p-4 sm:p-5">
       <div className="flex items-center justify-between gap-4">
         <h3 className="text-sm font-bold text-brand">KPI {n}</h3>
         <button
@@ -721,7 +729,7 @@ function KpiEditor({
       <Subsection
         title="Reward tiers"
         action={
-          <button type="button" onClick={onAddTier} className={TEXT_BUTTON}>
+          <button type="button" onClick={onAddTier} className={BRAND_OUTLINE_SMALL}>
             + Add tier
           </button>
         }
@@ -810,7 +818,7 @@ function TierLadder({
       </div>
       {kpi.tiers.map((tier, j) => (
         <div key={j} className={`${TIER_GRID} items-start`}>
-          <span className="tnum pt-2 text-xs text-ink-muted">{j + 1}</span>
+          <span className="tnum pt-2 text-xs font-semibold text-brand">{j + 1}</span>
           <div>
             <Field
               labelHidden
