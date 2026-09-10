@@ -18,11 +18,22 @@ library Types {
         Stake,
         Bridge,
         Tvl,
-        Volume,
-        ActiveUser,
-        signUps,
-        downloads,
-        withdraw
+        GenerateVolume,
+        OnboardAnActiveUser,
+        SignUps,
+        Downloads,
+        Withdraw,
+        CreatePool,
+        ProvideLiquidity,
+        RemoveLiquidity,
+        Redeem,
+        Claim,
+        Burn,
+        Repay,
+        Borrow,
+        Lend,
+        Vote,
+        Referral
     }
 
     /// @notice Campaign lifecycle.

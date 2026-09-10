@@ -40,10 +40,12 @@ const SCALARS: Record<string, unknown> = {
   project: PROJECT,
   token: TOKEN,
   rewardPool: BigInt(1_000_000),
+  initialRewardPool: BigInt(1_000_000),
   paidOut: BigInt(250_000),
   remainingPool: BigInt(750_000),
   startTime: BigInt(1_700_000_000),
   endTime: BigInt(1_700_600_000),
+  maximumEndTime: BigInt(1_701_900_000),
   endedAt: BigInt(1_700_500_000),
   attributionWindow: BigInt(86_400),
   minReputation: BigInt(42),
@@ -99,6 +101,12 @@ function makeClient(overrides: Record<string, unknown> = {}) {
     },
     readContract: async (c: Call) => {
       calls.push(c);
+      if (
+        overrides.missingFeatureGetters === true &&
+        (c.functionName === "initialRewardPool" || c.functionName === "maximumEndTime")
+      ) {
+        throw new Error("function selector not found");
+      }
       switch (c.functionName) {
         case "balanceOf":
           return overrides.balanceOf ?? ESCROW_BALANCE;
@@ -132,13 +140,26 @@ describe("fetchCampaignDetail", () => {
     expect(detail.project).toBe(PROJECT);
     expect(detail.token).toBe(TOKEN);
     expect(detail.rewardPool).toBe(BigInt(1_000_000));
+    expect(detail.initialRewardPool).toBe(BigInt(1_000_000));
+    expect(detail.feature1Supported).toBe(true);
     expect(detail.paidOut).toBe(BigInt(250_000));
     expect(detail.remainingPool).toBe(BigInt(750_000));
     expect(detail.startTime).toBe(BigInt(1_700_000_000));
     expect(detail.endTime).toBe(BigInt(1_700_600_000));
+    expect(detail.maximumEndTime).toBe(BigInt(1_701_900_000));
     expect(detail.attributionWindow).toBe(BigInt(86_400));
     expect(detail.minReputation).toBe(BigInt(42));
     expect(detail.claimGrace).toBe(BigInt(7 * 86_400));
+  });
+
+  it("falls back for campaigns deployed before the extension getters", async () => {
+    const detail = await fetchCampaignDetail(makeClient({missingFeatureGetters: true}).client, ADDRESS);
+
+    expect(detail.initialRewardPool).toBe(detail.rewardPool);
+    expect(detail.feature1Supported).toBe(false);
+    expect(detail.maximumEndTime).toBe(
+      detail.endTime + (detail.endTime - detail.startTime) / BigInt(2),
+    );
   });
 
   it("keeps endedAt distinct from endTime", async () => {

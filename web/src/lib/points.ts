@@ -26,7 +26,7 @@ export const POINTS_REFERRAL_REPORT = 25;
 export const POINTS_PROMOTER_REPORT = 60;
 
 /** KPI kinds whose credited amount is a token quantity rather than a count of actions. */
-const MAGNITUDE_KINDS: readonly KpiKind[] = ["Tvl", "Volume"];
+const MAGNITUDE_KINDS: readonly KpiKind[] = ["Tvl", "GenerateVolume"];
 
 /** One KPI's unit, as needed to score the credits against it. */
 export type PointsKpi = {

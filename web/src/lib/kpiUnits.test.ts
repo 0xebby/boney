@@ -71,14 +71,23 @@ describe("actionNoun", () => {
     published, so these degrade to the generic noun instead.
   */
   it("refuses to count a mass noun", () => {
-    for (const kind of ["Custom", "Tvl", "Volume", "Stake", "ActiveUser"] as const) {
+    for (const kind of [
+      "Custom",
+      "Tvl",
+      "GenerateVolume",
+      "Stake",
+      "OnboardAnActiveUser",
+    ] as const) {
       expect(actionNoun(undefined, kind), kind).toEqual({many: "events", one: "event"});
     }
   });
 
   it("still names a mass-noun kind when the event does", () => {
     // The kind is uncountable but the event is not, and the event is the better source anyway.
-    expect(actionNoun("Swap(address,uint256)", "Volume")).toEqual({many: "swaps", one: "swap"});
+    expect(actionNoun("Swap(address,uint256)", "GenerateVolume")).toEqual({
+      many: "swaps",
+      one: "swap",
+    });
   });
 });
 

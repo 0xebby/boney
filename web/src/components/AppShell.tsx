@@ -73,9 +73,11 @@ function WalletButton() {
         type="button"
         onClick={() => (isConnected ? disconnect() : injected && connect({connector: injected}))}
         disabled={isPending || (!isConnected && !injected)}
-        // `truncate` needs a width constraint to have anything to truncate against; in the bar
-        // that is a max-width, so a long address ellipses instead of squeezing the nav.
-        className="min-h-11 max-w-[11rem] truncate rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 sm:min-h-0"
+        // `truncate` needs a width constraint to have anything to truncate against. The max-width
+        // bounds a long label; `block w-full` is what lets the wrapper's `min-w-0` reach the button —
+        // a button is inline-block, so without it the chip kept its full width and spilled past the
+        // viewport on a 320px row instead of ellipsing.
+        className="block w-full min-h-11 max-w-[11rem] truncate rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50 sm:min-h-0"
         title={isConnected ? `${address} — click to disconnect` : "Connect an injected wallet"}
       >
         {/* "Connect wallet" is 40px of a 375px bar that has none to spare, and the shorter label
@@ -363,11 +365,13 @@ export function AppShell({children}: {children: ReactNode}) {
           <NavDrawer items={nav} />
 
           {/* The mark leads the wordmark at the same colour and height, so the pair reads as one
-              lockup rather than an icon parked beside a word. Under 360px the word goes and the mark
-              carries the identity alone — the drawer's own header spells it out again on open. */}
+              lockup rather than an icon parked beside a word. Below `sm` the word goes and the mark
+              carries the identity alone — the drawer's own header spells it out again on open. The
+              ~100px it frees is what lets the Create button keep its full label on a phone; the word
+              used to survive down to 360px, and the button paid for it by shrinking to "Create". */}
           <Link href="/" className="flex shrink-0 items-center gap-1.5 text-brand">
             <BoneyB className="h-5 w-auto shrink-0 sm:h-6" />
-            <span className="font-display text-xl lowercase leading-none max-[359px]:hidden sm:text-2xl">
+            <span className="hidden font-display text-2xl lowercase leading-none sm:inline">
               boneyard
             </span>
           </Link>
@@ -394,13 +398,17 @@ export function AppShell({children}: {children: ReactNode}) {
             <Link
               href="/create"
               aria-current={pathname === "/create" ? "page" : undefined}
-              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-md bg-brand px-3 text-[13px] font-semibold text-plane transition-opacity hover:opacity-90 sm:min-h-0 sm:py-1.5"
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-md bg-brand px-2.5 text-[13px] font-semibold text-plane transition-opacity hover:opacity-90 sm:min-h-0 sm:px-3 sm:py-1.5"
             >
-              <span aria-hidden className="text-xs">
+              {/* The fullwidth plus is 18px with its gap — the exact margin a 360px row lacks. It is
+                  decorative beside a label that already says "Create", so it waits for `sm`. */}
+              <span aria-hidden className="hidden text-xs sm:inline">
                 ＋
               </span>
               <span className="hidden sm:inline">Create a campaign</span>
-              <span className="sm:hidden">Create</span>
+              {/* The article is the one word a 360px row cannot afford; "Create" alone was not a
+                  label, it was a verb. */}
+              <span className="sm:hidden">Create campaign</span>
             </Link>
 
             {/*

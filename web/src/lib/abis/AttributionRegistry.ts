@@ -748,7 +748,7 @@ export const AttributionRegistryAbi = [
   },
   {
     "type": "error",
-    "name": "ZeroPromoterId",
+    "name": "InvalidPromoterId",
     "inputs": []
   },
   {

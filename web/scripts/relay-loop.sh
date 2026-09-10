@@ -5,10 +5,6 @@
 # gated KPI's ceiling stays at 0 until this has run. A report that lands first succeeds and credits
 # nothing, with no revert to surface it. This is the "just press the button" prerequisite.
 #
-# Each cycle costs at most one transaction per KPI: `reportBatch` when there is creditable activity,
-# `advanceCheckpoint` when there are new blocks but nothing creditable, and nothing at all when no new
-# blocks have appeared. On Base's 2s blocks the middle case is the common one.
-#
 # Usage: RPC=<url> ./scripts/relay-loop.sh [--once] [interval_seconds]
 #
 # `--once` runs a single pass and exits, which is what `dev-up.sh` needs: the indexer must not report

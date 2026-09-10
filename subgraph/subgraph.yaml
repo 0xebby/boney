@@ -1,15 +1,9 @@
 # Boney subgraph — Base Sepolia.
 #
 # Addresses and startBlock come from `web/src/lib/deployments.ts`, generated from Foundry's broadcast
-# receipt, so they describe what actually landed on chain. Base Sepolia was redeployed and reseeded
-# 2026-08-29 to the two-campaign fixture (Venus on canonical WETH, Sdy Labs on a fresh Open Mint NFT),
-# both ungated; every earlier deployment (0x0FF749bB…, 0x424b10cB…, 0xC0E30d14…, 0xe07C214C…,
-# 0x6427217e…) is dead and must not be re-added.
+# receipt, so they describe what actually landed on chain.
 #
-# `startBlock` is the CampaignRegistry DEPLOYMENT block, not a recent one. Templates only spawn from
-# `CampaignCreated`, and a dynamically created data source never indexes blocks before it was
-# spawned, so starting late means the already-deployed campaigns never spawn their KPI templates at
-# all — the subgraph would sync clean and index nothing.
+# `startBlock` is the CampaignRegistry DEPLOYMENT block.
 specVersion: 1.2.0
 description: Boney — attributed campaign KPIs, promoter attribution, and credited progress.
 repository: https://github.com/0xcoda/boney

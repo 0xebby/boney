@@ -118,14 +118,14 @@ contract MultiKpiTest is Test {
             params: ""
         });
         k[SIGNUPS_KPI] = Types.KpiSpec({
-            kind: Types.KpiKind.signUps,
+            kind: Types.KpiKind.SignUps,
             verifier: address(0),
             target: 50,
             aggregate: false,
             params: ""
         });
         k[DOWNLOADS_KPI] = Types.KpiSpec({
-            kind: Types.KpiKind.downloads,
+            kind: Types.KpiKind.Downloads,
             verifier: address(0),
             target: 50,
             aggregate: false,

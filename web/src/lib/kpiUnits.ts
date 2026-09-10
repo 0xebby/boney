@@ -75,9 +75,9 @@ const GENERIC: ActionNoun = {one: "event", many: "events"};
 const MASS_KINDS: ReadonlySet<KpiKind> = new Set<KpiKind>([
   "Custom",
   "Tvl",
-  "Volume",
+  "GenerateVolume",
   "Stake",
-  "ActiveUser",
+  "OnboardAnActiveUser",
 ]);
 
 // ── the action noun ──────────────────────────────────────────────

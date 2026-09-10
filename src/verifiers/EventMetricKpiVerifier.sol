@@ -23,12 +23,10 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @param scale Divisor applied to a user's observed total inside `verify`, so the compared figure
     ///        is denominated the way the project denominates it. 0 is read as 1. Mirrors the indexer's
     ///        `scale` in `web/src/lib/kpiSource.ts`. `verifiedTotals` holds the raw, unscaled metric.
-    /// @param windowStartBlock Earliest block worth scanning — typically where attribution begins.
+    /// @param windowStartBlock Earliest block worth scanning = where attribution begins.
     /// @param windowEndBlock Latest block the relayer may report up to. See `setKpiConfig`.
     /// @param configured Set once `setKpiConfig` has run; nothing may be reported or verified first.
-    /// @param epoch Generation of this config, bumped when `setKpiConfig` changes what is watched. Part
-    ///        of every total's storage key, so a bump abandons every total observed under the previous
-    ///        config.
+    /// @param epoch Generation of this config, bumped when `setKpiConfig` changes what is watched.
     struct KpiConfig {
         address targetContract;
         string eventSignature;
@@ -191,8 +189,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param users Users whose totals changed.
     /// @param totals New cumulative totals, positionally matching `users`.
-    /// @param scannedUpToBlock Block the relayer confirms it has fully incorporated. Must not
-    ///        regress, and must not exceed the configured `windowEndBlock`.
+    /// @param scannedUpToBlock Block the relayer confirms it has fully incorporated. must not exceed the configured `windowEndBlock`.
     function reportBatch(
         address campaign,
         uint256 kpiIndex,
@@ -234,8 +231,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     }
 
     /// @inheritdoc IKpiVerifier
-    /// @dev `evidence` and `params` are accepted for interface compatibility and ignored. Reverts on an
-    ///      unconfigured KPI.
+    /// @dev `evidence` and `params` are accepted for interface compatibility and ignored. Reverts on an unconfigured KPI.
     function verify(
         address campaign,
         uint256 kpiIndex,
@@ -302,8 +298,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
 
     // ── internals ────────────────────────────────────────────────
 
-    /// @dev Whether a replacement config describes a different measurement. Every field except
-    ///      `windowEndBlock` is compared.
+    /// @dev Whether a replacement config describes a different measurement. Every field except `windowEndBlock` is compared.
     /// @param existing The stored config.
     /// @param targetContract Replacement contract emitting the watched event.
     /// @param eventSignature Replacement event ABI.
@@ -337,8 +332,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         return scale == 0 ? 1 : scale;
     }
 
-    /// @dev Shared guard for both checkpoint-advancing paths: KPI configured, no checkpoint regression,
-    ///      and within `windowEndBlock`.
+    /// @dev Shared guard for both checkpoint-advancing paths: KPI configured, no checkpoint regression, and within `windowEndBlock`.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param kKey Precomputed `_kpiKey(campaign, kpiIndex)`.
@@ -365,8 +359,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         return keccak256(abi.encodePacked(campaign, kpiIndex));
     }
 
-    /// @dev Per-user-per-KPI storage key, scoped to a config generation. `epoch` is in the preimage, so
-    ///      a config change moves every total to fresh slots.
+    /// @dev Per-user-per-KPI storage key, scoped to a config generation. `epoch` is in the preimage, so a config change moves every total to fresh slots.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param epoch Generation of the KPI's config, from `KpiConfig.epoch`.

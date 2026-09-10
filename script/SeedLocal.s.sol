@@ -301,7 +301,7 @@ contract SeedLocal is Script {
             params: ""
         });
         kpis[2] = Types.KpiSpec({
-            kind: Types.KpiKind.ActiveUser,
+            kind: Types.KpiKind.OnboardAnActiveUser,
             verifier: address(0),
             target: 500,
             aggregate: false,
