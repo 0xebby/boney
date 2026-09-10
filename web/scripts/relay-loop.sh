@@ -32,7 +32,7 @@ INTERVAL="${1:-120}"
 # the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
 # observed ceiling, which unlocks the next tier, which pays out again. Both campaigns below pay in a
 # token none of their own KPIs watch — Gyndore in GYND, Uniswap in bUSD against pool, USDC and WETH
-# events: so all six are safe to list.
+# events — so all six are safe to list.
 TARGETS=(
   # Gyndore Testnet, seeded 2026-08-31: swaps, GYND stakes, LP mints.
   0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:0

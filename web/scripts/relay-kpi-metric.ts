@@ -131,6 +131,8 @@ async function fetchLogs(
 
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
+    // Sent raw rather than through viem's `getLogs`, whose parameters have no `topics` field: this
+    // is what makes the node do the narrowing. What comes back is checked again below.
     const logs = (await client.request({
       method: "eth_getLogs",
       params: [logRequest(address, topic0, source, chunk.from, chunk.to)],
