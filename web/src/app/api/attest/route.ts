@@ -6,6 +6,7 @@ import {SCHEMA_ETHOS, SCHEMA_REACH, SCHEMA_FOLLOWERS} from "@/lib/boneyscore";
 import {AttestationVerifierAbi} from "@/lib/abis";
 import {getDeployment, ZERO_ADDRESS} from "@/lib/chains";
 import {chainFor, rpcFor} from "@/lib/serverChain";
+import {loadStubWallets} from "@/lib/stubWalletStore";
 
 /**
  * Attestor endpoint — turns an Ethos profile into signed reputation attestations.
@@ -154,7 +155,7 @@ export async function POST(request: NextRequest) {
   // other callers' nonces.
   let report;
   try {
-    report = await buildScoreReport(wallet);
+    report = await buildScoreReport(wallet, await loadStubWallets());
   } catch (error) {
     if (error instanceof EthosError) return fail(error.code, error.message, error.httpStatus);
     return fail("ethos_unavailable", "Could not build a score for this wallet.", 502);

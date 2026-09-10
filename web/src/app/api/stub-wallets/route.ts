@@ -51,9 +51,9 @@ function json(status: number, body: unknown) {
 
 export async function GET() {
   return json(200, {
-    wallets: listStubWallets(),
+    wallets: await listStubWallets(),
     admin: stubAdminWallet(),
-    persisted: isStubListPersisted(),
+    persisted: await isStubListPersisted(),
   });
 }
 
@@ -130,7 +130,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = action === "add" ? addStubWallet(normalized) : removeStubWallet(normalized);
+    const result =
+      action === "add" ? await addStubWallet(normalized) : await removeStubWallet(normalized);
     return json(200, {...result, admin});
   } catch (cause) {
     return json(400, {error: cause instanceof Error ? cause.message : "Invalid address."});

@@ -6,7 +6,7 @@
  */
 
 import {reachFromFollowers} from "./boneyscore";
-import {isStubbedWallet} from "./stubWalletStore";
+import {isStubbedWallet, loadStubWallets} from "./stubWalletStore";
 import {stubFiguresFor} from "./stubProfile";
 
 const DEFAULT_ETHOS_API = "https://api.ethos.network";
@@ -106,14 +106,18 @@ const NO_PROFILE_MESSAGE =
  * `derivePromoterId` in `lib/promoter`: case carries no meaning in an address, so normalise rather than
  * let a hand-typed one fail as though Ethos were down.
  */
-export async function fetchEthosProfile(wallet: string): Promise<EthosProfile> {
+export async function fetchEthosProfile(
+  wallet: string,
+  stubWallets?: ReadonlySet<string>,
+): Promise<EthosProfile> {
   if (!isAddress(wallet)) {
     throw new EthosError("invalid_address", "Not a valid Ethereum address.", 400);
   }
 
   // Allowlisted wallets never reach Ethos. Synthesised rather than fetched from the loopback stub so
   // this works identically on a deploy, where no such host exists — see `lib/stubProfile`.
-  if (isStubbedWallet(wallet)) {
+  const wallets = stubWallets ?? (await loadStubWallets());
+  if (isStubbedWallet(wallet, wallets)) {
     const figures = stubFiguresFor(wallet);
     return {
       score: figures.score,
@@ -224,10 +228,15 @@ export const FOLLOWER_SOURCES: ReadonlyArray<FollowerSource> = [
  * empty account, and falling through costs one request while trusting it costs the promoter 30% of their
  * score.
  */
-export async function fetchFollowers(handle: string, wallet?: string): Promise<number> {
+export async function fetchFollowers(
+  handle: string,
+  wallet?: string,
+  stubWallets?: ReadonlySet<string>,
+): Promise<number> {
   // An allowlisted wallet's audience is fabricated alongside its Ethos score, so the two halves of
   // its BoneyScore agree. Nothing is fetched.
-  if (isStubbedWallet(wallet)) return stubFiguresFor(wallet as string).followers;
+  const wallets = stubWallets ?? (await loadStubWallets());
+  if (isStubbedWallet(wallet, wallets)) return stubFiguresFor(wallet as string).followers;
 
   const encoded = encodeURIComponent(handle);
 
@@ -257,8 +266,13 @@ export async function fetchFollowers(handle: string, wallet?: string): Promise<n
  * sybil-resistant of the two counts and a plausible future input, but it is also sparse — most
  * handles return 0 — so weighting it today would penalise everyone Kaito has not indexed.
  */
-export async function fetchSmartFollowers(handle: string, wallet?: string): Promise<number> {
-  if (isStubbedWallet(wallet)) return stubFiguresFor(wallet as string).smartFollowers;
+export async function fetchSmartFollowers(
+  handle: string,
+  wallet?: string,
+  stubWallets?: ReadonlySet<string>,
+): Promise<number> {
+  const wallets = stubWallets ?? (await loadStubWallets());
+  if (isStubbedWallet(wallet, wallets)) return stubFiguresFor(wallet as string).smartFollowers;
 
   const base = KAITO_API();
 
@@ -286,12 +300,19 @@ export type ScoreReport = {
 };
 
 /** Everything the attestor needs to sign, assembled from Ethos plus a best-effort follower count. */
-export async function buildScoreReport(wallet: string): Promise<ScoreReport> {
-  const profile = await fetchEthosProfile(wallet);
+export async function buildScoreReport(
+  wallet: string,
+  stubWallets?: ReadonlySet<string>,
+): Promise<ScoreReport> {
+  const wallets = stubWallets ?? (await loadStubWallets());
+  const profile = await fetchEthosProfile(wallet, wallets);
   const handle = xHandleOf(profile);
   // Independent lookups against different hosts, so run them together rather than serially.
   const [followers, smartFollowers] = handle
-    ? await Promise.all([fetchFollowers(handle, wallet), fetchSmartFollowers(handle, wallet)])
+    ? await Promise.all([
+        fetchFollowers(handle, wallet, wallets),
+        fetchSmartFollowers(handle, wallet, wallets),
+      ])
     : [0, 0];
 
   return {
