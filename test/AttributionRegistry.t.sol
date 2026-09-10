@@ -117,7 +117,7 @@ contract AttributionRegistryTest is Test {
 
     function test_RegisterPromoter_revertsZeroId() public {
         vm.prank(campaign);
-        vm.expectRevert(IAttributionRegistry.ZeroPromoterId.selector);
+        vm.expectRevert(IAttributionRegistry.InvalidPromoterId.selector);
         attribution.registerPromoter(bytes32(0));
     }
 
@@ -413,7 +413,7 @@ contract AttributionRegistryTest is Test {
         IAttributionRegistry.Touch memory t = _touch(campaign, bytes32(0), uint64(block.timestamp + 1 days));
         bytes memory sig = _sign(userPk, t);
 
-        vm.expectRevert(IAttributionRegistry.ZeroPromoterId.selector);
+        vm.expectRevert(IAttributionRegistry.InvalidPromoterId.selector);
         attribution.storeTouch(user, t, sig, relayer);
     }
 

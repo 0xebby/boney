@@ -189,8 +189,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param users Users whose totals changed.
     /// @param totals New cumulative totals, positionally matching `users`.
-    /// @param scannedUpToBlock Block the relayer confirms it has fully incorporated. Must not
-    ///        regress, and must not exceed the configured `windowEndBlock`.
+    /// @param scannedUpToBlock Block the relayer confirms it has fully incorporated. must not exceed the configured `windowEndBlock`.
     function reportBatch(
         address campaign,
         uint256 kpiIndex,
@@ -232,8 +231,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     }
 
     /// @inheritdoc IKpiVerifier
-    /// @dev `evidence` and `params` are accepted for interface compatibility and ignored. Reverts on an
-    ///      unconfigured KPI.
+    /// @dev `evidence` and `params` are accepted for interface compatibility and ignored. Reverts on an unconfigured KPI.
     function verify(
         address campaign,
         uint256 kpiIndex,
@@ -300,8 +298,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
 
     // ── internals ────────────────────────────────────────────────
 
-    /// @dev Whether a replacement config describes a different measurement. Every field except
-    ///      `windowEndBlock` is compared.
+    /// @dev Whether a replacement config describes a different measurement. Every field except `windowEndBlock` is compared.
     /// @param existing The stored config.
     /// @param targetContract Replacement contract emitting the watched event.
     /// @param eventSignature Replacement event ABI.
@@ -335,8 +332,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         return scale == 0 ? 1 : scale;
     }
 
-    /// @dev Shared guard for both checkpoint-advancing paths: KPI configured, no checkpoint regression,
-    ///      and within `windowEndBlock`.
+    /// @dev Shared guard for both checkpoint-advancing paths: KPI configured, no checkpoint regression, and within `windowEndBlock`.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param kKey Precomputed `_kpiKey(campaign, kpiIndex)`.
@@ -363,8 +359,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         return keccak256(abi.encodePacked(campaign, kpiIndex));
     }
 
-    /// @dev Per-user-per-KPI storage key, scoped to a config generation. `epoch` is in the preimage, so
-    ///      a config change moves every total to fresh slots.
+    /// @dev Per-user-per-KPI storage key, scoped to a config generation. `epoch` is in the preimage, so a config change moves every total to fresh slots.
     /// @param campaign Campaign the KPI belongs to.
     /// @param kpiIndex Index of the KPI within that campaign.
     /// @param epoch Generation of the KPI's config, from `KpiConfig.epoch`.

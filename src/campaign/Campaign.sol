@@ -247,6 +247,10 @@ contract Campaign is ICampaign, ReentrancyGuard {
             revert OutsideWindow(startTime, _endTime);
         }
 
+        if (status == Types.CampaignStatus.Active) {
+            if (_totalShortfall != 0) revert OutstandingShortfall(_totalShortfall);
+        }
+
         endedAt = uint64(block.timestamp);
         _setStatus(Types.CampaignStatus.Ended);
     }
@@ -318,7 +322,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         ) revert WrongStatus(status);
 
         uint256 amount = _shortfall[msg.sender][kpiIndex];
-        if (amount == 0) revert NothingToReclaim();
+        if (amount == 0) revert NoShortFallOwed(msg.sender);
 
         uint256 available = _rewardPool - paidOut;
         uint256 payout = amount > available ? available : amount;

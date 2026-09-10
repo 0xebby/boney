@@ -11,7 +11,7 @@ interface IAttributionRegistry {
     // ── errors ───────────────────────────────────────────────────
 
     error ZeroAddress();
-    error ZeroPromoterId();
+    error InvalidPromoterId();
     error TouchExpired(uint64 expiresAt, uint64 timestamp);
     error TouchTooLong(uint64 expiresAt, uint64 maxExpiresAt);
     error TouchNotYetValid(uint64 signedAt, uint64 timestamp);

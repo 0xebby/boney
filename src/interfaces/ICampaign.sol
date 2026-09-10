@@ -46,6 +46,7 @@ interface ICampaign {
     error TopUpTooEarly(uint256 paidOut, uint256 required);
     error TopUpTooSmall(uint256 provided, uint256 required);
     error ShortfallUnfunded(uint256 provided, uint256 required);
+    error NoShortFallOwed(address promoter);
     error OutstandingShortfall(uint256 amount);
 
     // ── events ───────────────────────────────────────────────────
