@@ -21,7 +21,7 @@ import {
   type AttributionEntry,
 } from "@/lib/attributions";
 import {classifyTouch} from "@/lib/referrals";
-import {projectName} from "@/lib/projects";
+import {campaignName} from "@/lib/campaignName";
 import {formatDate, formatTokenAmount, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
 
@@ -208,7 +208,7 @@ function CampaignPromoterCard({
             href={`/campaign/${view.campaignId}`}
             className="text-sm font-medium text-ink hover:underline"
           >
-            {projectName(view)}
+            {campaignName(view)}
           </Link>
           <span className="tnum text-xs text-ink-muted">#{view.campaignId.toString()}</span>
           <StatusPill status={view.status} />

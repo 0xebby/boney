@@ -31,7 +31,7 @@ import {
 import {joinOptions} from "@/lib/joinPicker";
 import {utilization} from "@/lib/campaign";
 import {summarizeKinds} from "@/lib/kpiSummary";
-import {projectName, hasProjectName} from "@/lib/projects";
+import {campaignName, hasCampaignName} from "@/lib/campaignName";
 import type {ResolvedGuide} from "@/lib/campaignGuide";
 import {formatTokenAmount, formatPercent, formatTimeUntil, formatUsd} from "@/lib/format";
 import type {CampaignView, KpiSpec} from "@/lib/types";
@@ -202,10 +202,10 @@ export function CampaignsPage() {
         </div>
       </header>
 
-      {/* The project column's measure, as a property the column and its cells both read: a wide
+      {/* The name column's measure, as a property the column and its cells both read: a wide
           share of the viewport while the row is a name and one number, the desktop 220px from `md`,
           where the five columns that share the row with it come back. */}
-      <Card padded={false} className="[--project-col:62vw] md:[--project-col:220px]">
+      <Card padded={false} className="[--name-col:62vw] md:[--name-col:220px]">
         {/* The table’s own header carries what the list is showing and the one control that
             changes it — filters live behind it rather than in a row of their own above the panel.
             Padded to the table’s own cell inset, so the title starts where the first column does. */}
@@ -242,7 +242,7 @@ export function CampaignsPage() {
             rows={visible}
             columns={columns}
             rowKey={(c) => c.campaign}
-            initialSort={{key: "project", dir: "asc"}}
+            initialSort={{key: "name", dir: "asc"}}
             isRefreshing={isRefreshing}
             /* The whole row opens the campaign, so a reader aiming at a status or a number lands
                somewhere instead of nowhere. The project name stays a real link inside it — it is
@@ -314,21 +314,21 @@ function buildColumns(
 
   return [
     {
-      key: "project",
-      header: "Project",
-      // The campaign's on-chain name, which is what a project puts its own name in. The project
+      key: "name",
+      header: "Campaign",
+      // The campaign's on-chain name, chosen at creation and unique across the registry. The project
       // wallet stands in where a campaign was created without one.
-      sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
+      sortValue: (c) => (hasCampaignName(c) ? campaignName(c) : c.project.toLowerCase()),
       /*
         A custom property set on the panel, so an inline width can change at a breakpoint — see
-        `--project-col` on the `Card` this table mounts in.
+        `--name-col` on the `Card` this table mounts in.
 
         The wide share holds until `md`, which is exactly where the columns it makes room for come
         back. Below that the row is a name, a sub-line and one number, and the sub-line carries the
         status, the end date, the gate and the share paid; capped at the desktop 220px it wrapped to
         a second line while the middle of the row sat empty.
       */
-      width: "var(--project-col)",
+      width: "var(--name-col)",
       /*
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
@@ -341,15 +341,15 @@ function buildColumns(
         const summary = summaryFor(c);
 
         return (
-          <div className="flex max-w-(--project-col) flex-col gap-0.5">
+          <div className="flex max-w-(--name-col) flex-col gap-0.5">
             <span className="flex items-center gap-2">
               <Link
                 href={`/campaign/${c.campaignId}`}
-                title={projectName(c)}
+                title={campaignName(c)}
                 className="min-w-0 truncate font-medium text-ink hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
-                {projectName(c)}
+                {campaignName(c)}
               </Link>
               {hasJoined(c) ? <JoinedBadge /> : null}
             </span>

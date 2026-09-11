@@ -8,7 +8,7 @@ import {createPublicClient, http, type PublicClient} from "viem";
 import {baseSepolia} from "viem/chains";
 import {fetchBrowseCampaigns} from "../src/lib/contracts";
 import {summarize, filterCampaigns, EMPTY_FILTERS} from "../src/lib/filters";
-import {projectName, hasProjectName} from "../src/lib/projects";
+import {campaignName, hasCampaignName} from "../src/lib/campaignName";
 import {utilization} from "../src/lib/campaign";
 import {formatTokenAmount} from "../src/lib/format";
 
@@ -24,7 +24,7 @@ async function main() {
   for (const v of views) {
     const days = (Number(v.endTime) - now) / 86_400;
     console.log(
-      `  id ${v.campaignId}  ${projectName(v).padEnd(10)} named=${hasProjectName(v)}  ` +
+      `  id ${v.campaignId}  ${campaignName(v).padEnd(10)} named=${hasCampaignName(v)}  ` +
         `${v.status.padEnd(7)} expires in ${days.toFixed(2)}d  ` +
         `pool ${formatTokenAmount(v.rewardPool, 18, {maxFractionDigits: 0}).padStart(6)}  ` +
         `util ${utilization(v.rewardPool, v.paidOut)}%`,
