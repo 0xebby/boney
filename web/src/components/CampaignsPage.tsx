@@ -20,8 +20,6 @@ import {JoinCampaignMenu} from "@/components/ui/JoinCampaignMenu";
 import {CampaignFilters as CampaignFilterControls} from "@/components/CampaignFilters";
 import {LeaderboardTeaser} from "@/components/LeaderboardTeaser";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
-import {WelcomeDialog} from "@/components/WelcomeDialog";
-import {welcomeFigure} from "@/lib/welcome";
 import {
   filterCampaigns,
   summarize,
@@ -93,16 +91,6 @@ export function CampaignsPage() {
   // retotal what the filter produced rather than leave the row reporting rows it no longer shows.
   const value = useMemo(() => poolValue(visible, tokens), [visible, tokens]);
 
-  // The welcome dialog's headline number, from the same totals the tiles below read.
-  const welcome = useMemo(
-    () =>
-      welcomeFigure({
-        pool: value.pool,
-        activeCount: summary.activeCount,
-      }),
-    [value.pool, summary.activeCount],
-  );
-
   const columns = useMemo(
     () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, guides, chainId),
     [tokens, now, joinedAddresses, kpiSpecs, guides, chainId],
@@ -131,176 +119,170 @@ export function CampaignsPage() {
   }
 
   return (
-    <>
-      {/* Outside the column below, not the first child of it: `space-y-5` would give the overlay a
-          top margin, and an `inset-0` box shifts for one. */}
-      <WelcomeDialog figure={welcome} ready={!isLoading && !error} />
-
-      <div className="space-y-5">
+    <div className="space-y-5">
+      {/*
+        The list page doubles as the landing page, so the name gets hero treatment here rather
+        than the small page-title treatment every other route uses. Lowercase to match the brand
+        mark in the top bar.
+      */}
+      <header className="py-6 text-center sm:py-12">
         {/*
-          The list page doubles as the landing page, so the name gets hero treatment here rather
-          than the small page-title treatment every other route uses. Lowercase to match the brand
-          mark in the top bar.
+          The wordmark and both lines are one lockup, inside a `w-fit` box.
+
+          That box is as wide as its widest child, so no line can run wider than the name it sits
+          under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
+          it. Centring them against the page instead let the blocks meet at a shared midpoint while
+          their edges disagreed, which is what read as misaligned — and capping only the first line
+          left the second free to set the box's width, so the first one wrapped early inside a box
+          wider than the wordmark.
         */}
-        <header className="py-6 text-center sm:py-12">
+        <div className="mx-auto w-fit">
+          <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
+            Boneyard
+          </h1>
+          <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
+            The Marketplace for Verifiable Web3 Growth.
+          </p>
+
           {/*
-            The wordmark and both lines are one lockup, inside a `w-fit` box.
-
-            That box is as wide as its widest child, so no line can run wider than the name it sits
-            under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
-            it. Centring them against the page instead let the blocks meet at a shared midpoint while
-            their edges disagreed, which is what read as misaligned — and capping only the first line
-            left the second free to set the box's width, so the first one wrapped early inside a box
-            wider than the wordmark.
+            Capped to the same measure as the line above it. Left unbounded it was the widest child,
+            so it — not the wordmark — decided how wide the box was.
           */}
-          <div className="mx-auto w-fit">
-            <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-              Boneyard
-            </h1>
-            <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
-              The Marketplace for Verifiable Web3 Growth.
-            </p>
+        </div>
+      </header>
 
-            {/*
-              Capped to the same measure as the line above it. Left unbounded it was the widest child,
-              so it — not the wordmark — decided how wide the box was.
-            */}
-          </div>
-        </header>
+      {/* One panel across the width: what the marketplace is paying out and how much of it has
+          landed. Four figures reading left to right, the pool set larger as the one everything
+          else is a share of. Unheaded — each figure carries its own label, so a heading above them
+          would only name the panel a second time.
 
-        {/* One panel across the width: what the marketplace is paying out and how much of it has
-            landed. Four figures reading left to right, the pool set larger as the one everything
-            else is a share of. Unheaded — each figure carries its own label, so a heading above them
-            would only name the panel a second time.
-
-            One gap for both axes, equal to the card's own inset: every space inside the panel —
-            figure to figure, figure to edge — measures the same. */}
-        <Card>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Figure
-              label="Total Reward Pool"
-              value={formatUsd(value.pool, {compact: true})}
-              size="lg"
-            />
-            <Figure
-              label="Active campaigns"
-              value={summary.activeCount.toLocaleString("en-US")}
-              qualifier={`of ${summary.count.toLocaleString("en-US")}`}
-            />
-            <Figure label="Rewards Earned" value={formatUsd(value.paidOut, {compact: true})} />
-            <Figure label="Pool Utilization" value={formatPercent(value.paidOut, value.pool)} />
-          </div>
-        </Card>
-
-        {/* The two actions the page exists to start, centred between the overview above and the table
-            below. Promoting is a menu rather than a link because the campaign has to be chosen, and
-            the choice is the part a promoter needs help with — every offerable campaign is listed,
-            with the ones this wallet cannot promote yet saying why. */}
-        {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
-            each takes half of a measure narrow enough to stay a pair, wide enough to read as the
-            page’s two entry points. A caption under each states what that side of the marketplace
-            does. Stacked below `sm`, where half of a phone is not a button, and spaced wider there
-            so a caption groups with the button above it instead of reading as four loose lines. */}
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-6 py-2 sm:flex-row sm:gap-3 sm:py-4">
-          <div className="flex flex-col gap-2 sm:flex-1">
-            <Link
-              href="/create"
-              className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90"
-            >
-              Create a campaign
-            </Link>
-
-            <p className="text-balance text-center text-xs leading-snug text-brand">
-              <i>Set your KPIs. Escrow reward pool. Pay for verifiable results.</i>
-            </p>
-          </div>
-
-          <JoinCampaignMenu
-            options={joinable}
-            onJoined={refetchJoined}
-            loading={isLoading}
-            caption="Generate a unique boneylink, share and earn rewards."
-            className="sm:flex-1"
+          One gap for both axes, equal to the card's own inset: every space inside the panel —
+          figure to figure, figure to edge — measures the same. */}
+      <Card>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Figure
+            label="Total Reward Pool"
+            value={formatUsd(value.pool, {compact: true})}
+            size="lg"
           />
+          <Figure
+            label="Active campaigns"
+            value={summary.activeCount.toLocaleString("en-US")}
+            qualifier={`of ${summary.count.toLocaleString("en-US")}`}
+          />
+          <Figure label="Rewards Earned" value={formatUsd(value.paidOut, {compact: true})} />
+          <Figure label="Pool Utilization" value={formatPercent(value.paidOut, value.pool)} />
+        </div>
+      </Card>
+
+      {/* The two actions the page exists to start, centred between the overview above and the table
+          below. Promoting is a menu rather than a link because the campaign has to be chosen, and
+          the choice is the part a promoter needs help with — every offerable campaign is listed,
+          with the ones this wallet cannot promote yet saying why. */}
+      {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
+          each takes half of a measure narrow enough to stay a pair, wide enough to read as the
+          page’s two entry points. A caption under each states what that side of the marketplace
+          does. Stacked below `sm`, where half of a phone is not a button, and spaced wider there
+          so a caption groups with the button above it instead of reading as four loose lines. */}
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-6 py-2 sm:flex-row sm:gap-3 sm:py-4">
+        <div className="flex flex-col gap-2 sm:flex-1">
+          <Link
+            href="/create"
+            className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90"
+          >
+            Create a campaign
+          </Link>
+
+          <p className="text-balance text-center text-xs leading-snug text-brand">
+            <i>Set your KPIs. Escrow reward pool. Pay for verifiable results.</i>
+          </p>
         </div>
 
-        <Card padded={false}>
-          {/* The table’s own header carries what the list is showing and the one control that
-              changes it — filters live behind it rather than in a row of their own above the panel.
-              Padded to the table’s own cell inset, so the title starts where the first column does. */}
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-2 py-2.5 sm:px-3">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h2 className="text-sm font-bold text-brand">Browse campaigns</h2>
+        <JoinCampaignMenu
+          options={joinable}
+          onJoined={refetchJoined}
+          loading={isLoading}
+          caption="Generate a unique boneylink, share and earn rewards."
+          className="sm:flex-1"
+        />
+      </div>
 
-              {visible.length !== campaigns.length ? (
-                <span className="tnum text-xs text-ink-muted">
-                  {visible.length} of {campaigns.length}
-                </span>
-              ) : null}
+      <Card padded={false}>
+        {/* The table’s own header carries what the list is showing and the one control that
+            changes it — filters live behind it rather than in a row of their own above the panel.
+            Padded to the table’s own cell inset, so the title starts where the first column does. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-2 py-2.5 sm:px-3">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-sm font-bold text-brand">Browse campaigns</h2>
 
-              {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
-                  column that quietly stopped describing the tail of the list would read as “no KPIs
-                  here”. */}
-              {kpiSpecsDropped > 0 ? (
-                <span className="text-xs text-ink-muted">
-                  KPI kinds not loaded for {kpiSpecsDropped} campaign
-                  {kpiSpecsDropped === 1 ? "" : "s"}
-                </span>
-              ) : null}
-            </div>
+            {visible.length !== campaigns.length ? (
+              <span className="tnum text-xs text-ink-muted">
+                {visible.length} of {campaigns.length}
+              </span>
+            ) : null}
 
-            <CampaignFilterControls filters={filters} setFilters={setFilters} />
+            {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
+                column that quietly stopped describing the tail of the list would read as “no KPIs
+                here”. */}
+            {kpiSpecsDropped > 0 ? (
+              <span className="text-xs text-ink-muted">
+                KPI kinds not loaded for {kpiSpecsDropped} campaign
+                {kpiSpecsDropped === 1 ? "" : "s"}
+              </span>
+            ) : null}
           </div>
 
-          {isLoading ? (
-            <SkeletonRows rows={4} cols={8} />
-          ) : error ? (
-            <ErrorState message={String(error)} onRetry={() => refetch()} />
-          ) : (
-            <DataTable
-              rows={visible}
-              columns={columns}
-              rowKey={(c) => c.campaign}
-              initialSort={{key: "project", dir: "asc"}}
-              isRefreshing={isRefreshing}
-              emptyState={
-                <EmptyState
-                  title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
-                  description={
-                    campaigns.length === 0
-                      ? "Create the first campaign to start a performance-based collaboration."
-                      : "Try clearing the filters or widening your search."
-                  }
-                  action={
-                    campaigns.length === 0 ? (
-                      <Link
-                        href="/create"
-                        className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
-                      >
-                        Create a campaign
-                      </Link>
-                    ) : null
-                  }
-                />
-              }
-            />
-          )}
-        </Card>
+          <CampaignFilterControls filters={filters} setFilters={setFilters} />
+        </div>
 
-        {/* Who is already earning, below the table rather than above it: the panel renders nothing
-            until the subgraph answers, so a slot here shifts only the docs link under it. */}
-        <LeaderboardTeaser />
+        {isLoading ? (
+          <SkeletonRows rows={4} cols={8} />
+        ) : error ? (
+          <ErrorState message={String(error)} onRetry={() => refetch()} />
+        ) : (
+          <DataTable
+            rows={visible}
+            columns={columns}
+            rowKey={(c) => c.campaign}
+            initialSort={{key: "project", dir: "asc"}}
+            isRefreshing={isRefreshing}
+            emptyState={
+              <EmptyState
+                title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
+                description={
+                  campaigns.length === 0
+                    ? "Create the first campaign to start a performance-based collaboration."
+                    : "Try clearing the filters or widening your search."
+                }
+                action={
+                  campaigns.length === 0 ? (
+                    <Link
+                      href="/create"
+                      className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
+                    >
+                      Create a campaign
+                    </Link>
+                  ) : null
+                }
+              />
+            }
+          />
+        )}
+      </Card>
 
-        {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
-            and not found what they came for is the one who wants an explanation, and the hero's job is
-            to get them to the list. */}
-        <p className="text-xs text-ink-muted">
-          <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
-            See how it works
-          </Link>
-        </p>
-      </div>
-    </>
+      {/* Who is already earning, below the table rather than above it: the panel renders nothing
+          until the subgraph answers, so a slot here shifts only the docs link under it. */}
+      <LeaderboardTeaser />
+
+      {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
+          and not found what they came for is the one who wants an explanation, and the hero's job is
+          to get them to the list. */}
+      <p className="text-xs text-ink-muted">
+        <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
+          See how it works
+        </Link>
+      </p>
+    </div>
   );
 }
 
