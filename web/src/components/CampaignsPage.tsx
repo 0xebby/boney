@@ -202,7 +202,10 @@ export function CampaignsPage() {
         </div>
       </header>
 
-      <Card padded={false}>
+      {/* The project column's measure, as a property the column and its cells both read: a wide
+          share of the viewport while the row is a name and one number, the desktop 220px from `md`,
+          where the five columns that share the row with it come back. */}
+      <Card padded={false} className="[--project-col:62vw] md:[--project-col:220px]">
         {/* The table’s own header carries what the list is showing and the one control that
             changes it — filters live behind it rather than in a row of their own above the panel.
             Padded to the table’s own cell inset, so the title starts where the first column does. */}
@@ -316,12 +319,16 @@ function buildColumns(
       // The campaign's on-chain name, which is what a project puts its own name in. The project
       // wallet stands in where a campaign was created without one.
       sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
-      // `min()` rather than a flat 220px: the same declaration is the column's share of a phone's
-      // width and its measure on a desktop, which an inline width cannot express with a breakpoint.
-      // The phone share went from 42vw to 62vw when the status column left it — the row is a name,
-      // a sub-line and one number there, and the sub-line was wrapping inside a third of the screen
-      // while the rest of it sat empty.
-      width: "min(220px, 62vw)",
+      /*
+        A custom property set on the panel, so an inline width can change at a breakpoint — see
+        `--project-col` on the `Card` this table mounts in.
+
+        The wide share holds until `md`, which is exactly where the columns it makes room for come
+        back. Below that the row is a name, a sub-line and one number, and the sub-line carries the
+        status, the end date, the gate and the share paid; capped at the desktop 220px it wrapped to
+        a second line while the middle of the row sat empty.
+      */
+      width: "var(--project-col)",
       /*
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
@@ -334,7 +341,7 @@ function buildColumns(
         const summary = summaryFor(c);
 
         return (
-          <div className="flex max-w-[62vw] flex-col gap-0.5 sm:max-w-[220px]">
+          <div className="flex max-w-(--project-col) flex-col gap-0.5">
             <span className="flex items-center gap-2">
               <Link
                 href={`/campaign/${c.campaignId}`}
