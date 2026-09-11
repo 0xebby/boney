@@ -2,6 +2,7 @@
 
 import {useEffect, useRef, useState} from "react";
 import {useRouter} from "next/navigation";
+import {buttonClass, type ButtonVariant} from "@/components/ui/Button";
 import {Notice} from "@/components/ui/Notice";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
 import {useJoinCampaign, isPending} from "@/hooks/useWriteCampaign";
@@ -22,6 +23,8 @@ import {StatusPill} from "@/components/ui/StatusPill";
  * @param onJoined Called once the join confirms, so the caller can refetch membership.
  * @param loading Whether the campaign list is still arriving.
  * @param caption A line under the trigger saying what promoting a campaign gets you.
+ * @param variant The trigger's button register, from `ui/Button`. `brand-outline` on the home hero,
+ *   where it is the promoter's half of a pair whose other half is the one `primary` on the page.
  * @param className Extra classes for the anchor the trigger and its panels position against.
  */
 export function JoinCampaignMenu({
@@ -29,12 +32,14 @@ export function JoinCampaignMenu({
   onJoined,
   loading = false,
   caption,
+  variant = "secondary",
   className = "",
 }: {
   options: readonly JoinOption[];
   onJoined: () => void;
   loading?: boolean;
   caption?: string;
+  variant?: ButtonVariant;
   className?: string;
 }) {
   const router = useRouter();
@@ -111,7 +116,7 @@ export function JoinCampaignMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-controls="join-campaign-menu"
-        className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-hairline-strong bg-surface-1 px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+        className={buttonClass({variant, full: true})}
       >
         {label}
         <span aria-hidden className={`text-[10px] leading-none transition-transform ${open ? "rotate-180" : ""}`}>
@@ -122,7 +127,7 @@ export function JoinCampaignMenu({
       {/* In flow rather than absolute, so the panel and the wallet progress below it clear
           the caption instead of landing on top of it. */}
       {caption ? (
-        <p className="text-balance text-center text-xs leading-snug text-brand"><i>{caption}</i></p>
+        <p className="text-balance text-xs leading-snug text-ink-muted">{caption}</p>
       ) : null}
 
       {open ? (

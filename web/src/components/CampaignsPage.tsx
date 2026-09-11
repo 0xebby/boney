@@ -16,6 +16,7 @@ import {StatusPill} from "@/components/ui/StatusPill";
 import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
+import {ButtonLink} from "@/components/ui/Button";
 import {JoinCampaignMenu} from "@/components/ui/JoinCampaignMenu";
 import {CampaignFilters as CampaignFilterControls} from "@/components/CampaignFilters";
 import {LeaderboardTeaser} from "@/components/LeaderboardTeaser";
@@ -121,47 +122,71 @@ export function CampaignsPage() {
   return (
     <div className="space-y-5">
       {/*
-        The list page doubles as the landing page, so the name gets hero treatment here rather
-        than the small page-title treatment every other route uses. Lowercase to match the brand
-        mark in the top bar.
+        The list page doubles as the landing page, so it opens with what the marketplace does rather
+        than with its own name: the top bar already carries the wordmark, and a second one below it
+        spent the first screen saying "Boneyard" twice and nothing else.
+
+        One left-aligned lockup on the table's own axis — headline, the line that explains it, the
+        two actions with a caption each, the way in for anyone who wants the mechanics first, and the
+        live figures under a hairline. The figures are evidence for the headline rather than a panel
+        of their own, so they sit inside the lockup instead of in a card.
       */}
-      <header className="py-6 text-center sm:py-12">
-        {/*
-          The wordmark and both lines are one lockup, inside a `w-fit` box.
+      <header className="pt-2 sm:pt-4">
+        <h1 className="animate-rise-in max-w-[18ch] text-balance font-display text-4xl leading-tight text-ink sm:text-5xl">
+          Pay only for verified growth.
+        </h1>
 
-          That box is as wide as its widest child, so no line can run wider than the name it sits
-          under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
-          it. Centring them against the page instead let the blocks meet at a shared midpoint while
-          their edges disagreed, which is what read as misaligned — and capping only the first line
-          left the second free to set the box's width, so the first one wrapped early inside a box
-          wider than the wordmark.
-        */}
-        <div className="mx-auto w-fit">
-          <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-            Boneyard
-          </h1>
-          <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
-            The Marketplace for Verifiable Web3 Growth.
-          </p>
+        <p className="animate-rise-in mt-3 max-w-[48ch] text-balance text-sm leading-snug text-ink-secondary [animation-delay:60ms] sm:mt-4 sm:text-base">
+          The marketplace for verifiable Web3 growth: projects escrow rewards, promoters earn them
+          per verified result.
+        </p>
 
-          {/*
-            Capped to the same measure as the line above it. Left unbounded it was the widest child,
-            so it — not the wordmark — decided how wide the box was.
-          */}
+        {/* The two actions the page exists to start, ranked by register: one solid primary for the
+            project side, the brand outline for the promoter's. Promoting is a menu rather than a
+            link because the campaign has to be chosen, and the choice is the part a promoter needs
+            help with — every offerable campaign is listed, with the ones this wallet cannot promote
+            yet saying why.
+
+            A fixed measure each rather than halves of a band: side by side they read as a pair, and
+            a caption under each states what that side of the marketplace does. Stacked below `sm`,
+            where half a phone is not a button, and spaced wider there so a caption groups with the
+            button above it instead of reading as four loose lines. */}
+        <div className="mt-5 flex flex-col gap-6 sm:mt-6 sm:flex-row sm:items-start sm:gap-6">
+          <div className="flex flex-col gap-2 sm:w-64">
+            <ButtonLink href="/create" variant="primary" full>
+              Create a campaign
+            </ButtonLink>
+
+            <p className="text-balance text-xs leading-snug text-ink-muted">
+              Set the KPIs, escrow the reward pool, pay for verified results.
+            </p>
+          </div>
+
+          <JoinCampaignMenu
+            options={joinable}
+            onJoined={refetchJoined}
+            loading={isLoading}
+            variant="brand-outline"
+            caption="Generate a boneylink, share it, earn per verified result."
+            className="sm:w-64"
+          />
         </div>
-      </header>
 
-      {/* One panel across the width: what the marketplace is paying out and how much of it has
-          landed. Four figures reading left to right, the pool set larger as the one everything
-          else is a share of. Unheaded — each figure carries its own label, so a heading above them
-          would only name the panel a second time.
+        {/* The mechanics, as a quiet link inside the lockup. It used to sit under the table, which
+            put the explanation after the thing it explains. */}
+        <p className="mt-5 text-xs">
+          <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
+            See how it works
+          </Link>
+        </p>
 
-          One gap for both axes, equal to the card's own inset: every space inside the panel —
-          figure to figure, figure to edge — measures the same. */}
-      <Card>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {/* What the marketplace is paying out and how much of it has landed, reading left to right
+            with the pool set larger as the figure everything else is a share of. One hairline above
+            them and no box: each carries its own label, so a panel with a border would only fence
+            off four numbers that belong to the sentence at the top of the page. */}
+        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-hairline pt-5 sm:mt-7 lg:grid-cols-4">
           <Figure
-            label="Total Reward Pool"
+            label="Total reward pool"
             value={formatUsd(value.pool, {compact: true})}
             size="lg"
           />
@@ -170,42 +195,10 @@ export function CampaignsPage() {
             value={summary.activeCount.toLocaleString("en-US")}
             qualifier={`of ${summary.count.toLocaleString("en-US")}`}
           />
-          <Figure label="Rewards Earned" value={formatUsd(value.paidOut, {compact: true})} />
-          <Figure label="Pool Utilization" value={formatPercent(value.paidOut, value.pool)} />
+          <Figure label="Rewards earned" value={formatUsd(value.paidOut, {compact: true})} />
+          <Figure label="Pool utilization" value={formatPercent(value.paidOut, value.pool)} />
         </div>
-      </Card>
-
-      {/* The two actions the page exists to start, centred between the overview above and the table
-          below. Promoting is a menu rather than a link because the campaign has to be chosen, and
-          the choice is the part a promoter needs help with — every offerable campaign is listed,
-          with the ones this wallet cannot promote yet saying why. */}
-      {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
-          each takes half of a measure narrow enough to stay a pair, wide enough to read as the
-          page’s two entry points. A caption under each states what that side of the marketplace
-          does. Stacked below `sm`, where half of a phone is not a button, and spaced wider there
-          so a caption groups with the button above it instead of reading as four loose lines. */}
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-6 py-2 sm:flex-row sm:gap-3 sm:py-4">
-        <div className="flex flex-col gap-2 sm:flex-1">
-          <Link
-            href="/create"
-            className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90"
-          >
-            Create a campaign
-          </Link>
-
-          <p className="text-balance text-center text-xs leading-snug text-brand">
-            <i>Set your KPIs. Escrow reward pool. Pay for verifiable results.</i>
-          </p>
-        </div>
-
-        <JoinCampaignMenu
-          options={joinable}
-          onJoined={refetchJoined}
-          loading={isLoading}
-          caption="Generate a unique boneylink, share and earn rewards."
-          className="sm:flex-1"
-        />
-      </div>
+      </header>
 
       <Card padded={false}>
         {/* The table’s own header carries what the list is showing and the one control that
@@ -271,17 +264,8 @@ export function CampaignsPage() {
       </Card>
 
       {/* Who is already earning, below the table rather than above it: the panel renders nothing
-          until the subgraph answers, so a slot here shifts only the docs link under it. */}
+          until the subgraph answers, so an empty slot here costs the page nothing. */}
       <LeaderboardTeaser />
-
-      {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
-          and not found what they came for is the one who wants an explanation, and the hero's job is
-          to get them to the list. */}
-      <p className="text-xs text-ink-muted">
-        <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
-          See how it works
-        </Link>
-      </p>
     </div>
   );
 }
