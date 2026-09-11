@@ -594,47 +594,41 @@ export function AppShell({children}: {children: ReactNode}) {
       </header>
 
       <main id="content" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
-        {/*
-          Where every BoneyScore in the app comes from, in the page's top-right corner rather than in
-          the bar above it. The bar is navigation and wallet state; an attribution is neither, and at
-          `text-[10px]` in that row it was competing for width with controls that need it.
-
-          `--brand-ethos` on the mark and the name, so the credit reads as another party's rather than
-          as Boney's own copy. Right-aligned above the page's own first element, so it never overlaps
-          one.
-        */}
-        <div className="-mt-2 mb-3 flex justify-end">
-          {/* Wraps below `sm`. Held on one line it measured wider than a narrow phone's content
-              column, and in a `justify-end` row the overflow runs off the *leading* edge — so the
-              whole credit sat outside the viewport with nothing to scroll to it. */}
-          <span
-            className="inline-flex flex-wrap items-center justify-end gap-x-1 text-right text-[11px] text-ink-muted sm:whitespace-nowrap"
-            title="A BoneyScore is composed from an Ethos credibility score and X reach."
-          >
-            BoneyScore is powered by
-            <span className="inline-flex items-center gap-1 font-semibold text-brand-ethos">
-              <EthosMark className="h-3 w-3" />
-              Ethos
-            </span>
-            credibility score
-          </span>
-        </div>
-
         {children}
       </main>
 
       {/*
-        The protocol attribution lives here rather than in the bar: the product is the Boneyard,
-        and the machinery underneath it is a footnote that links to where it is explained.
+        The attributions, and nothing else. Both are footnotes: the product is the Boneyard, and who
+        supplies the machinery under it is worth crediting but is not worth a reader's first glance.
+
+        The Ethos credit used to sit above every page's own first element, inside `<main>`, where it
+        read as a caption on whatever happened to be below it — a line about scoring standing over a
+        table of campaigns, a form, a docs page. It says the same thing here and interrupts nothing.
+
+        One wrapping row of muted 12px items, no card and no columns: three short lines do not need a
+        layout.
       */}
       <footer className="mt-12 border-t border-hairline">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-2 px-4 py-8 sm:px-6 lg:px-8">
-          <p className="text-xs text-ink-muted">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-5 gap-y-1.5 px-4 py-8 text-xs text-ink-muted sm:px-6 lg:px-8">
+          <p>
             Powered by the{" "}
             <Link href="/docs" className="text-ink-secondary transition-colors hover:text-brand">
               Boney Protocol
             </Link>
           </p>
+
+          {/* `--brand-ethos` on the mark and the name, so the credit reads as another party's rather
+              than as Boney's own copy. */}
+          <p title="A BoneyScore is composed from an Ethos credibility score and X reach.">
+            BoneyScore is powered by{" "}
+            <span className="inline-flex items-center gap-1 align-baseline font-semibold text-brand-ethos">
+              <EthosMark className="h-3 w-3" />
+              Ethos
+            </span>{" "}
+            credibility score
+          </p>
+
+          <p>Beta on Base Sepolia — testnet only, unaudited</p>
         </div>
       </footer>
     </div>
