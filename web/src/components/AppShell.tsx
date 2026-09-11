@@ -554,7 +554,9 @@ export function AppShell({children}: {children: ReactNode}) {
           {/* `ml-auto` rather than a spacer element, and `min-w-0` so the cluster is what compresses
               when the row is tight. */}
           <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-2.5">
-            <span className="animate-blink hidden text-[10px] font-bold uppercase tracking-wider text-brand xl:inline">
+            {/* Static. It blinked, and a chip that disappears twice a second next to the product's
+                one primary action is a distraction the word does not earn. */}
+            <span className="hidden text-[10px] font-bold uppercase tracking-wider text-brand xl:inline">
               beta
             </span>
 
