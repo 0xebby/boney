@@ -318,7 +318,10 @@ function buildColumns(
       sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
       // `min()` rather than a flat 220px: the same declaration is the column's share of a phone's
       // width and its measure on a desktop, which an inline width cannot express with a breakpoint.
-      width: "min(220px, 42vw)",
+      // The phone share went from 42vw to 62vw when the status column left it — the row is a name,
+      // a sub-line and one number there, and the sub-line was wrapping inside a third of the screen
+      // while the rest of it sat empty.
+      width: "min(220px, 62vw)",
       /*
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
@@ -331,7 +334,7 @@ function buildColumns(
         const summary = summaryFor(c);
 
         return (
-          <div className="flex max-w-[42vw] flex-col gap-0.5 sm:max-w-[220px]">
+          <div className="flex max-w-[62vw] flex-col gap-0.5 sm:max-w-[220px]">
             <span className="flex items-center gap-2">
               <Link
                 href={`/campaign/${c.campaignId}`}
@@ -358,15 +361,16 @@ function buildColumns(
               </span>
             ) : null}
 
-            {/* A phone drops four of the seven columns, which leaves it a name, a status and a
-                number. The three that decide whether a campaign is worth opening — when it ends,
-                what it gates on, how much of the pool has moved — ride under the name instead, and
-                go away from `md` up where the table shows them itself. */}
+            {/* A phone drops five of the seven columns, which leaves it a name and a number. The
+                four facts that decide whether a campaign is worth opening — what state it is in,
+                when it ends, what it gates on, how much of the pool has moved — ride under the name
+                instead, and go away from `md` up where the table shows them itself. */}
             <span className="text-[11px] leading-snug text-ink-muted md:hidden">
-              {now > 0 ? `${formatTimeUntil(c.endTime, now)} · ` : ""}
+              {c.status}
+              {now > 0 ? ` · ${formatTimeUntil(c.endTime, now)}` : ""}
               {c.minReputation === BigInt(0)
-                ? "open to all"
-                : `min ${c.minReputation.toLocaleString("en-US")}`}
+                ? " · open to all"
+                : ` · min ${c.minReputation.toLocaleString("en-US")}`}
               {c.paidOut > BigInt(0)
                 ? ` · ${formatPercent(Number(c.paidOut), Number(c.rewardPool))} paid`
                 : ""}
@@ -378,6 +382,8 @@ function buildColumns(
     {
       key: "status",
       header: "Status",
+      // A phone spends the width on the name instead; the status leads the sub-line under it.
+      hideOnMobile: true,
       sortValue: (c) => c.status,
       render: (c) => <StatusPill status={c.status} />,
     },
