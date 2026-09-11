@@ -2,6 +2,7 @@
 
 import {useMemo, useState} from "react";
 import Link from "next/link";
+import {useRouter} from "next/navigation";
 import {useAccount} from "wagmi";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
 import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
@@ -40,6 +41,7 @@ export function CampaignsPage() {
     useCampaigns();
   const {reputation} = useReputation();
   const {isConnected} = useAccount();
+  const router = useRouter();
   const [filters, setFilters] = useState<CampaignFilters>(EMPTY_FILTERS);
 
   /*
@@ -206,7 +208,7 @@ export function CampaignsPage() {
             Padded to the table’s own cell inset, so the title starts where the first column does. */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-2 py-2.5 sm:px-3">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className="text-sm font-bold text-brand">Browse campaigns</h2>
+            <h2 className="text-sm font-bold text-ink">Browse campaigns</h2>
 
             {visible.length !== campaigns.length ? (
               <span className="tnum text-xs text-ink-muted">
@@ -229,7 +231,7 @@ export function CampaignsPage() {
         </div>
 
         {isLoading ? (
-          <SkeletonRows rows={4} cols={8} />
+          <SkeletonRows rows={4} cols={7} />
         ) : error ? (
           <ErrorState message={String(error)} onRetry={() => refetch()} />
         ) : (
@@ -239,6 +241,10 @@ export function CampaignsPage() {
             rowKey={(c) => c.campaign}
             initialSort={{key: "project", dir: "asc"}}
             isRefreshing={isRefreshing}
+            /* The whole row opens the campaign, so a reader aiming at a status or a number lands
+               somewhere instead of nowhere. The project name stays a real link inside it — it is
+               how you open one in a new tab — and stops the click from being handled twice. */
+            onRowClick={(c) => router.push(`/campaign/${c.campaignId}`)}
             emptyState={
               <EmptyState
                 title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
@@ -321,57 +327,51 @@ function buildColumns(
         and vanishes when it disconnects — moved every column to its right. The cap makes this
         column's measure a constant, so the badge is free to come and go.
       */
-      render: (c) => (
-        <div className="flex max-w-[42vw] flex-col gap-0.5 sm:max-w-[220px]">
-          <span className="flex items-center gap-2">
-            <Link
-              href={`/campaign/${c.campaignId}`}
-              title={projectName(c)}
-              className="min-w-0 truncate font-medium text-ink hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {projectName(c)}
-            </Link>
-            {hasJoined(c) ? <JoinedBadge /> : null}
-          </span>
-
-          {/* A phone drops six of the nine columns, which left it a name, a status and a number.
-              The three that decide whether a campaign is worth opening — when it ends, what it
-              gates on, how much of the pool has moved — ride under the name instead, and go away
-              from `md` up where the table shows them itself. */}
-          <span className="text-[11px] leading-snug text-ink-muted md:hidden">
-            {now > 0 ? `${formatTimeUntil(c.endTime, now)} · ` : ""}
-            {c.minReputation === BigInt(0)
-              ? "open to all"
-              : `min ${c.minReputation.toLocaleString("en-US")}`}
-            {c.paidOut > BigInt(0)
-              ? ` · ${formatPercent(Number(c.paidOut), Number(c.rewardPool))} paid`
-              : ""}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: "why",
-      header: "Campaign",
-      hideOnMobile: true,
-      width: "320px",
-      // Sorts on the summary, so campaigns that say what they are for group ahead of the ones that
-      // do not. The numeric id is not here at all — it is on the campaign's own page.
-      sortValue: (c) => summaryFor(c) ?? "",
       render: (c) => {
         const summary = summaryFor(c);
 
-        // Nothing published yet. Said as an absence rather than filled with the KPI kinds, which
-        // are their own column and describe what is measured rather than what it is for.
-        if (!summary) {
-          return <span className="text-ink-muted">No campaign info yet</span>;
-        }
-
         return (
-          <span className="line-clamp-2 text-ink-secondary" title={summary}>
-            {summary}
-          </span>
+          <div className="flex max-w-[42vw] flex-col gap-0.5 sm:max-w-[220px]">
+            <span className="flex items-center gap-2">
+              <Link
+                href={`/campaign/${c.campaignId}`}
+                title={projectName(c)}
+                className="min-w-0 truncate font-medium text-ink hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {projectName(c)}
+              </Link>
+              {hasJoined(c) ? <JoinedBadge /> : null}
+            </span>
+
+            {/* What the campaign is for, in the project's own words, under the name it belongs to
+                rather than in a 320px column of its own — most rows have nothing to put there, and
+                a column of "No campaign info yet" was the widest thing on the page. Absent, this
+                line is simply not rendered. */}
+            {summary ? (
+              <span className="hidden md:block">
+                {/* `line-clamp-2` sets its own `display`, so the breakpoint has to live on a
+                    wrapper rather than fight it for the same property. */}
+                <span className="line-clamp-2 text-xs leading-snug text-ink-muted" title={summary}>
+                  {summary}
+                </span>
+              </span>
+            ) : null}
+
+            {/* A phone drops four of the seven columns, which leaves it a name, a status and a
+                number. The three that decide whether a campaign is worth opening — when it ends,
+                what it gates on, how much of the pool has moved — ride under the name instead, and
+                go away from `md` up where the table shows them itself. */}
+            <span className="text-[11px] leading-snug text-ink-muted md:hidden">
+              {now > 0 ? `${formatTimeUntil(c.endTime, now)} · ` : ""}
+              {c.minReputation === BigInt(0)
+                ? "open to all"
+                : `min ${c.minReputation.toLocaleString("en-US")}`}
+              {c.paidOut > BigInt(0)
+                ? ` · ${formatPercent(Number(c.paidOut), Number(c.rewardPool))} paid`
+                : ""}
+            </span>
+          </div>
         );
       },
     },
@@ -428,8 +428,10 @@ function buildColumns(
           return <span className="text-ink-muted">{c.kpiCount.toString()}</span>;
         }
 
+        // One line: `NFT mints +1` broken across two reads as two separate KPIs, and the column has
+        // the room now that the summary is not a column of its own.
         return (
-          <span title={summary.title} className="text-ink-secondary">
+          <span title={summary.title} className="whitespace-nowrap text-ink-secondary">
             {summary.label}
             {summary.extra > 0 ? (
               <span className="ml-1 text-ink-muted">+{summary.extra}</span>

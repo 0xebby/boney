@@ -11,6 +11,10 @@ import {sortRows, nextSortState, type SortState, type SortableColumn} from "@/li
  * the brand mark, primary and add buttons, links, the active nav item and the focus ring, so that
  * seeing it means "brand" or "press this" — and a header row is neither. The sort affordance keeps
  * its own arrow, which is what actually says a column is interactive.
+ *
+ * Numeric columns never wrap, header or cell. A quantity broken across two lines — `650K` over
+ * `bUSD`, `83d` over `8h` — reads as two facts and costs every row in the table the height of the
+ * worst cell in it, so the column takes the width it needs and the table scrolls instead.
  */
 
 export type Column<T> = SortableColumn<T> & {
@@ -66,7 +70,7 @@ export function DataTable<T>({
                   aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
                   style={col.width ? {width: col.width} : undefined}
                   className={`px-2 py-2 text-xs font-semibold text-ink-secondary sm:px-3 ${
-                    col.numeric ? "text-right" : "text-left"
+                    col.numeric ? "whitespace-nowrap text-right" : "text-left"
                   } ${col.hideOnMobile ? "hidden md:table-cell" : ""}`}
                 >
                   {sortable ? (
@@ -109,7 +113,7 @@ export function DataTable<T>({
                 <td
                   key={col.key}
                   className={`px-2 py-2.5 align-middle sm:px-3 ${
-                    col.numeric ? "tnum text-right" : "text-left"
+                    col.numeric ? "tnum whitespace-nowrap text-right" : "text-left"
                   } ${col.hideOnMobile ? "hidden md:table-cell" : ""}`}
                 >
                   {col.render(row)}
