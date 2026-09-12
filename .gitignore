@@ -13,9 +13,7 @@ broadcast
 
 *.md
 !/README.md
-boneyMd/*
-!/boneyMd/eth-global-2026-plan.md
-!/boneyMd/feature-*.md
+/boneyMd/
 
 /*.html
 
@@ -32,7 +30,10 @@ web/.vercel
 
 .indexer-state.json
 
-.claude/
+.claude/*
+!/.claude/docs/
+.claude/docs/*
+!/.claude/docs/BoneyGeneral.md
 
 .vscode/settings.json
 
@@ -48,3 +49,12 @@ web/scripts/sygma-deposit.ts
 web/scripts/uniswap-swap.ts
 web/scripts/gyndore-swap.ts
 web/scripts/gyndore-stake.ts
+
+# CRE workflow outputs
+boneyard/**/node_modules/
+boneyard/**/.cre_build_tmp.js
+boneyard/**/dist/
+boneyard/**/build/
+boneyard/**/.cre/
+boneyard/**/main.js
+boneyard/**/main.wasm
