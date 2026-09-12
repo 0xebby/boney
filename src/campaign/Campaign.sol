@@ -32,10 +32,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
     uint256 public constant MAX_EXTENSION_NUMERATOR = 1;
     /// @notice Maximum extension denominator against the initial campaign duration.
     uint256 public constant MAX_EXTENSION_DENOMINATOR = 2;
+    /// @notice Maximum extension duration.
+    uint64 public constant MAX_EXTENSION_DURATION = 360 days;
 
     /// @notice Maximum number of evidence actions a single report may carry.
-    /// @dev Bounds the segment walk in `reportUserAction`. The off-chain reporter folds same-block
-    ///      actions, and then whole attribution segments, to stay under it.
+    /// @dev Bounds the segment walk in `reportUserAction`.
     uint256 public constant MAX_EVIDENCE_ACTIONS = 256;
 
     // ── dependencies ─────────────────────────────────────────────
@@ -52,7 +53,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @notice Owner of the campaign; funds it, controls its lifecycle, receives unspent escrow.
     address public immutable project;
     /// @notice Human-readable campaign name, as supplied at creation.
-    /// @dev Written once in the constructor. Validated for length and charset, not for uniqueness.
     string public name;
     /// @notice ERC20 used for escrow and payouts.
     address public immutable token;
@@ -109,6 +109,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
     mapping(address => mapping(uint256 => uint256)) private _shortfall;
     /// @dev Total unpaid rewards across all promoters and KPIs.
     uint256 private _totalShortfall;
+    /// @dev Accounts allowed to report user actions on behalf of the project.
+    mapping(address => bool) public override authorizedReporters;
 
     /// @dev Restricts a call to the campaign's project.
     modifier onlyProject() {
@@ -198,8 +200,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
         startTime = cfg.startTime;
         _endTime = cfg.endTime;
         initialDuration = cfg.endTime - cfg.startTime;
-        maximumEndTime =
-            cfg.endTime + uint64(initialDuration * MAX_EXTENSION_NUMERATOR / MAX_EXTENSION_DENOMINATOR);
+        uint256 extension = ((initialDuration * MAX_EXTENSION_NUMERATOR) / MAX_EXTENSION_DENOMINATOR);
+        if (extension > MAX_EXTENSION_DURATION) extension = MAX_EXTENSION_DURATION;
+        maximumEndTime = cfg.endTime + uint64(extension);
         attributionWindow = cfg.attributionWindow;
         minReputation = cfg.minReputation;
 
@@ -372,6 +375,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
     // ── reporting ────────────────────────────────────────────────
 
     /// @inheritdoc ICampaign
+    function setAuthorizedReporter(address reporter, bool allowed) external onlyProject {
+        if (reporter == address(0)) revert InvalidReporter();
+        authorizedReporters[reporter] = allowed;
+        emit AuthorizedReporterUpdated(reporter, allowed);
+    }
+
+    /// @inheritdoc ICampaign
     /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
     /// @dev Accepted while Active and inside the campaign window, and for `CLAIM_GRACE` after `end()`.
     ///      Per-action `evidence` splits the credit across the promoters who held the user when each
@@ -382,7 +392,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
         nonReentrant
     {
         _requireReportableStatus();
-        if (msg.sender != project && msg.sender != oracleCoordinator) revert NotReporter();
+        if (msg.sender != project && msg.sender != oracleCoordinator && !authorizedReporters[msg.sender]) {
+            revert NotReporter();
+        }
         if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
         if (user == address(0)) revert ZeroAddress();
         _requireReportWindow();
@@ -437,10 +449,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         _lastReportBlock[user][kpiIndex] = uint64(block.number);
     }
 
-    /// @dev Splits a report across the promoters who held the user when each action happened. Evidence
-    ///      is cumulative, so the per-promoter tally is recomputed in full and only the part above
-    ///      `_creditedTo` is applied — a replay credits nothing, and a report the verifier's ceiling
-    ///      cut short finishes on the next one without moving credit off its promoter.
+    /// @dev Splits a report across the promoters who held the user when each action happened.
     /// @param user The end user who's actions is being reported.
     /// @param kpiIndex Index of the KPI being credited.
     /// @param already Amount already credited for this pair, across every promoter.
@@ -764,19 +773,12 @@ contract Campaign is ICampaign, ReentrancyGuard {
         return _totalProgress[kpiIndex];
     }
 
-    /// @notice Cumulative amount already credited for a `(user, kpi)` pair.
-    /// @param user The end user.
-    /// @param kpiIndex Index of the KPI.
-    /// @return Amount credited so far; the replay guard for reports.
+    /// @inheritdoc ICampaign
     function userCreditedOf(address user, uint256 kpiIndex) external view returns (uint256) {
         return _userCredited[user][kpiIndex];
     }
 
-    /// @notice Block of the last report that credited anything for a `(user, kpi)` pair.
-    /// @param user The end user.
-    /// @param kpiIndex Index of the KPI.
-    /// @return Block number, or 0 if the pair has never been credited; the start of the span an
-    ///         evidence-free report is checked over.
+    /// @inheritdoc ICampaign
     function lastReportBlockOf(address user, uint256 kpiIndex) external view returns (uint64) {
         return _lastReportBlock[user][kpiIndex];
     }
@@ -828,14 +830,12 @@ contract Campaign is ICampaign, ReentrancyGuard {
         return _shortfall[promoter][kpiIndex];
     }
 
-    /// @notice The campaign's project.
-    /// @return The project address.
+    /// @inheritdoc ICampaign
     function getProject() external view returns (address) {
         return project;
     }
 
-    /// @notice The coordinator authorized to push oracle updates.
-    /// @return The oracle coordinator address.
+    /// @inheritdoc ICampaign
     function getOracle() external view returns (address) {
         return oracleCoordinator;
     }

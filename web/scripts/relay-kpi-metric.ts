@@ -4,7 +4,7 @@
  * Usage: pnpm relay --campaign <address> --kpi <index> [--rpc <url>] [--verifier <address>] [--dry-run]
  *
  * The independent half of KPI verification. `indexer.ts` reports what a *project* claims;
- * reports what Boney *observed*, and a claim is capped at the smaller of the two. 
+ * relayer.ts reports what Boney *observed*, and a claim is capped at the smaller of the two.
  * The two are deliberately separate processes with separate keys.
  *
  * Trust model: whoever holds `REPORTER_PRIVATE_KEY` is trusted to report honestly.

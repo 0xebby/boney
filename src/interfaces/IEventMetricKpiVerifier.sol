@@ -87,4 +87,30 @@ interface IEventMetricKpiVerifier is IKpiVerifier {
         /// @dev Each matching event contributes its decoded numeric param (e.g. "12,400 USDC").
         SUM
     }
+
+    /// @notice A user's observed cumulative metric in campaign units.
+    /// @param campaign Campaign the KPI belongs to.
+    /// @param kpiIndex Index of the KPI within the campaign.
+    /// @param user User whose observed metric is returned.
+    /// @return Observed cumulative progress after scaling.
+    function observedProgressOf(address campaign, uint256 kpiIndex, address user)
+        external
+        view
+        returns (uint256);
+
+    /// @notice Number of users observed for the current KPI configuration epoch.
+    /// @param campaign Campaign the KPI belongs to.
+    /// @param kpiIndex Index of the KPI within the campaign.
+    /// @return Number of observed users.
+    function observedUserCount(address campaign, uint256 kpiIndex) external view returns (uint256);
+
+    /// @notice Return one user observed for the current KPI configuration epoch.
+    /// @param campaign Campaign the KPI belongs to.
+    /// @param kpiIndex Index of the KPI within the campaign.
+    /// @param index Position in the observed-user list.
+    /// @return The observed user.
+    function observedUserAt(address campaign, uint256 kpiIndex, uint256 index)
+        external
+        view
+        returns (address);
 }

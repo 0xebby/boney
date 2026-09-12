@@ -165,6 +165,19 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_EXTENSION_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_EXTENSION_NUMERATOR",
     "inputs": [],
     "outputs": [
@@ -249,6 +262,25 @@ export const CampaignAbi = [
         "name": "",
         "type": "uint64",
         "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authorizedReporters",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -787,6 +819,24 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "setAuthorizedReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "settle",
     "inputs": [
       {
@@ -1018,6 +1068,25 @@ export const CampaignAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AuthorizedReporterUpdated",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -1371,6 +1440,11 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidReporter",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidWindow",
     "inputs": []
   },
@@ -1405,6 +1479,17 @@ export const CampaignAbi = [
     "type": "error",
     "name": "NoKpis",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoShortFallOwed",
+    "inputs": [
+      {
+        "name": "promoter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",

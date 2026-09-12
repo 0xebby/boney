@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Types} from "../libraries/Types.sol";
+import {IAttributionRegistry} from "./IAttributionRegistry.sol";
 
 /// @title ICampaign
 /// @notice A single performance campaign: escrowed rewards released as attributed KPI progress
@@ -48,6 +49,7 @@ interface ICampaign {
     error ShortfallUnfunded(uint256 provided, uint256 required);
     error NoShortFallOwed(address promoter);
     error OutstandingShortfall(uint256 amount);
+    error InvalidReporter();
 
     // ── events ───────────────────────────────────────────────────
 
@@ -120,6 +122,11 @@ interface ICampaign {
         bytes32 indexed promoterId, address indexed promoter, uint256 indexed kpiIndex, uint256 amount
     );
 
+    /// @notice Emitted when a project grants or revokes an automated reporting account.
+    /// @param reporter Account whose reports are being configured.
+    /// @param allowed Whether the account may report user actions.
+    event AuthorizedReporterUpdated(address indexed reporter, bool allowed);
+
     /// @notice Emitted when unspent escrow returns to the project.
     /// @param to Recipient, always the project.
     /// @param amount Amount returned.
@@ -172,6 +179,11 @@ interface ICampaign {
     ///        `Types.Action[]`, ascending by `blockNumber`, or empty.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external;
+
+    /// @notice Allow or disallow an account to report user actions for this campaign.
+    /// @param reporter Account to configure.
+    /// @param allowed Whether the account may report.
+    function setAuthorizedReporter(address reporter, bool allowed) external;
 
     /// @notice Apply a campaign-level aggregate update. Oracle coordinator only.
     /// @param kpiIndex Index of the aggregate KPI.
@@ -244,11 +256,36 @@ interface ICampaign {
     /// @return The campaign-level total.
     function totalProgress(uint256 kpiIndex) external view returns (uint256);
 
+    /// @notice Attribution registry used by this campaign.
+    /// @return The campaign's attribution registry.
+    function attributionRegistry() external view returns (IAttributionRegistry);
+
     /// @notice Rewards released from the pool so far.
     /// @return The cumulative amount paid out.
     function paidOut() external view returns (uint256);
 
+    /// @notice Whether an account may report user actions for this campaign.
+    /// @param reporter Account to check.
+    /// @return True when the project has authorized the account.
+    function authorizedReporters(address reporter) external view returns (bool);
+
+    /// @notice Cumulative amount already credited for a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Amount credited so far.
+    function userCreditedOf(address user, uint256 kpiIndex) external view returns (uint256);
+
+    /// @notice Block of the last report that credited a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Block number, or zero when the pair has not been credited.
+    function lastReportBlockOf(address user, uint256 kpiIndex) external view returns (uint64);
+
+    /// @notice The campaign's project.
+    /// @return The project address.
     function getProject() external view returns (address);
 
+    /// @notice The coordinator authorized to push oracle updates.
+    /// @return The oracle coordinator address.
     function getOracle() external view returns (address);
 }

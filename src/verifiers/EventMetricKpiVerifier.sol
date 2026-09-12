@@ -54,6 +54,11 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     /// @notice `_userKey(...)` => `block.timestamp` of the most recent report for that user.
     mapping(bytes32 => uint256) public lastReportedAt;
 
+    /// @dev Current-epoch KPI key => users whose observed totals have been reported.
+    mapping(bytes32 => address[]) private _observedUsers;
+    /// @dev Current-epoch user key => whether the user is already in `_observedUsers`.
+    mapping(bytes32 => bool) private _observedUserKnown;
+
     /// @notice `_kpiKey(...)` => last block fully scanned and folded into `verifiedTotals`.
     /// @dev Read by the relayer to resume scanning.
     mapping(bytes32 => uint256) public lastScannedBlock;
@@ -176,6 +181,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         if (!cfg.configured) revert KpiNotConfigured(campaign, kpiIndex);
 
         bytes32 uKey = _userKey(campaign, kpiIndex, cfg.epoch, user);
+        _rememberUser(campaign, kpiIndex, cfg.epoch, user);
         verifiedTotals[uKey] = verifiedTotal;
         lastReportedAt[uKey] = block.timestamp;
 
@@ -205,6 +211,7 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
 
         for (uint256 i = 0; i < users.length; i++) {
             bytes32 uKey = _userKey(campaign, kpiIndex, epoch, users[i]);
+            _rememberUser(campaign, kpiIndex, epoch, users[i]);
             verifiedTotals[uKey] = totals[i];
             lastReportedAt[uKey] = block.timestamp;
             emit VerifiedTotalReported(campaign, kpiIndex, users[i], totals[i]);
@@ -286,6 +293,22 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     {
         KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
         return verifiedTotals[_userKey(campaign, kpiIndex, cfg.epoch, user)] / _effectiveScale(cfg.scale);
+    }
+
+    /// @inheritdoc IEventMetricKpiVerifier
+    function observedUserCount(address campaign, uint256 kpiIndex) external view returns (uint256) {
+        KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
+        return _observedUsers[_epochKey(campaign, kpiIndex, cfg.epoch)].length;
+    }
+
+    /// @inheritdoc IEventMetricKpiVerifier
+    function observedUserAt(address campaign, uint256 kpiIndex, uint256 index)
+        external
+        view
+        returns (address)
+    {
+        KpiConfig storage cfg = kpiConfigs[_kpiKey(campaign, kpiIndex)];
+        return _observedUsers[_epochKey(campaign, kpiIndex, cfg.epoch)][index];
     }
 
     /// @notice Where the relayer left off for a KPI.
@@ -371,5 +394,26 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
         returns (bytes32)
     {
         return keccak256(abi.encodePacked(campaign, kpiIndex, epoch, user));
+    }
+
+    /// @dev Adds a user to the current configuration epoch once.
+    /// @param campaign Campaign the KPI belongs to.
+    /// @param kpiIndex Index of the KPI within the campaign.
+    /// @param epoch Configuration generation.
+    /// @param user User whose observed total was reported.
+    function _rememberUser(address campaign, uint256 kpiIndex, uint256 epoch, address user) private {
+        bytes32 key = _epochKey(campaign, kpiIndex, epoch);
+        if (_observedUserKnown[keccak256(abi.encodePacked(key, user))]) return;
+        _observedUserKnown[keccak256(abi.encodePacked(key, user))] = true;
+        _observedUsers[key].push(user);
+    }
+
+    /// @dev Builds the list key for a campaign KPI configuration epoch.
+    /// @param campaign Campaign the KPI belongs to.
+    /// @param kpiIndex Index of the KPI within the campaign.
+    /// @param epoch Configuration generation.
+    /// @return The epoch-scoped list key.
+    function _epochKey(address campaign, uint256 kpiIndex, uint256 epoch) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(campaign, kpiIndex, epoch));
     }
 }

@@ -237,6 +237,17 @@ contract CampaignTest is Test {
         campaign.extend(maximum + 1);
     }
 
+    function test_Extend_capsLongInitialDurationAt360Days() public {
+        Types.CampaignConfig memory cfg = _defaultConfig(0);
+        cfg.endTime = cfg.startTime + 800 days;
+
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(cfg, _defaultKpis(), _defaultTiers());
+        Campaign longCampaign = Campaign(addr);
+
+        assertEq(longCampaign.maximumEndTime(), cfg.endTime + 360 days);
+    }
+
     function test_Extend_rejectsEndedCampaign() public {
         _activate(campaign);
         vm.prank(project);
@@ -325,7 +336,9 @@ contract CampaignTest is Test {
         token.mint(project, 1_500 ether);
         vm.startPrank(project);
         token.approve(address(depleted), 1_500 ether);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.ShortfallUnfunded.selector, 1_500 ether, 2_000 ether));
+        vm.expectRevert(
+            abi.encodeWithSelector(ICampaign.ShortfallUnfunded.selector, 1_500 ether, 2_000 ether)
+        );
         depleted.topUp(1_500 ether);
         vm.stopPrank();
     }
@@ -669,11 +682,7 @@ contract CampaignTest is Test {
         campaign.reportUserAction(0, user, 5, "");
     }
 
-    /// @dev An expired touch reverts the whole report rather than skipping the user, so the
-    ///      activity is not burned — it is merely unbanked. A fresh touch from the same promoter makes
-    ///      the same cumulative report land, and because `_userCredited` never advanced, the full total
-    ///      is still owed.
-    function test_Report_recoverableAfterAttributionExpires() public {
+    function test_Report_retouchAfterExpiryRequiresEvidence() public {
         _activate(campaign);
         bytes32 id1 = _join(campaign, kol);
         _join(campaign, kol2);
@@ -685,12 +694,13 @@ contract CampaignTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
 
-        // The same KOL re-engages the user and the same report now succeeds.
         _touch(campaign, userPk, user, id1, 7 days);
-        _report(campaign, project, user, 5);
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        campaign.reportUserAction(0, user, 5, "");
 
-        assertEq(campaign.progressOf(kol, 0), 5, "the lapse only deferred it");
-        assertEq(campaign.progressOf(kol2, 0), 0);
+        assertEq(campaign.progressOf(kol, 0), 0);
+        assertEq(campaign.userCreditedOf(user, 0), 0);
     }
 
     /// @dev A lapse no longer hands everything to whoever the user signs for next: the span the report
@@ -709,6 +719,108 @@ contract CampaignTest is Test {
         campaign.reportUserAction(0, user, 5, "");
 
         assertEq(campaign.progressOf(kol2, 0), 0, "kol's backlog is not kol2's to take");
+    }
+
+    // ── authorized reporters ───────────────────────────────────────
+
+    function test_SetAuthorizedReporter_grantsAndRevokes() public {
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+        assertTrue(campaign.authorizedReporters(outsider));
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, false);
+        assertFalse(campaign.authorizedReporters(outsider));
+    }
+
+    function test_SetAuthorizedReporter_onlyProject() public {
+        vm.prank(outsider);
+        vm.expectRevert(ICampaign.NotProject.selector);
+        campaign.setAuthorizedReporter(outsider, true);
+    }
+
+    function test_SetAuthorizedReporter_rejectsZeroAddress() public {
+        vm.prank(project);
+        vm.expectRevert(ICampaign.InvalidReporter.selector);
+        campaign.setAuthorizedReporter(address(0), true);
+    }
+
+    function test_AuthorizedReporterMayReportAndReplayIsNoop() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        _report(campaign, outsider, user, 5);
+        _report(campaign, outsider, user, 5);
+
+        assertEq(campaign.progressOf(kol, 0), 5);
+        assertEq(campaign.userCreditedOf(user, 0), 5);
+    }
+
+    function test_RevokedReporterCannotReport() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.startPrank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+        campaign.setAuthorizedReporter(outsider, false);
+        vm.stopPrank();
+
+        vm.prank(outsider);
+        vm.expectRevert(ICampaign.NotReporter.selector);
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassLifecycle() public {
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Pending));
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassAttribution() public {
+        _activate(campaign);
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassVerifier() public {
+        HalvingVerifier half = new HalvingVerifier();
+        Campaign verified = _createWithVerifier(address(half));
+        _activate(verified);
+        bytes32 id = _join(verified, kol);
+        _touch(verified, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        verified.setAuthorizedReporter(outsider, true);
+        _report(verified, outsider, user, 10);
+
+        assertEq(verified.progressOf(kol, 0), 5);
+    }
+
+    function test_AuthorizedReporterCannotReportAggregateKpi() public {
+        Campaign aggregate = _createAggregateCampaign();
+        _activate(aggregate);
+
+        vm.prank(project);
+        aggregate.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AggregateKpi.selector, 0));
+        aggregate.reportUserAction(0, user, 5, "");
     }
 
     function test_Report_onlyReporters() public {
