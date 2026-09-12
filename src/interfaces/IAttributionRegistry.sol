@@ -5,7 +5,7 @@ pragma solidity ^0.8.30;
 /// @notice Tracks which promoter (KOL) gets credit for which end-user wallet, per campaign.
 /// @dev Attribution is a user-signed touch: the end user signs a typed message binding their wallet
 ///      to a promoter id within a campaign, and a relayer submits it. Model is LAST_TOUCH, with
-///      "newer" decided by the signed `signedAt` rather than relay order. 
+///      "newer" decided by the signed `signedAt` rather than relay order.
 ///      Superseded touches are kept as history, so `promoterAt` can answer who held a user at a past block.
 interface IAttributionRegistry {
     // ── errors ───────────────────────────────────────────────────
@@ -20,6 +20,7 @@ interface IAttributionRegistry {
     error InvalidSignature();
     error PromoterNotRegistered(address campaign, bytes32 promoterId);
     error ZeroWindow();
+    error TouchDurationTooLong(uint64 maximum, uint64 provided);
     /// @dev `endTime` is the full 32-byte word the campaign answered with.
     error CampaignOver(uint256 endTime, uint64 timestamp);
     error CampaignTerminal(uint256 status);
