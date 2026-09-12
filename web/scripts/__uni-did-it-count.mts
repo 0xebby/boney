@@ -1,4 +1,4 @@
-/** Throwaway: did the swap just made land on the watched pool, and has it credited yet. */
+/** Checks whether a recent swap reached the watched pool and campaign credit. */
 import {createPublicClient, http, getAddress, type Hex, type PublicClient} from "viem";
 import {baseSepolia} from "viem/chains";
 import {CampaignAbi, EventMetricKpiVerifierAbi, AttributionRegistryAbi} from "../src/lib/abis";

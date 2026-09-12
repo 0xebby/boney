@@ -104,7 +104,7 @@ const PROPOSALS: Proposal[] = [
     src: {source: A.WETH, topic0: eventTopic(SIG.deposit), actorTopic: 1,
           amountMode: AMOUNT_MODE.dataWord0, scale: BigInt(1e18)},
   },
-  // Rejected shapes, probed to show why.
+  // Additional candidate event shapes.
   {
     name: "REJECTED: v3 Swap as volume",
     signature: SIG.swapV3,

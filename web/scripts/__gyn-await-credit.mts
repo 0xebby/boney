@@ -1,4 +1,4 @@
-/** Throwaway: polls one promoter's credited progress on two KPIs until both reach a target. */
+/** Polls two promoter KPIs until both reach a target. */
 import {createPublicClient, http, getAddress, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
 

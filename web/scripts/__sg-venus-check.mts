@@ -1,8 +1,4 @@
-/**
- * Throwaway: does the reconciler's Venus flag survive the two ways it could be a false positive —
- * subgraph rows missing before the template's spawn block, and a re-signed referral whose windows
- * a single `signedAt` floor understates?
- */
+/** Validates Venus reconciliation against full history and referral windows. */
 import {readFileSync} from "node:fs";
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
@@ -46,7 +42,7 @@ const users = campaign.touches.map((t) => t.user.toLowerCase());
 console.log(`\ndistinct referrals: ${new Set(users).size} of ${users.length} touch rows` +
   ` → ${new Set(users).size === users.length ? "no duplicate users; re-signing invisible here by design" : "duplicates"}`);
 
-// Full-history chain scan for the flagged referral, from well before the template spawned.
+// Scan the referral across full chain history.
 const from = 46_100_000n;
 let logs = 0;
 const blocks: bigint[] = [];

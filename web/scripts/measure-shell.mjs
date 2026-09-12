@@ -1,11 +1,4 @@
-// Measures the app shell's header with a connected promoter wallet and captures the strips that
-// prove it: nav rows and header height at desktop/tablet widths, horizontal overflow at phone
-// widths, plus the wallet menu and the nav drawer.
-//
-// The header is the one piece of chrome every page carries, and its failure mode is silent — it
-// wraps to a second and third row as the nav list grows with the wallet's role, which no unit test
-// sees. So it gets measured rather than eyeballed.
-//
+// Measures connected shell layout and captures header, drawer, and wallet-menu screenshots.
 // Usage: node scripts/measure-shell.mjs [before|after] [baseUrl]
 import {chromium} from "../node_modules/playwright/index.mjs";
 import {mkdirSync} from "node:fs";
@@ -15,8 +8,7 @@ const base = process.argv[3] ?? "http://localhost:3005";
 const OUT = new URL("../screenshots/", import.meta.url).pathname;
 mkdirSync(OUT, {recursive: true});
 
-// The one promoter on Base Sepolia: it has joined three campaigns and owns every seeded one, so it
-// is the wallet that sees the longest nav list.
+// Promoter wallet with the full connected navigation.
 const ADDR = "0xba954e89ce301415964e9405f09f4cc7c668976a";
 const ROW_WIDTHS = [640, 768, 1024, 1280, 1440];
 const PHONE_WIDTHS = [320, 360, 375, 390, 414];
@@ -29,15 +21,14 @@ const ctx = await browser.newContext({
   deviceScaleFactor: 2,
 });
 
-// The welcome modal covers the header on a first visit, and it is not what this measures.
+// Suppress the first-visit modal.
 await ctx.addInitScript(() => {
   try {
     window.localStorage.setItem("boney:welcome-seen", "1");
   } catch {}
 });
 
-// An injected wallet that can read and refuses to sign: enough to reach every connected state
-// without a key anywhere near the browser.
+// Read-only injected wallet.
 await ctx.exposeFunction("__walletRequest", async ({method}) => {
   switch (method) {
     case "eth_requestAccounts":
@@ -67,15 +58,14 @@ await ctx.addInitScript(() => {
 const page = await ctx.newPage();
 await page.goto(`${base}/discover`, {waitUntil: "networkidle", timeout: 90_000});
 
-// Connect at desktop width, where the button is always on the row, then resize.
+// Connect before measuring narrower viewports.
 const connect = page.getByRole("button", {name: /^connect( wallet)?$/i});
 for (let i = 0; i < 8; i++) {
   if (!(await connect.first().isVisible().catch(() => false))) break;
   await connect.first().click({timeout: 5_000}).catch(() => {});
   await page.waitForTimeout(800);
 }
-// The nav list grows once `useIsPromoter` resolves, so measuring before it settles measures the
-// short list.
+// Wait for promoter navigation to resolve.
 await page.waitForTimeout(3_000);
 
 console.log(`\n${phase}: nav rows and header height (promoter wallet connected)`);
@@ -87,8 +77,7 @@ for (const width of ROW_WIDTHS) {
   const m = await page.evaluate(() => {
     const header = document.querySelector("header");
     const nav = header.querySelector("nav");
-    // A `display: none` nav reports every link at top 0, which would read as one tidy row. Count
-    // the links that are actually laid out.
+    // Count only laid-out navigation links.
     const links = nav
       ? [...nav.querySelectorAll("a")].filter((a) => a.getBoundingClientRect().height > 0)
       : [];
@@ -117,7 +106,7 @@ for (const width of PHONE_WIDTHS) {
   await page.setViewportSize({width, height: 800});
   await page.waitForTimeout(300);
   const m = await page.evaluate(() => {
-    // The chip is a flex row, so the label inside it is what ellipses, not the button.
+    // Measure truncation on the chip label.
     const chip = document.querySelector("header button[title]");
     const label = chip?.querySelector(".truncate") ?? chip;
     const create = document.querySelector('header a[href="/create"]');
@@ -130,7 +119,7 @@ for (const width of PHONE_WIDTHS) {
   console.log(`| ${width}px | ${m.overflow}px | ${m.truncated} | ${m.createLabel} |`);
 }
 
-// The drawer, which below `md` is the only way to every destination.
+// Capture the mobile navigation drawer.
 await page.setViewportSize({width: 390, height: 800});
 await page.waitForTimeout(400);
 await page.getByRole("button", {name: "Open navigation"}).click();
@@ -139,7 +128,7 @@ await page.screenshot({path: `${OUT}shell-drawer-390.png`});
 await page.keyboard.press("Escape");
 await page.waitForTimeout(300);
 
-// The wallet menu, which only exists after this PR.
+// Capture the connected wallet menu.
 await page.setViewportSize({width: 1440, height: 900});
 await page.waitForTimeout(400);
 const chip = page.locator('header button[aria-haspopup="menu"]');

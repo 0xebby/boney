@@ -1,15 +1,8 @@
 /**
- * Drives the campaign *detail* page in a headless browser.
- *
- * The read layer is proven by `live.test.ts`, and the build proves the page compiles. Neither
- * answers the question this asks: does the detail page actually paint chain data, or does it
- * render a shell while every read fails? A client-only render failure is invisible to both.
+ * Captures a campaign detail page and reports its rendered structure.
  *
  * Usage: node scripts/screenshot-detail.mjs [campaignId] [outfile]
- *
- * Set `CHROME_PATH` when Playwright's bundled `headless_shell` cannot start. On this WSL box the
- * shell build is missing `libnspr4.so` while the full chromium build ships its own copies, so
- * point CHROME_PATH at `chrome-linux64/chrome` under the `chromium-<rev>` cache directory.
+ * Set `CHROME_PATH` when Playwright's bundled browser is unavailable.
  */
 import {chromium} from "playwright";
 import {mkdirSync} from "node:fs";
@@ -36,8 +29,7 @@ page.on("pageerror", (err) => pageErrors.push(err.message));
 console.log(`→ ${url}`);
 await page.goto(url, {waitUntil: "domcontentloaded", timeout: 60_000});
 
-// Race the real outcomes against each other: whichever paints tells us what happened, instead
-// of a bare timeout that cannot distinguish "slow" from "broken".
+// Wait for a rendered detail outcome.
 const outcome = await Promise.race([
   page.getByRole("heading", {name: /^KPIs/}).waitFor({timeout: 45_000}).then(() => "loaded"),
   page.getByText("not found").first().waitFor({timeout: 45_000}).then(() => "not-found"),
@@ -51,7 +43,6 @@ await page.waitForTimeout(1_500);
 await page.screenshot({path: out, fullPage: true});
 console.log(`screenshot: ${out}`);
 
-// Structural assertions — the image alone cannot prove the numbers came from the chain.
 const meters = await page.locator('[role="meter"]').count();
 const ladderRows = await page.locator("table tbody tr").count();
 const statTiles = await page.locator("text=Reward pool").count();
@@ -77,8 +68,7 @@ if (consoleErrors.length) {
 
 await browser.close();
 
-// A campaign with KPIs must paint at least one ladder row and one meter. Anything less means
-// the panels rendered empty, which a screenshot could easily hide.
+// Loaded campaigns require a ladder row and meter.
 const painted = outcome === "loaded" && ladderRows > 0 && meters > 0;
 if (!painted || pageErrors.length > 0) {
   console.log("\nFAIL: detail page did not paint chain data");

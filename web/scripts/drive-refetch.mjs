@@ -1,11 +1,5 @@
 /**
- * Isolates one question: after a lifecycle write lands, does the panel repaint from fresh chain
- * state without a reload?
- *
- * The fund/activate drive left `pause became available` failing, with `cancel became
- * unavailable` passing in the same run — so the status *did* reach the UI. That points at the
- * refetch boundary rather than the guard logic, and this script separates the two by polling the
- * button state instead of sampling it once.
+ * Checks lifecycle-control repainting after a confirmed write.
  *
  * Usage: node scripts/drive-refetch.mjs [campaignId]
  */
@@ -107,7 +101,7 @@ const snapshot = async (label) => {
 console.log(`\ncampaign #${campaignId} — button state vs chain status:`);
 await snapshot("on load");
 
-// Poll rather than sample once: this distinguishes "never repaints" from "repaints late".
+// Poll for delayed repainting.
 const pauseWithin = async (ms) => {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -125,7 +119,6 @@ if (status === 1) {
   await page.getByText("Confirmed.", {exact: false}).first().waitFor({timeout: 60_000}).catch(() => {});
   console.log(`  chain status after pause: ${await chainStatus()} (2=Paused)`);
 
-  // Now the inverse question: does Resume light up?
   const deadline = Date.now() + 15_000;
   let resumeAt = null;
   while (Date.now() < deadline) {

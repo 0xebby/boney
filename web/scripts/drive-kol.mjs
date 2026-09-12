@@ -1,16 +1,8 @@
 /**
- * Drives the KOL path — join, promoter id, tracking link — through the real UI.
- *
- * The value here is the promoter id. `derivePromoterId` recomputes, in TypeScript, a hash the
- * contract builds with `keccak256(abi.encode(address(this), msg.sender))`. If the encoding drifts
- * by so much as argument order, the frontend hands KOLs a tracking link whose promoterId no touch
- * will ever match — and everything still *looks* fine, because a wrong hash is as plausible as a
- * right one. Only comparing against the chain catches it.
- *
- * Uses a fresh anvil account so the join is real rather than a replay of the seeded KOL.
+ * Drives promoter gating, joining, and tracking-link generation through the UI.
  *
  * Usage: node scripts/drive-kol.mjs [joinableId] [gatedId]
- * Requires: anvil + deploy + seed, and `pnpm dev` on :3000.
+ * Requires Anvil, deployed seed data, and the app on :3000.
  */
 import {chromium} from "playwright";
 import {createWalletClient, createPublicClient, http, keccak256, encodeAbiParameters} from "viem";
@@ -18,7 +10,7 @@ import {privateKeyToAccount} from "viem/accounts";
 import {anvil} from "viem/chains";
 import {mkdirSync} from "node:fs";
 
-/** Anvil account #6 — untouched by SeedLocal, so it has joined nothing and has no reputation. */
+/** Unseeded Anvil account with no reputation. */
 const KOL_PK = "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
 
 const joinableId = process.argv[2] ?? "1"; // minReputation 0
@@ -107,7 +99,6 @@ const goTo = async (id) => {
   await page.getByRole("heading", {name: /^KPIs/}).waitFor({timeout: 45_000});
 };
 
-// ── connect ──────────────────────────────────────────────────
 await goTo(joinableId);
 console.log("wallet:");
 await page.getByRole("button", {name: "Connect wallet"}).click();
@@ -115,7 +106,6 @@ const short = `${account.address.slice(0, 6)}…${account.address.slice(-4)}`;
 await page.getByRole("button", {name: short}).waitFor({timeout: 20_000});
 check("connected as a fresh KOL", true, short);
 
-// ── reputation gate ──────────────────────────────────────────
 console.log("\nreputation gate:");
 await goTo(gatedId);
 await page.waitForTimeout(1_500);
@@ -128,7 +118,6 @@ const gatedReason = await page
   .catch(() => "");
 check("reason names reputation", /reputation/i.test(gatedReason), gatedReason.slice(0, 80));
 
-// ── join ─────────────────────────────────────────────────────
 console.log("\njoin:");
 await goTo(joinableId);
 await page.waitForTimeout(1_500);
@@ -149,7 +138,7 @@ await page
 const after = await promoterIdOnChain(campaign, account.address);
 check("promoter id recorded on chain", !/^0x0+$/.test(after), after);
 
-// The property this script exists for.
+// Compare the derived promoter id with the contract value.
 const expected = keccak256(
   encodeAbiParameters(
     [{type: "address"}, {type: "address"}],
@@ -158,7 +147,6 @@ const expected = keccak256(
 );
 check("derivePromoterId matches the chain", after.toLowerCase() === expected.toLowerCase(), after);
 
-// ── tracking link ────────────────────────────────────────────
 console.log("\ntracking link:");
 const link = await page.locator("#tracking-link").inputValue().catch(() => "");
 check("link rendered", link.length > 0, link);
@@ -166,10 +154,8 @@ check("link carries the campaign", link.toLowerCase().includes(campaign.toLowerC
 check("link carries the on-chain promoter id", link.toLowerCase().includes(after.toLowerCase()));
 check("link does not bake in an expiry", !/expire|exp=|until/i.test(link));
 
-// ── claim state ──────────────────────────────────────────────
 console.log("\nclaim:");
-// A promoter who just joined has no credited progress, so every Claim must be disabled with a
-// reason rather than offering a transaction that would revert or pay nothing.
+// New promoters have no claimable progress.
 const claimBtns = page.getByRole("button", {name: "Claim", exact: true});
 const claimCount = await claimBtns.count();
 check("a claim row per KPI", claimCount > 0, String(claimCount));

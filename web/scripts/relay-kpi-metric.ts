@@ -40,6 +40,13 @@ import {
   type BlockTimestamps,
 } from "../src/lib/blockTimestamps";
 import {TOUCH_STORED} from "../src/lib/events";
+import {
+  foldRelayGraphHistory,
+  readRelayGraphHistory,
+  readRelayGraphMeta,
+  relayGraphSnapshot,
+  type RelayGraphFold,
+} from "../src/lib/relayGraph";
 import {progress, progressDone} from "./progress";
 import {loadTimestampCache, saveTimestampCache} from "./timestampCache";
 import {
@@ -89,6 +96,28 @@ const RPC_TIMEOUT = 60_000;
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
   return i === -1 ? undefined : process.argv[i + 1];
+}
+
+type RelayMode = "rpc" | "shadow" | "subgraph";
+
+function relayMode(): RelayMode {
+  const mode = arg("--mode") ?? process.env.RELAY_MODE ?? "rpc";
+  if (mode !== "rpc" && mode !== "shadow" && mode !== "subgraph") {
+    throw new Error(`Invalid relay mode "${mode}". Expected rpc, shadow, or subgraph.`);
+  }
+  return mode;
+}
+
+function graphEndpoint(): string | undefined {
+  const url = arg("--subgraph-url") ?? process.env.RELAY_SUBGRAPH_URL ?? process.env.NEXT_PUBLIC_SUBGRAPH_URL;
+  return url?.trim() || undefined;
+}
+
+function pageCeiling(): number {
+  const raw = arg("--graph-max-pages") ?? process.env.RELAY_GRAPH_MAX_PAGES ?? "100";
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid graph page ceiling "${raw}".`);
+  return value;
 }
 
 /**
@@ -151,6 +180,9 @@ async function fetchLogs(
 
 async function main(): Promise<void> {
   const rpcUrl = arg("--rpc") ?? "http://127.0.0.1:8545";
+  const mode = relayMode();
+  const subgraphUrl = graphEndpoint();
+  const maxGraphPages = pageCeiling();
   const dryRun = process.argv.includes("--dry-run");
 
   const campaignArg = arg("--campaign");
@@ -179,6 +211,7 @@ async function main(): Promise<void> {
   console.log(`Relaying KPI ${kpiIndex} of ${campaign}`);
   console.log(`  chain:    ${chainId}`);
   console.log(`  verifier: ${verifier}`);
+  console.log(`  source:   ${mode}${subgraphUrl ? ` (${subgraphUrl})` : ""}`);
 
   // ── config ─────────────────────────────────────────────────────
 
@@ -239,6 +272,7 @@ async function main(): Promise<void> {
     verifierScale: config.scale,
     verifierAggregation: config.aggregation,
     verifierUserParamIndex: config.userParamIndex,
+    verifierValueParamIndex: config.valueParamIndex,
     indexerTopic0: indexerSource?.topic0,
     indexerSource: indexerSource?.source,
     indexerScale: indexerSource?.scale,
@@ -273,6 +307,24 @@ async function main(): Promise<void> {
     confirmations: CONFIRMATIONS,
   });
 
+  let graphMeta: Awaited<ReturnType<typeof readRelayGraphMeta>> | undefined;
+  if (mode !== "rpc") {
+    if (!subgraphUrl) {
+      throw new Error(`${mode} mode requires --subgraph-url or RELAY_SUBGRAPH_URL.`);
+    }
+    graphMeta = await readRelayGraphMeta({url: subgraphUrl});
+    const snapshot = relayGraphSnapshot({
+      indexedBlock: graphMeta.indexedBlock,
+      head,
+      confirmations: CONFIRMATIONS,
+      windowEndBlock: config.windowEndBlock,
+      checkpoint,
+    });
+    if (snapshot !== null && range.scan && snapshot !== range.toBlock) {
+      throw new Error(`Subgraph snapshot ${snapshot} does not match RPC pass end ${range.toBlock}.`);
+    }
+  }
+
   console.log(`  checkpoint: ${checkpoint}  (head ${head})`);
 
   if (!range.scan) {
@@ -283,12 +335,51 @@ async function main(): Promise<void> {
 
   // ── scan and decode ────────────────────────────────────────────
 
-  // One cache for every timestamp this pass needs, shared by the touch search, the touch scan and
-  // the KPI logs, and carried over from earlier passes on this chain.
-  const blockTimestamps = loadTimestampCache(chainId);
-  const cachedOnEntry = blockTimestamps.size;
+  const [registry, startTime] = await Promise.all([
+    client.readContract({
+      address: campaign,
+      abi: CampaignAbi,
+      functionName: "attributionRegistry",
+    }),
+    client.readContract({address: campaign, abi: CampaignAbi, functionName: "startTime"}),
+  ]);
 
-  const logs = await fetchLogs(
+  let graphFold: RelayGraphFold | undefined;
+  if (mode !== "rpc") {
+    const snapshotBlock = await client.getBlock({blockNumber: range.toBlock});
+    if (!snapshotBlock.hash) throw new Error(`RPC block ${range.toBlock} has no hash.`);
+    const history = await readRelayGraphHistory({
+      url: subgraphUrl!,
+      campaign,
+      kpiIndex,
+      snapshot: range.toBlock,
+      expectedHash: snapshotBlock.hash,
+      fromBlock: range.fromBlock,
+      event,
+      topic0,
+      config,
+      source: indexerSource,
+      maxPages: maxGraphPages,
+    });
+    graphFold = foldRelayGraphHistory({
+      history,
+      event,
+      config,
+      campaignStartTime: BigInt(startTime),
+    });
+    console.log(`\n  graph: ${history.logs.length} action(s), ${history.touches.length} touch(es)`);
+  }
+
+  // Subgraph mode has completed and validated its whole historical pass before any total read.
+  let logs: RelayLog[] = [];
+  let decoded: ReturnType<typeof decodeUserEvents>["decoded"] = [];
+  let blockTimestamps: BlockTimestamps = new Map();
+  let cachedOnEntry = 0;
+
+  if (mode !== "subgraph") {
+    blockTimestamps = loadTimestampCache(chainId);
+    cachedOnEntry = blockTimestamps.size;
+    logs = await fetchLogs(
     client,
     config.targetContract,
     topic0,

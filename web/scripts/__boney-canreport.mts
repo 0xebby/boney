@@ -1,8 +1,5 @@
-/**
- * Answers "could this campaign report progress right now" by mirroring every guard in
- * `Campaign.reportUserAction` against live state — campaign-level, per-KPI, and per-user.
- *
- * Takes a campaign address, or defaults to the newest one in the registry.
+/** Audits the live `Campaign.reportUserAction` guards for one campaign.
+ * @param argv[2] Campaign address; defaults to the newest registry campaign.
  */
 import {createPublicClient, http, getAddress, decodeAbiParameters, type Hex} from "viem";
 import {privateKeyToAccount} from "viem/accounts";

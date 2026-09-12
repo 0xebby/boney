@@ -1,7 +1,4 @@
-/**
- * Runs the app's own event-source probe over the Boney protocol's own Base Sepolia deployment, so
- * each proposed self-hosted KPI is judged by the same code the create form uses.
- */
+/** Runs the app event-source probe against the Boney deployment on Base Sepolia. */
 import {createPublicClient, http, getAddress, keccak256, toHex} from "viem";
 import {baseSepolia} from "viem/chains";
 import {
@@ -115,7 +112,7 @@ const PROPOSALS: Proposal[] = [
           actorTopic: 2, amountMode: AMOUNT_MODE.count, scale: BigInt(1),
           filterTopic: 1, filterValue: ZERO_TOPIC},
   },
-  // Rejected shapes, probed to show what the probe does and does not catch.
+  // Additional candidate event shapes.
   {
     name: "REJECTED: Released (promoter payout)",
     signature: "Released(address,address,uint256)",

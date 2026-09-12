@@ -1,11 +1,4 @@
-/**
- * Wide historical scan of the Boney protocol's own event logs on Base Sepolia.
- *
- * The app's probe only looks back `PROBE_BLOCK_RANGE`, which is the right question for a create
- * form and the wrong one for deciding whether a shape has ever fired. This walks from the
- * subgraph's `startBlock` to head and reports, per candidate, how many logs exist, whether the
- * proposed actor topic really holds an address, and what the first non-indexed word looks like.
- */
+/** Scans the full Boney deployment history for candidate KPI event layouts. */
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
 import {eventTopic} from "../src/lib/kpiSource";

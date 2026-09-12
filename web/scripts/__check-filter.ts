@@ -1,4 +1,4 @@
-/** Control test: does the positional topic filter actually match a wallet that DID act? */
+/** Verifies positional topic filtering against a wallet with matching activity. */
 import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from "viem";
 import {EVENT_PRESETS, WETH_BASE} from "../src/lib/kpiSource";
 import {aggregateByActor, type IndexedLog} from "../src/lib/indexerCore";
@@ -12,7 +12,7 @@ async function main() {
   const head = await client.getBlockNumber();
   const from = head - 1899n;
 
-  // Unfiltered: find someone who actually deposited in this window.
+  // Find an active wallet in the unfiltered window.
   const all = (await client.request({
     method: "eth_getLogs",
     params: [{address: WETH_BASE, topics: [deposit.topic0], fromBlock: toHex(from), toBlock: toHex(head)}],
@@ -23,7 +23,7 @@ async function main() {
   const actor = `0x${all[0]!.topics[1]!.slice(26)}` as `0x${string}`;
   console.log(`picked actor ${actor}`);
 
-  // Filtered exactly as useObservedActions does.
+  // Apply the production positional filter.
   const filtered = (await client.request({
     method: "eth_getLogs",
     params: [
@@ -40,8 +40,7 @@ async function main() {
   const logs: IndexedLog[] = filtered.map((l) => ({
     topics: l.topics, data: l.data, blockNumber: BigInt(l.blockNumber), timestamp: 0n,
   }));
-  // `null` floors: this asks "does the topic filter match at all", not "is it creditable". These
-  // logs carry timestamp 0 anyway, which a real floor would drop every one of.
+  // Null floors test topic matching without creditability filtering.
   const totals = aggregateByActor(logs, deposit, null);
   for (const [addr, t] of totals) console.log(`  observed ${addr} = ${t.amount} units (scale 1e15)`);
   if (totals.size === 0) console.log("  folded to zero (sub-scale deposits)");

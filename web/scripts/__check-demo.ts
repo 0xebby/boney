@@ -1,9 +1,4 @@
-/**
- * Throwaway check for the SeedDemo fixture: does the app's own read path see exactly six Active
- * campaigns expiring at 24h and 3/5/7/10/14 days, with the names the marketplace column renders?
- *
- * Run: pnpm tsx scripts/__check-demo.ts
- */
+/** Checks seeded demo campaigns against marketplace expectations. */
 import {createPublicClient, http, type PublicClient} from "viem";
 import {baseSepolia} from "viem/chains";
 import {fetchBrowseCampaigns} from "../src/lib/contracts";

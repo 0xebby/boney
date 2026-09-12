@@ -1,9 +1,6 @@
-/**
- * Prints the encoded `KpiSpec.params` for the recommended self-hosted Boney KPIs, split into
- * 32-byte words, so the appendix can be checked against a deployed campaign's spec.
- */
+/** Prints encoded `KpiSpec.params` values as 32-byte words. */
 import {getAddress, keccak256, toHex} from "viem";
-import {encodeEventSource, eventTopic, AMOUNT_MODE, ZERO_TOPIC, normalizeTopicValue, type EventSource} from "../src/lib/kpiSource";
+import {encodeEventSource, eventTopic, AMOUNT_MODE, ZERO_TOPIC, type EventSource} from "../src/lib/kpiSource";
 
 const A = {
   campaignRegistry: getAddress("0x3e0a2fc423dE77bEE9147879308BFfFC6129c4EE"),

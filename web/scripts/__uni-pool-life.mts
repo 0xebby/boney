@@ -1,4 +1,4 @@
-/** Throwaway: has the watched pool seen any `Swap` at all lately, and from whom? */
+/** Lists recent swaps and actors for the watched pool. */
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
 import {knownContractName} from "../src/lib/knownContracts";

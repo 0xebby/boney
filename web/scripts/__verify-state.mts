@@ -1,5 +1,5 @@
 /**
- * Throwaway: per-referral verification state for one campaign — claim, ceiling, credit — plus an
+ * per-referral verification state for one campaign — claim, ceiling, credit — plus an
  * independent log re-scan of the KPI's own `params`, so an ungated claim can be checked against
  * what the chain actually shows.
  *
@@ -78,8 +78,7 @@ for (let k = 0n; k < kpiCount; k++) {
       const to = from + 8999n > head ? head : from + 8999n;
       const topics: (Hex | Hex[] | null)[] = [src.topic0 as Hex, null, null, null];
       if (src.filterTopic) topics[src.filterTopic] = src.filterValue as Hex;
-      // Let the node narrow to these referrals, the way `useObservedActions` does — the LP source
-      // emits about one matching log per block, and an unnarrowed range is megabytes of response.
+      // Narrow logs to campaign referrals at the RPC layer.
       topics[src.actorTopic] = [...live.keys()].map((a) => `0x${"0".repeat(24)}${a.slice(2)}` as Hex);
       while (topics.length && topics[topics.length - 1] === null) topics.pop();
       let logs: {topics: Hex[]; data: Hex}[] = [];

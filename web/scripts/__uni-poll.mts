@@ -1,4 +1,4 @@
-/** Throwaway: waits for the relay's ceiling and then the indexer's credit to catch up to the swap. */
+/** Waits for the relay ceiling and indexer credit to include a swap. */
 import {createPublicClient, http, getAddress, type PublicClient} from "viem";
 import {baseSepolia} from "viem/chains";
 import {CampaignAbi, EventMetricKpiVerifierAbi} from "../src/lib/abis";

@@ -1,5 +1,5 @@
 /**
- * Throwaway: the reconciler seat, run for real. For every KPI the subgraph can observe, folds
+ * the reconciler seat, run for real. For every KPI the subgraph can observe, folds
  * `KpiAction` under the campaign's own attribution floor and scale and compares it to what the
  * campaign credited, per referral.
  */
