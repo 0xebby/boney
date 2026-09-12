@@ -15,7 +15,7 @@ import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {ReferredCampaigns} from "@/components/ReferredCampaigns";
 import {utilization} from "@/lib/campaign";
-import {projectName, hasProjectName} from "@/lib/projects";
+import {campaignName, hasCampaignName} from "@/lib/campaignName";
 import {
   formatTokenAmount,
   formatPercent,
@@ -179,15 +179,15 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Ca
       key: "name",
       header: "Campaign",
       // Sorts on the displayed title. Unnamed rows sort together under "Campaign #".
-      sortValue: (c) => (hasProjectName(c) ? projectName(c) : `Campaign #${c.campaignId}`),
+      sortValue: (c) => (hasCampaignName(c) ? campaignName(c) : `Campaign #${c.campaignId}`),
       render: (c) => (
         <span className="inline-flex items-center gap-2">
           <Link href={`/campaign/${c.campaignId}`} className="font-medium text-ink hover:underline">
-            {hasProjectName(c) ? projectName(c) : `Campaign #${c.campaignId.toString()}`}
+            {hasCampaignName(c) ? campaignName(c) : `Campaign #${c.campaignId.toString()}`}
           </Link>
           {/* The owner's own operations page, where the id is the handle every script and
               explorer link uses — so it is shown rather than revealed. */}
-          {hasProjectName(c) ? (
+          {hasCampaignName(c) ? (
             <span className="tnum text-xs text-ink-muted">#{c.campaignId.toString()}</span>
           ) : null}
         </span>
