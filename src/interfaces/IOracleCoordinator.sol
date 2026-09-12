@@ -2,17 +2,13 @@
 pragma solidity ^0.8.30;
 
 /// @title IOracleCoordinator
-/// @notice Coordinates oracle-reported campaign updates. Reporters stake collateral; reports enter
-///         a dispute window before being applied. A governance-disputed report slashes the
-///         reporter and is never applied.
+/// @notice Coordinates oracle-reported campaign updates through a dispute window.
 /// @dev Dispute authority is governance's.
 interface IOracleCoordinator {
     // ── errors ───────────────────────────────────────────────────
 
     error ZeroAddress();
     error NotAReporter(address who);
-    error NothingStaked();
-    error StakeLocked(uint256 until);
     error UnknownReport(bytes32 reportId);
     error ReportAlreadyExists(bytes32 reportId);
     error DisputeWindowOpen(uint256 until);
@@ -22,9 +18,10 @@ interface IOracleCoordinator {
     error UnknownCampaign(address campaign);
     error NotUserReport(bytes32 reportId);
     error NotAggregateReport(bytes32 reportId);
-    error TransferFailed();
     error RegistryAlreadySet();
     error RegistryNotSet();
+    error ReporterAlreadyListed(address reporter);
+    error ReporterNotListed(address reporter);
 
     // ── events ───────────────────────────────────────────────────
 
@@ -32,15 +29,10 @@ interface IOracleCoordinator {
     /// @param registry The campaign registry used to validate report targets.
     event RegistrySet(address indexed registry);
 
-    /// @notice Emitted when a reporter posts collateral.
-    /// @param reporter The reporter.
-    /// @param amount Amount added to their stake.
-    event ReporterStaked(address indexed reporter, uint256 amount);
-
-    /// @notice Emitted when a reporter's stake is cut for a successfully disputed report.
-    /// @param reporter The reporter penalized.
-    /// @param amount Stake removed.
-    event ReporterSlashed(address indexed reporter, uint256 amount);
+    /// @notice Emitted when an account is added to or removed from the reporter list.
+    /// @param reporter Account whose listing changed.
+    /// @param allowed Whether the account may submit reports.
+    event ReporterAllowlistUpdated(address indexed reporter, bool allowed);
 
     /// @notice Emitted when a report enters the challenge window. It is not applied yet.
     /// @param reportId Id of the report.
@@ -91,11 +83,13 @@ interface IOracleCoordinator {
         bytes evidence;
     }
 
-    /// @notice Lock collateral to become eligible to submit reports.
-    function stake() external payable;
+    /// @notice Add an account to the reporter allowlist.
+    /// @param reporter Account accepted as a reporter.
+    function addReporter(address reporter) external;
 
-    /// @notice Withdraw the caller's entire stake.
-    function unstake() external;
+    /// @notice Remove an account from the reporter allowlist.
+    /// @param reporter Account no longer accepted as a reporter.
+    function removeReporter(address reporter) external;
 
     /// @notice Submit a candidate report; it becomes applicable after `disputeWindow`.
     /// @param report The candidate update.
@@ -103,8 +97,8 @@ interface IOracleCoordinator {
     function submitReport(Report calldata report) external returns (bytes32 reportId);
 
     /// @notice Submit a candidate per-user report; it becomes applicable after `disputeWindow`.
-    /// @dev Same stake, dispute and slashing rules as `submitReport`. Ids are domain-separated from
-    ///      aggregate reports.
+    /// @dev Uses the same reporter allowlist and dispute window as `submitReport`. Ids are
+    ///      domain-separated from aggregate reports.
     /// @param report The candidate per-user update.
     /// @return reportId Content-derived id used to apply or dispute the report.
     function submitUserReport(UserReport calldata report) external returns (bytes32 reportId);
@@ -121,7 +115,7 @@ interface IOracleCoordinator {
     function applyUserReport(bytes32 reportId) external;
 
     /// @notice Dispute a report. Callable only by the governor while the window is open.
-    ///         Slashes the reporter's stake; the report can never be applied.
+    ///         The report can never be applied afterward.
     /// @param reportId Id returned by `submitReport`.
     function disputeReport(bytes32 reportId) external;
 
@@ -140,10 +134,19 @@ interface IOracleCoordinator {
     /// @return True if the report was applied.
     function reportApplied(bytes32 reportId) external view returns (bool);
 
-    /// @notice Collateral currently posted by a reporter.
-    /// @param reporter The reporter to query.
-    /// @return The staked amount in wei.
-    function stakeOf(address reporter) external view returns (uint256);
+    /// @notice Number of listed reporters.
+    /// @return The reporter-list length.
+    function reporterCount() external view returns (uint256);
+
+    /// @notice Listed reporter at an index.
+    /// @param index Position in the reporter list.
+    /// @return The listed reporter.
+    function reporterAt(uint256 index) external view returns (address);
+
+    /// @notice Whether an account is listed as a reporter.
+    /// @param who Account to check.
+    /// @return True when the account is accepted for submissions.
+    function isReporter(address who) external view returns (bool);
 
     /// @notice Seconds a report stays challengeable before it can be applied.
     /// @return The dispute window length.

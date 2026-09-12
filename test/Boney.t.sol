@@ -29,7 +29,6 @@ contract MockToken is ERC20 {
 /// @notice End-to-end protocol test: the full KOL-marketplace flow through the facade.
 contract BoneyTest is Test {
     uint256 internal constant POOL = 10_000 ether;
-    uint256 internal constant MIN_STAKE = 1 ether;
     uint256 internal constant DISPUTE_WINDOW = 1 days;
 
     MockToken internal token;
@@ -67,7 +66,7 @@ contract BoneyTest is Test {
         attribution = new AttributionRegistry(30 days);
         attestations = new AttestationVerifier(governor, attestor);
         reputation = new ReputationRegistry(governor, address(attestations));
-        coordinator = new OracleCoordinator(governor, MIN_STAKE, DISPUTE_WINDOW, 1 days);
+        coordinator = new OracleCoordinator(governor, DISPUTE_WINDOW);
 
         vault = new EscrowVault(address(this));
         registry = new CampaignRegistry(
@@ -382,9 +381,8 @@ contract BoneyTest is Test {
         c.activate();
 
         address reporter = address(0x0BAC);
-        vm.deal(reporter, MIN_STAKE);
-        vm.prank(reporter);
-        coordinator.stake{value: MIN_STAKE}();
+        vm.prank(governor);
+        coordinator.addReporter(reporter);
 
         vm.prank(reporter);
         bytes32 reportId = coordinator.submitReport(
