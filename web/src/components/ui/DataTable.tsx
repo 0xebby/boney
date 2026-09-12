@@ -5,6 +5,12 @@ import {sortRows, nextSortState, type SortState, type SortableColumn} from "@/li
 
 /**
  * DataTable — dense, sortable, metric-heavy table.
+ *
+ * Headers are `text-ink-secondary`, a step quieter than the cells under them. They used to be bold
+ * brand yellow, which made the least interesting row on the page the loudest: yellow is reserved for
+ * the brand mark, primary and add buttons, links, the active nav item and the focus ring, so that
+ * seeing it means "brand" or "press this" — and a header row is neither. The sort affordance keeps
+ * its own arrow, which is what actually says a column is interactive.
  */
 
 export type Column<T> = SortableColumn<T> & {
@@ -59,7 +65,7 @@ export function DataTable<T>({
                   scope="col"
                   aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : "none"}
                   style={col.width ? {width: col.width} : undefined}
-                  className={`px-2 py-2 font-bold text-brand sm:px-3 ${
+                  className={`px-2 py-2 text-xs font-semibold text-ink-secondary sm:px-3 ${
                     col.numeric ? "text-right" : "text-left"
                   } ${col.hideOnMobile ? "hidden md:table-cell" : ""}`}
                 >
@@ -67,7 +73,7 @@ export function DataTable<T>({
                     <button
                       type="button"
                       onClick={() => setSort((prev) => nextSortState(prev, col.key))}
-                      className={`inline-flex items-center gap-1 text-xs transition-opacity hover:opacity-80 ${
+                      className={`inline-flex items-center gap-1 transition-opacity hover:opacity-80 ${
                         col.numeric ? "flex-row-reverse" : ""
                       }`}
                     >
@@ -80,7 +86,7 @@ export function DataTable<T>({
                       </span>
                     </button>
                   ) : (
-                    <span className="text-xs">
+                    <span>
                       {col.header}
                       {col.srHeader ? <span className="sr-only">{col.srHeader}</span> : null}
                     </span>

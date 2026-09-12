@@ -312,9 +312,9 @@ no admin · [chapter 04](./04-attribution.md)
 | Getter | Value |
 |---|---|
 | `TOUCH_TYPEHASH()` | `keccak256("Touch(address campaign,bytes32 promoterId,uint64 signedAt,uint64 expiresAt)")` |
-| `maxTouchDuration()` | `uint64` immutable. 30 days as deployed — the one time constant this branch does **not** shorten |
+| `maxTouchDuration()` | `uint64` immutable. 360 days as deployed — the one time constant this branch does **not** shorten |
 
-`constructor(uint64 maxTouchDuration_)` reverts `ZeroWindow` on zero.
+`constructor(uint64 maxTouchDuration_)` reverts `ZeroWindow` on zero and `TouchDurationTooLong` above 360 days.
 
 ### Functions
 

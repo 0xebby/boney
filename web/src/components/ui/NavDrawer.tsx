@@ -7,7 +7,7 @@ import {isActiveNav, type NavItem} from "@/lib/nav";
 import {NavLabel} from "@/components/ui/NavLabel";
 
 /**
- * NavDrawer — the nav below `sm`, as a panel from the left rather than a strip across the top.
+ * NavDrawer — the nav below `md`, as a panel from the left rather than a strip across the top.
  *
  * The bar it replaces put the links in an `overflow-x-auto` strip beside the brand mark. That fits,
  * but the nav is what gets squeezed, and a horizontally scrolling nav is undiscoverable: the items
@@ -15,8 +15,13 @@ import {NavLabel} from "@/components/ui/NavLabel";
  * showing every destination at full label width, and at phone widths it is also the only way the
  * brand mark, Create and the wallet button fit on one line.
  *
- * Rendered only below `sm` (`sm:hidden` on the trigger). From `sm` up the top bar carries the nav on
- * its own row and this contributes nothing but an unmounted panel.
+ * Rendered only below `md` (`md:hidden` on the trigger). From `md` up the top bar carries the four
+ * public links itself and this contributes nothing but an unmounted panel. The breakpoint used to be
+ * `sm`, which handed 640–767px an inline nav it had no room for; that band gets the drawer instead.
+ *
+ * It lists the public destinations *and* the wallet's personal ones, which on a wider screen are
+ * split between the bar and the wallet chip's menu. A phone should not have to know that a
+ * destination lives under a control whose other job is disconnecting.
  *
  * The dialog behaviour here is hand-rolled rather than pulled from a headless-UI dependency, in
  * keeping with `DataTable` being hand-rolled for the same reason: the behaviour is a handful of
@@ -108,8 +113,10 @@ export function NavDrawer({items}: {items: NavItem[]}) {
         aria-expanded={open}
         aria-controls="nav-drawer"
         aria-label="Open navigation"
-        // 44px square: this is the one control on the bar a thumb must hit reliably.
-        className="flex size-11 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink sm:hidden"
+        // 44px square below `sm`: this is the one control on the bar a thumb must hit reliably.
+        // From `sm` up it matches the row's other controls, so it does not stand the header taller
+        // than they do on a tablet.
+        className="flex size-11 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-surface-hover hover:text-ink sm:size-9 md:hidden"
       >
         <span aria-hidden className="text-lg leading-none">
           ☰
@@ -117,7 +124,7 @@ export function NavDrawer({items}: {items: NavItem[]}) {
       </button>
 
       {open ? (
-        <div className="fixed inset-0 z-50 sm:hidden">
+        <div className="fixed inset-0 z-50 md:hidden">
           {/*
             The overlay is a plain div rather than a button: it is decorative, and the dialog is
             already dismissible from the labelled Close control and from Escape. Announcing a

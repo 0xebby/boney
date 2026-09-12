@@ -181,14 +181,14 @@ value.
 | `CLAIM_GRACE`                       | `src/campaign/Campaign.sol`                  | 7 days        | **20 minutes**                |
 | `DISPUTE_WINDOW`                    | `script/DeployBoney.s.sol`                   | 1 day         | **4 minutes**                 |
 | `UNSTAKE_DELAY`                     | `script/DeployBoney.s.sol`                   | 2 days        | **10 minutes**                |
-| `MAX_TOUCH_DURATION`                | `script/DeployBoney.s.sol`                   | 30 days       | 30 days (**unchanged**)       |
+| `MAX_TOUCH_DURATION`                | `script/DeployBoney.s.sol`                   | 360 days      | 360 days (**unchanged**)      |
 | `attributionWindow`                 | `SeedLocal`, `SeedGated`, `SeedEventKpi` | 7–14 days    | 30 minutes – 1 hour                |
 | `attributionWindow`                 | every other seed                               | —            | equal to each campaign's own length |
 | `ETHOS_MAX_AGE` / `REACH_MAX_AGE` | `SeedLocal`, `SeedDevRep`                  | 180 / 90 days | 180 / 90 days (**unchanged**) |
 
 Three of those deserve their reasons stated, because the obvious change is wrong in each case.
 
-**`MAX_TOUCH_DURATION` is deliberately not shortened.** will be extended to 360 days .
+**`MAX_TOUCH_DURATION` is deliberately not shortened.** It is capped at 360 days.
 
 **The reputation freshness windows are not shortened.**
 
