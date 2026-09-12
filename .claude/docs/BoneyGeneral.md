@@ -1,0 +1,334 @@
+# BoneyGeneral — how Solidity, the off-chain processes, and the web app connect
+
+Read this when a task crosses a layer boundary, or when you can't tell where a number on screen came
+from. Protocol detail lives in `README.md` and `boneyMd/spec/`; **this doc is about the seams.**
+
+---
+
+## 1. What the product is
+
+A project escrows a reward pool and defines KPIs with reward tiers. Promoters join and get a
+campaign-bound promoter id encoded in a tracking link. A user who clicks that link **signs** a touch
+binding their wallet to that promoter. When the user's on-chain actions are reported, progress credits
+the attributed promoter and each newly crossed tier pays out of escrow automatically.
+
+Identity is wallet-first: a project sees a reputation score and attestations, never a social handle.
+
+---
+
+## 2. The three layers
+
+```
+  ┌─ Solidity ───────────────────────────────────────────────────────┐
+  │  Boney (facade, holds nothing, privileged nowhere)               │
+  │  CampaignRegistry → Campaign  ·  EscrowVault                    │
+  │  ReputationRegistry ← AttestationVerifier                       │
+  │  AttributionRegistry  ·  OracleCoordinator                      │
+  │  GuardedKpiVerifier → EventMetricKpiVerifier + TouchWindowVerifier│
+  └───────────┬────────────────────────────────────┬────────────────┘
+              │ two GENERATED artifacts            │ event logs
+              │ (abis, deployments)                │
+  ┌───────────▼────────────┐          ┌────────────▼────────────────┐
+  │  web/src (Next 16)     │          │  off-chain processes         │
+  │  app → components →    │◄─────────│ relay · indexer · CRE · stub │
+  │  hooks → lib → viem    │  reads   │  (web/scripts, lib, boneyard) │
+  └────────────────────────┘          └──────────────────────────────┘
+```
+
+`flow/*.svg` draws the protocol side; `boneyMd/spec/02-architecture.md` has the full module map with
+responsibilities. The rest of this doc is what those diagrams don't show.
+
+---
+
+## 3. The two generated seams
+
+Everything the frontend knows about the contracts arrives through exactly two generated files. This is
+the single most important thing to internalise: **the frontend cannot disagree with the compiled
+contracts, unless you skip a regeneration.**
+
+### `web/src/lib/abis/*.ts` ← `pnpm abis`
+
+Reads Foundry's `out/<Contract>.sol/<Contract>.json` and writes a typed ABI per contract. The list of
+contracts is `CONTRACTS` in `web/scripts/extract-abis.ts` — a new contract the frontend must talk to
+gets added there, not copied by hand.
+
+Skip this after changing an external function or event and the failure is a **runtime decode error**,
+not a build error. There is no type-level link.
+
+### `web/src/lib/deployments.ts` ← `pnpm deployments <chainId>`
+
+Reads `broadcast/DeployBoney.s.sol/<chainId>/run-latest.json` and writes `GENERATED_DEPLOYMENTS`:
+every module address plus a `startBlock` (the block the indexer and history scans start from). Two
+chains are populated today — `31337` (anvil) and `84532` (Base Sepolia).
+
+`lib/chains.ts` wraps it: `getDeployment(chainId)` returns `undefined` or a zero `boney` address when
+the protocol isn't there, and every read helper in `lib/contracts.ts` returns an empty value rather
+than throwing. That is why the UI can render an honest "not available on this network" instead of an
+error boundary.
+
+---
+
+## 4. Vocabulary that diverges across the seam
+
+| Concept | Solidity | web | note |
+| --- | --- | --- | --- |
+| the person promoting | `kol`, `kolId` | promoter, promoter id | **deliberate.** Don't rename across the seam. |
+| reputation number | `scoreOf` | BoneyScore | |
+| reputation inputs | `ETHOS_SCORE` / `X_REACH` / `X_FOLLOWERS` schema ids | same | the chain's spelling won a rename; match it |
+| attribution event | `Touch` | touch / tracking link | |
+| a KPI's definition | `KpiSpec {kind, verifier, target, aggregate, params}` | `lib/kpiSource.ts`, `lib/kpiUnits.ts` | |
+
+When you grep, grep both spellings.
+
+---
+
+## 5. Reputation: how an off-chain number becomes an on-chain gate
+
+The chain can't make HTTP calls, so reputation arrives by signed attestation. There are **two numbers
+and they are not the same one**, which is the most common source of confusion in this codebase:
+
+| | route | what it is |
+| --- | --- | --- |
+| display score | `GET /api/score` → `lib/score.ts` → `lib/ethos.ts` | reads Ethos + follower sources, computes BoneyScore. Nothing signed, no gas, no nonce. A wallet that has never sent a tx still gets a score, a rank, and a qualification list. |
+| gate score | `ReputationRegistry.scoreOf` | **0 until attestations are submitted and gas is paid.** This is what `Campaign.join()` gates on. |
+
+`POST /api/attest` bridges them: same upstream read, then one EIP-712 `Attestation` signed **per
+weighted schema**. The promoter submits them (one tx each — `AttestationVerifier` consumes a nonce per
+signature), and only then does `scoreOf` move. `web/src/app/card/page.tsx` refetches the on-chain
+score after attesting for exactly this reason; forget that and the UI keeps asking for a verification
+already paid for.
+
+The **ethos stub** (`127.0.0.1:8787`, `pnpm ethos:stub:dev`) fabricates profiles. It matters in two
+different modes:
+
+- **allowlist mode** (the default) — a signed allowlist synthesises a profile in-process via
+  `lib/stubProfile.ts`. The dev wallet `0x98405c…` is on it; real wallets go to live Ethos.
+- **global stub mode** — the four `*_API` vars in `web/.env.local`, commented out by default.
+
+The dev wallet is attestor *and* promoter, BoneyScore 24,620, and unclaimed on real Ethos — which is
+why the stub path has to exist at all.
+
+---
+
+## 6. KPI verification: why two processes must run, in one order
+
+A `Custom` KPI names an `IKpiVerifier`. The adapter returns a credited amount and `Campaign` caps the
+claim at it — **an adapter can discount a report but never inflate one.**
+
+### Automated reporting with Chainlink CRE
+
+The EventMetric relayer remains the observation authority. A CRE cron automates the claim path for
+guarded, non-aggregate KPIs after observed totals exist. It scans a bounded circular slice of observed
+users and selects only a user whose observed progress exceeds credited progress and whose unreported
+span has one active promoter.
+
+Each campaign/KPI pair uses an immutable `BoneyCreReceiver`. The Keystone forwarder delivers a
+versioned report with a nonce, expiry, next cursor, and optionally one cumulative user total. The
+receiver checks the forwarder, workflow identity, target contracts, nonce, and expiry before calling
+`Campaign.reportUserAction`. A campaign revert rolls cursor and nonce state back; cursor-only reports
+advance quiet scans so a fixed prefix cannot starve later users.
+
+```text
+EventMetric relayer → EventMetricKpiVerifier
+CRE cron → signed report → Keystone forwarder → BoneyCreReceiver
+         → Campaign.reportUserAction → inline settlement
+```
+
+CRE does not replace `eth_getLogs` or construct per-action evidence. The relayer runs first, ambiguous
+attribution stays with the evidence-bearing indexer, and preflight rejects aggregate, ungated, or
+second-verifier KPIs. The package is `boneyard/boneyard-cre-workflow`; its committed simulation and
+production configs keep contract addresses at zero until an operator supplies reviewed values.
+
+The verifier a campaign should point at is `GuardedKpiVerifier`, which composes:
+
+- `EventMetricKpiVerifier` — a ceiling fed by an **independent relayer** that scans the real event
+  logs. This is what stops a project crediting itself more than an observer saw.
+- `TouchWindowVerifier` is deployed but must **not** be wired as the `Mode.CAP` project verifier. It
+  returns a window-scoped total, which would shrink the budget `Campaign` splits across promoters to the
+  current promoter's slice. Segmentation lives in `Campaign` now; the adapter is kept for off-chain
+  window reads. See `decisions.md` → *KPI verifiers — adapters may discount, never inflate*.
+
+So two off-chain processes are required, and **the order between them is silent if you get it
+wrong**:
+
+1. **`pnpm relay`** (`scripts/relay-kpi-metric.ts` + `lib/relayCore.ts`) — Boney's observation. Until
+   it has run, a gated KPI's ceiling is **0**.
+2. **`pnpm index`** (`scripts/indexer.ts` + `lib/indexerCore.ts`) — the project's claim.
+
+A report that lands before the relayer has observed **succeeds and credits nothing**. No revert,
+nothing in the UI to surface it. `scripts/dev-up.sh` sequences relay-then-indexer and blocks on the
+first relay pass for this reason, and the comment there says so at length.
+
+Two more constraints worth not rediscovering:
+
+- **`REPORTER_PRIVATE_KEY` must equal `PRIVATE_KEY`.** Guarded verifiers accept only the *project*
+  key as reporter. The env var is named as if the reporter were independent — it isn't, in this
+  fixture.
+- **Aggregate KPIs (TVL, volume) are campaign-level and oracle-reported.** They advance display
+  totals but credit no individual promoter, and `Campaign` now refuses an aggregate KPI that carries
+  reward tiers. Per-promoter aggregate attribution is post-MVP.
+
+### What `pnpm index` sends, since segmentation
+
+Both processes resolve attribution through `web/src/lib/attributionWindows.ts` — the off-chain mirror of
+`AttributionRegistry.promoterAt` — rather than reading the live touch, so the ceiling and the claim
+measure the same activity the chain will segment.
+
+- **Evidence is sent for every KPI**, `verifier == address(0)` included. `Campaign` decodes
+  `Types.Action[]` itself to credit each action to whoever held the referral at that action's block.
+- **There is no cursor.** `.indexer-state.json` is gone — a cursor produces a window-scoped total that
+  `Campaign` compares against a lifetime watermark and silently ignores. Any doc still describing that
+  file is stale.
+- **The range is bounded by attribution instead.** The activity scan starts one block after the
+  campaign's *first* touch (nothing earlier is creditable to anybody, so a campaign with no touch is
+  skipped), and the `TouchStored` scan behind it starts at
+  `startTime - effectiveMaxDuration` converted to a block by `lib/blockSearch.ts`. `--from-block` still
+  overrides the activity floor. Both bounds only exclude blocks that could never have been credited;
+  credit itself is decided per action, inside the range.
+- **Activity nobody held is dropped**, including work done in a gap between an expired touch and the
+  next one. Counting it would leave a `newTotal` that can never settle.
+
+### Which logs count — ask for the narrowing twice
+
+**viem's `getLogs` has no `topics` parameter.** `GetLogsParameters` takes `event` / `events` / `args`
+and nothing else, so a `topics: [...]` array passed to it is silently dropped and the request comes
+back with *every* log the address emitted. That is what `lib/indexerCore.ts` exports `logRequest()`
+for: both processes now go through `client.request({method: "eth_getLogs", params: [logRequest(...)]})`,
+which puts the signature in `topics[0]` and a `KpiSpec.params` topic filter in its own slot, and lets
+the node do the narrowing.
+
+And ask again on the way in: **`aggregateByActor` compares `topics[0]` against the source's own
+signature** and re-applies the filter, so a trusted request is never the only line of defence.
+
+This mattered because most fixture KPIs are ungated. Until 2026-09-04 the indexer folded every event a
+watched contract emits, crediting it whenever `topics[actorTopic]` happened to parse as an address —
+WETH's `Withdrawal` counted as a `Deposit`, and a Uniswap `Swap`'s tick word counted as a wallet. A
+gated KPI survived it (the relayer re-checked topic0 in its own loop, so its ceiling clamped the
+inflated claim), which is why **Gyndore** and the Uniswap campaign are clean. **SuperBridge** carries
+roughly **2× inflated on-chain progress**: a patched dry-run prints `already credited 152 of 81`,
+`136 of 69`, `134 of 68` promoter by promoter. Crediting is monotonic, so the fix stops the growth but
+retracts nothing — treat its totals as fiction, not as a baseline to reconcile against.
+
+**Sdy Labs is not inflated**, measured on 2026-09-04, though its shape says it should be: an
+independent re-scan of both KPIs' own `params` matches every credited total log-for-log across all six
+referrals, and escrow reconciles to the tier ladders exactly. Its source contract emits only one other
+event, whose single indexed parameter cannot reach the topic-2 actor slot the buggy fold read.
+
+**Venus is inflated too**, measured on 2026-09-04 and smaller than SuperBridge's: 682 / 97 against 552 /
+66 observed, all of it on one referral (`0x98bef229…`, credited 402 and 60 against 272 and 29). Its other
+three referrals reconcile exactly. The conclusive form of that measurement ignores attribution entirely
+— that referral is credited 60 count-mode actions where WETH has emitted 59 matching logs to it in all
+of history, and 402 against an all-time 392. Nothing can credit more than a source has ever emitted.
+Measure a campaign before assuming either way — `boneyMd/VERIFICATION_FLOWS.md` shows how, and ships the
+two probes that do it.
+
+Design: `boneyMd/KPI_VERIFICATION.md`. Worked example: `boneyMd/KPI_VERIFICATION_WALKTHROUGH.md`.
+
+---
+
+## 7. Tracing one read and one write
+
+**A read** — the campaign list:
+
+```
+app/page.tsx (thin)
+  └─ components/CampaignsPage.tsx
+       └─ hooks/useCampaigns.ts          useQuery + usePublicClient({chainId: useBoneyChainId()})
+            └─ lib/contracts.ts          fetchBrowseCampaigns → boneyAddress → getDeployment
+                 └─ lib/abis/Boney.ts    generated
+                      └─ Boney.browseCampaigns(offset, limit) on chain
+```
+
+`lib/contracts.ts` decodes raw tuples into domain types (`CampaignView`, `statusFromIndex`) so no
+component ever handles a `uint8` enum index.
+
+**A write** — everything funnels through `hooks/useWriteCampaign.ts`, which owns the tx lifecycle and
+maps reverts to human text via `lib/txErrors.ts` (a large, deliberate mapping — extend it rather than
+surfacing a raw revert string).
+
+**The chain id is never implicit.** `wagmiConfig.chains[0]` is `anvil`, and wagmi rehydrates its store
+inside an effect, so *every* page load renders at least once with the store on anvil. Always
+`usePublicClient({chainId: useBoneyChainId()})` — a bare `usePublicClient()` silently reads a local
+node the visitor can't reach. See `hooks/useBoneyChain.ts`.
+
+---
+
+## 8. Lifecycle, and what is immutable
+
+1. Project creates a campaign (config, KPIs, per-KPI tiers). Everything determining a payout is
+   frozen at construction.
+2. Project escrows the full `rewardPool`, then activates. Activation is blocked while underfunded.
+3. Promoters join subject to `minReputation`; each gets a campaign-bound promoter id.
+4. A user signs a touch (`/r?c=…&p=…` does this); anyone may relay it.
+5. Cumulative per-user actions are reported. Progress credits the attributed promoter; each newly
+   crossed tier pays out inline.
+6. On end, a claim grace window; then the project reclaims the rest.
+
+Immutable, so a change means a **reseed or redeploy**: `minReputation`, `CLAIM_GRACE` (a compiled
+`constant`), and the registry itself (append-only — `Campaign.cancel()` is reachable only from
+`Pending`, so an activated campaign can never be retired).
+
+Rewards draw from one shared pool, first-come. An uncoverable tier pays what remains and emits
+`PoolExhausted` — it never reverts, because reverting would let one exhausted tier block reporting for
+everyone.
+
+**`Campaign.settle` pays zero in every reachable state** — settlement is inline, at report time. The
+claim button in the UI is dormant by design; don't "fix" it.
+
+---
+
+## 9. This branch's shortened durations
+
+`bscoretest`-lineage branches shorten time constants so manual testing is fast. `CLAIM_GRACE` 7d→20m,
+`DISPUTE_WINDOW` 1d→4m, `UNSTAKE_DELAY` 2d→10m, attribution windows down to 30–60m. Each source
+constant carries a `[bscoretest]` comment with its protocol value. **Restore them before merging to
+main.**
+
+Two are deliberately *not* shortened:
+
+- `MAX_TOUCH_DURATION` — a silent per-touch ceiling, `min(campaign.attributionWindow, cap)`. A
+  campaign still *reports* its own longer window, which is what the UI renders, so shortening the cap
+  makes the app disagree with the chain rather than making anything faster.
+- Reputation freshness (`ETHOS_MAX_AGE` / `REACH_MAX_AGE`, 180/90d) — shortening it would expire
+  seeded attestations mid-session and drop wallets below their gates.
+
+---
+
+## 10. Deploy + seed order
+
+Full detail with commands in `README.md`. The order that matters:
+
+1. `DeployBoney` — registries and verifiers with no deps, then `OracleCoordinator`, then
+   `EscrowVault` → `CampaignRegistry` (one-time `setRegistrar`), wire coordinator, then the facade.
+2. `web/ pnpm deployments <chainId>` — point the app at what landed.
+3. **`SeedDevRep` — not optional, and must precede step 4.** `DeployBoney` registers no reputation
+   schemas, so a fresh `ReputationRegistry` scores everyone 0 *and* reports `maxScore() == 0` — and
+   `Campaign`'s constructor rejects any `minReputation` above that ceiling with
+   `UnreachableReputation`. Gated campaigns literally cannot be created until the schemas exist.
+4. The campaign seed (`SeedDemo` whole-fixture, or `SeedTwo` / `SeedFive` / `SeedHistory` /
+   `SeedRealKpi` …).
+
+Current Base Sepolia fixture (read 2026-09-04): **seven** campaigns, ids 0–6, all `Active`, all with
+`project = 0xba954E89…` on registry `0x3e0a2fc4…`. `Venus` (canonical WETH, join-gated at BoneyScore
+19,500), `Sdy Labs` (a fresh `OpenMintNFT`, open), `SuperBridge`, `Boneyard-join-gyndore` and
+`Boneyard-sign-attribution` — the last two watch Boneyard's own `PromoterJoined` and `TouchStored` —
+carry **ungated** KPIs only. `Gyndore Testnet` (3 KPIs, 10,000 GYND) and `Uniswap` (3 KPIs, 700,000
+bUSD) are **gated** behind `GuardedKpiVerifier`, and those six KPIs are exactly `relay-loop.sh`'s
+target list. A join gate is not a KPI gate: Venus gates *joining* and the relayer neither sees nor
+cares. Every earlier registry, `0x82fCc991…` and `0x6427217e…` included, is dead. Two
+rival mock bUSD tokens exist on Base Sepolia — the current fixture prices everything in `0x2755…dCc2`,
+so a seed that deploys a fresh token splits the pool totals.
+
+A `boney-indexer` subgraph is live on Studio for Base Sepolia; its query endpoint needs no API key.
+It is version-pinned — `NEXT_PUBLIC_SUBGRAPH_URL` names `v0.5.0`, which is the first version indexing
+`0x3e0a2fc4…`, so a redeploy means a new version label *and* an env bump. `pnpm deploy` in `subgraph/`
+runs pnpm's own builtin; the script is `pnpm run deploy --version-label vX.Y.Z`.
+
+### A redeploy silently empties the guide catalog
+
+`web/src/lib/campaignGuide.ts`'s `CATALOG` is keyed by **campaign address**, and the registry mints
+each campaign with `new Campaign` — so a fresh registry produces fresh addresses and every key in the
+catalog becomes one nothing looks up. Nothing breaks loudly: the old campaigns still hold code, the
+lookup just misses and each campaign page renders one section fewer. Re-key it in the same change that
+regenerates `lib/deployments.ts`, alongside the subgraph version bump. `SeedFive`'s five entries
+survived `SeedTwo` this way and described nothing on the live registry for two days.
