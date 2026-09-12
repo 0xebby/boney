@@ -118,6 +118,19 @@ export const CampaignRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "campaignDeployer",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "campaignsOf",
     "inputs": [
       {

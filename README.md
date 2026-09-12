@@ -26,7 +26,8 @@ than a policy:
 
 ```
 1. CREATE     project → CampaignRegistry.createCampaign(cfg, kpis, tiers)
-                        deploys an immutable Campaign, claims the name, binds the escrow token
+                        → CampaignDeployer deploys an immutable Campaign
+                        → registry claims the name and binds the escrow token
 
 2. FUND       project → EscrowVault.deposit(campaign, rewardPool)
               project → Campaign.activate()          blocked while underfunded
@@ -454,6 +455,7 @@ src/
   IBoney.sol
   campaign/
     Campaign.sol                  one campaign: config, KPIs, tiers, progress, settlement
+    CampaignDeployer.sol          registry-bound Campaign creation helper
     CampaignRegistry.sol          factory + directory + the vault's registrar
   escrow/EscrowVault.sol          custody only
   attribution/AttributionRegistry.sol

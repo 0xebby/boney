@@ -67,6 +67,7 @@ contract DeployBoney is Script {
         console.log("Boney deployed");
         console.log("  Boney (facade):         ", address(boney));
         console.log("  CampaignRegistry:       ", address(registry));
+        console.log("  CampaignDeployer:       ", registry.campaignDeployer());
         console.log("  EscrowVault:            ", address(vault));
         console.log("  AttributionRegistry:    ", address(attribution));
         console.log("  AttestationVerifier:    ", address(attestations));

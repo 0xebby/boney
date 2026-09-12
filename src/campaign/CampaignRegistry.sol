@@ -2,8 +2,9 @@
 pragma solidity ^0.8.30;
 
 import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
+import {ICampaignDeployer} from "../interfaces/ICampaignDeployer.sol";
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
-import {Campaign} from "./Campaign.sol";
+import {CampaignDeployer} from "./CampaignDeployer.sol";
 import {Types} from "../libraries/Types.sol";
 import {Names} from "../libraries/Names.sol";
 
@@ -20,6 +21,8 @@ contract CampaignRegistry is ICampaignRegistry {
     address public immutable attributionRegistry;
     /// @inheritdoc ICampaignRegistry
     address public immutable oracleCoordinator;
+    /// @inheritdoc ICampaignRegistry
+    address public immutable campaignDeployer;
 
     /// @dev Every campaign ever deployed, indexed by campaign id.
     address[] private _campaigns;
@@ -53,6 +56,11 @@ contract CampaignRegistry is ICampaignRegistry {
         reputationRegistry = reputationRegistry_;
         attributionRegistry = attributionRegistry_;
         oracleCoordinator = oracleCoordinator_;
+        campaignDeployer = address(
+            new CampaignDeployer(
+                address(this), escrowVault_, attributionRegistry_, reputationRegistry_, oracleCoordinator_
+            )
+        );
     }
 
     /// @inheritdoc ICampaignRegistry
@@ -69,11 +77,7 @@ contract CampaignRegistry is ICampaignRegistry {
         address holder = campaignByName[nameKey];
         if (holder != address(0)) revert NameTaken(cfg.name, holder);
 
-        campaign = address(
-            new Campaign(
-                cfg, kpis, tiers, escrowVault, attributionRegistry, reputationRegistry, oracleCoordinator
-            )
-        );
+        campaign = ICampaignDeployer(campaignDeployer).deployCampaign(cfg, kpis, tiers);
 
         campaignId = _campaigns.length;
         _campaigns.push(campaign);

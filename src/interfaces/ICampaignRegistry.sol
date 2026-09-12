@@ -65,6 +65,10 @@ interface ICampaignRegistry {
     /// @return Campaign addresses in creation order.
     function campaignsOf(address project) external view returns (address[] memory);
 
+    /// @notice Helper bound to this registry for Campaign contract deployment.
+    /// @return The campaign deployer address.
+    function campaignDeployer() external view returns (address);
+
     /// @notice Vault holding every campaign's escrowed rewards.
     /// @return The escrow vault address.
     function escrowVault() external view returns (address);

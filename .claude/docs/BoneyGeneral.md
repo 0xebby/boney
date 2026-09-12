@@ -21,7 +21,7 @@ Identity is wallet-first: a project sees a reputation score and attestations, ne
 ```
   ┌─ Solidity ───────────────────────────────────────────────────────┐
   │  Boney (facade, holds nothing, privileged nowhere)               │
-  │  CampaignRegistry → Campaign  ·  EscrowVault                    │
+  │  CampaignRegistry → CampaignDeployer → Campaign · EscrowVault    │
   │  ReputationRegistry ← AttestationVerifier                       │
   │  AttributionRegistry  ·  OracleCoordinator                      │
   │  GuardedKpiVerifier → EventMetricKpiVerifier + TouchWindowVerifier│
@@ -255,7 +255,10 @@ node the visitor can't reach. See `hooks/useBoneyChain.ts`.
 
 ## 8. Lifecycle, and what is immutable
 
-1. Project creates a campaign (config, KPIs, per-KPI tiers). Everything determining a payout is
+1. Project creates a campaign (config, KPIs, per-KPI tiers). `CampaignRegistry` delegates contract
+   creation to its immutable `CampaignDeployer`, then keeps the canonical name, indexes, vault token
+   binding, and `CampaignCreated` event. There is one helper per registry; a redeploy changes Campaign
+   address derivation because the helper is the CREATE caller. Everything determining a payout is
    frozen at construction.
 2. Project escrows the full `rewardPool`, then activates. Activation is blocked while underfunded.
 3. Promoters join subject to `minReputation`; each gets a campaign-bound promoter id.
@@ -299,7 +302,8 @@ Two are deliberately *not* shortened:
 Full detail with commands in `README.md`. The order that matters:
 
 1. `DeployBoney` — registries and verifiers with no deps, then `OracleCoordinator`, then
-   `EscrowVault` → `CampaignRegistry` (one-time `setRegistrar`), wire coordinator, then the facade.
+   `EscrowVault` → `CampaignRegistry` → its internally-created `CampaignDeployer` (the registry remains
+   the vault registrar through one-time `setRegistrar`), wire coordinator, then the facade.
 2. `web/ pnpm deployments <chainId>` — point the app at what landed.
 3. **`SeedDevRep` — not optional, and must precede step 4.** `DeployBoney` registers no reputation
    schemas, so a fresh `ReputationRegistry` scores everyone 0 *and* reports `maxScore() == 0` — and
