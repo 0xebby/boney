@@ -107,7 +107,13 @@ contract SeedGyndoreLocal is Script {
             expiresAt: uint64(block.timestamp + DURATION)
         });
         bytes32 structHash = keccak256(
-            abi.encode(attribution.TOUCH_TYPEHASH(), touch.campaign, touch.promoterId, touch.signedAt, touch.expiresAt)
+            abi.encode(
+                attribution.TOUCH_TYPEHASH(),
+                touch.campaign,
+                touch.promoterId,
+                touch.signedAt,
+                touch.expiresAt
+            )
         );
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
