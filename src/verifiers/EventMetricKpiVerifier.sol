@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
+import {IKpiAutomation} from "../interfaces/IKpiAutomation.sol";
 import {IEventMetricKpiVerifier} from "../interfaces/IEventMetricKpiVerifier.sol";
 
 /// @title EventMetricKpiVerifier
@@ -10,7 +11,7 @@ import {IEventMetricKpiVerifier} from "../interfaces/IEventMetricKpiVerifier.sol
 ///         computed off-chain by a trusted relayer that scans event logs via `eth_getLogs`.
 /// @dev The relayer pushes observed totals ahead of time, so `verify` is a stored-value lookup and
 ///      comparison. The `reporter` key is trusted.
-contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
+contract EventMetricKpiVerifier is IEventMetricKpiVerifier, IKpiAutomation, Ownable {
     /// @notice What a KPI watches, and how the relayer should fold it.
     /// @param targetContract Contract emitting the event.
     /// @param eventSignature Full human-readable event ABI, `indexed` keywords included exactly as
@@ -256,6 +257,18 @@ contract EventMetricKpiVerifier is IEventMetricKpiVerifier, Ownable {
     }
 
     // ── views ────────────────────────────────────────────────────
+
+    /// @inheritdoc IKpiAutomation
+    function automationCapability(address campaign, uint256 kpiIndex)
+        external
+        view
+        returns (IKpiAutomation.AutomationMode mode, address observationAdapter)
+    {
+        if (!kpiConfigs[_kpiKey(campaign, kpiIndex)].configured) {
+            return (IKpiAutomation.AutomationMode.UNSUPPORTED, address(0));
+        }
+        return (IKpiAutomation.AutomationMode.USER_EVIDENCE_FREE, address(this));
+    }
 
     /// @notice A KPI's watch config, addressed directly rather than by hashed key.
     /// @param campaign Campaign the KPI belongs to.

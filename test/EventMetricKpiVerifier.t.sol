@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {EventMetricKpiVerifier} from "../src/verifiers/EventMetricKpiVerifier.sol";
 import {IEventMetricKpiVerifier} from "../src/interfaces/IEventMetricKpiVerifier.sol";
+import {IKpiAutomation} from "../src/interfaces/IKpiAutomation.sol";
 
 /// @title EventMetricKpiVerifierTest
 /// @notice Unit-tests the verifier in isolation. It holds no campaign references and `verify` reads
@@ -80,6 +81,16 @@ contract EventMetricKpiVerifierTest is Test {
         assertEq(cfg.scale, 1);
         assertEq(cfg.windowStartBlock, WINDOW_START);
         assertEq(cfg.windowEndBlock, WINDOW_END);
+    }
+
+    function test_AutomationCapability_requiresConfiguration() public view {
+        (IKpiAutomation.AutomationMode mode, address adapter) = verifier.automationCapability(campaign, KPI);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.USER_EVIDENCE_FREE));
+        assertEq(adapter, address(verifier));
+
+        (mode, adapter) = verifier.automationCapability(campaign, KPI + 1);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.UNSUPPORTED));
+        assertEq(adapter, address(0));
     }
 
     function test_SetKpiConfig_onlyOwner() public {
