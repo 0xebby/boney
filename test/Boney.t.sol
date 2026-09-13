@@ -70,7 +70,7 @@ contract BoneyTest is Test {
 
         vault = new EscrowVault(address(this));
         registry = new CampaignRegistry(
-            address(vault), address(reputation), address(attribution), address(coordinator)
+            address(vault), address(reputation), address(attribution), address(coordinator), address(this)
         );
         vault.setRegistrar(address(registry));
         boney = new Boney(address(registry));

@@ -22,6 +22,8 @@ contract CampaignRegistry is ICampaignRegistry {
     /// @inheritdoc ICampaignRegistry
     address public immutable oracleCoordinator;
     /// @inheritdoc ICampaignRegistry
+    address public immutable automatedReporter;
+    /// @inheritdoc ICampaignRegistry
     address public immutable campaignDeployer;
 
     /// @dev Every campaign ever deployed, indexed by campaign id.
@@ -41,24 +43,33 @@ contract CampaignRegistry is ICampaignRegistry {
     /// @param reputationRegistry_ Registry backing reputation lookups.
     /// @param attributionRegistry_ Registry storing attribution touches.
     /// @param oracleCoordinator_ Coordinator routing oracle reports.
+    /// @param automatedReporter_ Protocol reporter authorized by every campaign.
     constructor(
         address escrowVault_,
         address reputationRegistry_,
         address attributionRegistry_,
-        address oracleCoordinator_
+        address oracleCoordinator_,
+        address automatedReporter_
     ) {
         if (
             escrowVault_ == address(0) || reputationRegistry_ == address(0)
                 || attributionRegistry_ == address(0) || oracleCoordinator_ == address(0)
+                || automatedReporter_ == address(0)
         ) revert ZeroAddress();
 
         escrowVault = escrowVault_;
         reputationRegistry = reputationRegistry_;
         attributionRegistry = attributionRegistry_;
         oracleCoordinator = oracleCoordinator_;
+        automatedReporter = automatedReporter_;
         campaignDeployer = address(
             new CampaignDeployer(
-                address(this), escrowVault_, attributionRegistry_, reputationRegistry_, oracleCoordinator_
+                address(this),
+                escrowVault_,
+                attributionRegistry_,
+                reputationRegistry_,
+                oracleCoordinator_,
+                automatedReporter_
             )
         );
     }

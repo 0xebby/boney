@@ -5,6 +5,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IOracleCoordinator} from "../interfaces/IOracleCoordinator.sol";
 import {ICampaign} from "../interfaces/ICampaign.sol";
 import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
+import {Types} from "../libraries/Types.sol";
 
 /// @title OracleCoordinator
 /// @notice Allowlisted reporting of campaign-level KPI aggregates with an optimistic dispute window.
@@ -12,6 +13,9 @@ import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
 ///      a challenge. Governance can void a report while the window remains open. Report ids hash
 ///      the reporter and a per-reporter sequence, so identical claims do not collide.
 contract OracleCoordinator is IOracleCoordinator, Ownable {
+    /// @inheritdoc IOracleCoordinator
+    uint256 public constant MAX_REPORTS_PER_BATCH = 32;
+
     /// @notice Lifecycle state of a submitted report.
     /// @param reporter Account that submitted the report.
     /// @param campaign Campaign the report targets.
@@ -109,8 +113,38 @@ contract OracleCoordinator is IOracleCoordinator, Ownable {
         return _record(report.campaign, report.kpiIndex, report.newTotal, report.user, report.evidence);
     }
 
-    /// @dev Shared submission path for both report kinds. `user` is folded into the id, so the two
-    ///      kinds have disjoint ids.
+    /// @inheritdoc IOracleCoordinator
+    function submitReports(Report[] calldata reports) external returns (bytes32[] memory reportIds) {
+        uint256 length = _validateBatchLength(reports.length);
+        reportIds = new bytes32[](length);
+        for (uint256 i; i < length; ++i) {
+            Report calldata report = reports[i];
+            reportIds[i] = _record(report.campaign, report.kpiIndex, report.amount, address(0), "");
+        }
+    }
+
+    /// @inheritdoc IOracleCoordinator
+    function submitUserReports(UserReport[] calldata reports) external returns (bytes32[] memory reportIds) {
+        uint256 length = _validateBatchLength(reports.length);
+        reportIds = new bytes32[](length);
+        for (uint256 i; i < length; ++i) {
+            UserReport calldata report = reports[i];
+            if (report.user == address(0)) revert ZeroAddress();
+            reportIds[i] =
+                _record(report.campaign, report.kpiIndex, report.newTotal, report.user, report.evidence);
+        }
+    }
+
+    /// @dev Enforces the shared batch bound.
+    /// @param length Number of batch items.
+    /// @return The validated length.
+    function _validateBatchLength(uint256 length) private pure returns (uint256) {
+        if (length == 0) revert EmptyReportBatch();
+        if (length > MAX_REPORTS_PER_BATCH) revert TooManyReports(length, MAX_REPORTS_PER_BATCH);
+        return length;
+    }
+
+    /// @dev Stores one report with an independent sequence and deadline.
     /// @param campaign Campaign the report targets.
     /// @param kpiIndex KPI index within that campaign.
     /// @param amount New total being reported.
@@ -124,6 +158,15 @@ contract OracleCoordinator is IOracleCoordinator, Ownable {
         if (!reporterAllowed[msg.sender]) revert NotAReporter(msg.sender);
         if (address(campaignRegistry) == address(0)) revert RegistryNotSet();
         if (!campaignRegistry.isCampaign(campaign)) revert UnknownCampaign(campaign);
+        if (user == address(0)) {
+            ICampaign target = ICampaign(campaign);
+            if (target.status() != Types.CampaignStatus.Active) revert WrongCampaignStatus(target.status());
+            uint64 start = target.startTime();
+            uint64 end = target.endTime();
+            if (block.timestamp < start || block.timestamp > end) {
+                revert CampaignOutsideWindow(start, end);
+            }
+        }
 
         uint256 seq = _sequence[msg.sender]++;
         reportId = keccak256(abi.encode(msg.sender, campaign, kpiIndex, amount, user, seq));
@@ -151,9 +194,7 @@ contract OracleCoordinator is IOracleCoordinator, Ownable {
         ReportState storage r = _reports[reportId];
         if (r.user != address(0)) revert NotAggregateReport(reportId);
         _clearForApply(r, reportId);
-
-        ICampaign(r.campaign).applyAggregateUpdate(r.kpiIndex, r.amount);
-        emit ReportApplied(reportId, r.campaign);
+        _applyAggregate(r, reportId);
     }
 
     /// @inheritdoc IOracleCoordinator
@@ -167,17 +208,86 @@ contract OracleCoordinator is IOracleCoordinator, Ownable {
         emit ReportApplied(reportId, r.campaign);
     }
 
-    /// @dev Shared checks for both apply paths. Marks the report applied before the external campaign
-    ///      call.
+    /// @inheritdoc IOracleCoordinator
+    function applyReports(bytes32[] calldata reportIds) external {
+        uint256 length = _validateBatchLength(reportIds.length);
+        uint256 i;
+        while (i < length) {
+            bytes32 reportId = reportIds[i];
+            ReportState storage report = _reports[reportId];
+            _clearForApply(report, reportId);
+
+            if (report.user == address(0)) {
+                _applyAggregate(report, reportId);
+                ++i;
+                continue;
+            }
+
+            address campaign = report.campaign;
+            uint256 end = i + 1;
+            while (end < length) {
+                ReportState storage next = _reports[reportIds[end]];
+                if (next.reporter != address(0) && (next.user == address(0) || next.campaign != campaign)) {
+                    break;
+                }
+                _clearForApply(next, reportIds[end]);
+                ++end;
+            }
+            _applyUserGroup(reportIds, i, end, campaign);
+            i = end;
+        }
+    }
+
+    /// @dev Applies one aggregate report.
+    /// @param report Stored aggregate report.
+    /// @param reportId Id of the report.
+    function _applyAggregate(ReportState storage report, bytes32 reportId) private {
+        ICampaign(report.campaign).applyAggregateUpdate(report.kpiIndex, report.amount);
+        emit ReportApplied(reportId, report.campaign);
+    }
+
+    /// @dev Applies one contiguous same-campaign user-report group.
+    /// @param reportIds Full ordered report-id input.
+    /// @param start Inclusive group start.
+    /// @param end Exclusive group end.
+    /// @param campaign Campaign shared by the group.
+    function _applyUserGroup(bytes32[] calldata reportIds, uint256 start, uint256 end, address campaign)
+        private
+    {
+        uint256 length = end - start;
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](length);
+        for (uint256 i; i < length; ++i) {
+            ReportState storage report = _reports[reportIds[start + i]];
+            reports[i] = ICampaign.UserActionReport({
+                kpiIndex: report.kpiIndex,
+                user: report.user,
+                newTotal: report.amount,
+                evidence: report.evidence
+            });
+        }
+
+        ICampaign(campaign).reportUserActionsBatch(reports);
+        for (uint256 i; i < length; ++i) {
+            emit ReportApplied(reportIds[start + i], campaign);
+        }
+    }
+
+    /// @dev Validates and reserves one report for application.
     /// @param r The stored report.
     /// @param reportId Id of that report, for error reporting.
     function _clearForApply(ReportState storage r, bytes32 reportId) private {
+        _validateForApply(r, reportId);
+        r.applied = true;
+    }
+
+    /// @dev Checks whether one report can be applied.
+    /// @param r The stored report.
+    /// @param reportId Id of that report, for error reporting.
+    function _validateForApply(ReportState storage r, bytes32 reportId) private view {
         if (r.reporter == address(0)) revert UnknownReport(reportId);
         if (r.disputed) revert ReportIsDisputed(reportId);
         if (r.applied) revert ReportAlreadyApplied(reportId);
         if (block.timestamp < r.deadline) revert DisputeWindowOpen(r.deadline);
-
-        r.applied = true;
     }
 
     /// @inheritdoc IOracleCoordinator
@@ -197,6 +307,12 @@ contract OracleCoordinator is IOracleCoordinator, Ownable {
     /// @inheritdoc IOracleCoordinator
     function reportDeadline(bytes32 reportId) external view returns (uint256) {
         return _reports[reportId].deadline;
+    }
+
+    /// @inheritdoc IOracleCoordinator
+    function reportTarget(bytes32 reportId) external view returns (address campaign, uint256 kpiIndex) {
+        ReportState storage report = _reports[reportId];
+        return (report.campaign, report.kpiIndex);
     }
 
     /// @inheritdoc IOracleCoordinator

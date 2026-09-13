@@ -63,7 +63,9 @@ contract CampaignNamesTest is Test {
         attribution = new AttributionRegistry(30 days);
         reputation = new ReputationRegistry(admin, address(new AttestationVerifier(admin, admin)));
         vault = new EscrowVault(address(this));
-        registry = new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
+        registry = new CampaignRegistry(
+            address(vault), address(reputation), address(attribution), oracle, address(this)
+        );
         vault.setRegistrar(address(registry));
     }
 
@@ -265,7 +267,14 @@ contract CampaignNamesTest is Test {
 
         Types.CampaignConfig memory cfg = _config("Aave");
         Campaign twin = new Campaign(
-            cfg, _kpis(), _tiers(), address(vault), address(attribution), address(reputation), oracle
+            cfg,
+            _kpis(),
+            _tiers(),
+            address(vault),
+            address(attribution),
+            address(reputation),
+            oracle,
+            address(this)
         );
         assertEq(twin.name(), "Aave", "duplicate names are reachable off-registry");
         assertFalse(registry.isCampaign(address(twin)), "but such a campaign is not in the registry");
@@ -273,7 +282,14 @@ contract CampaignNamesTest is Test {
         cfg.name = "";
         vm.expectRevert(Names.EmptyName.selector);
         new Campaign(
-            cfg, _kpis(), _tiers(), address(vault), address(attribution), address(reputation), oracle
+            cfg,
+            _kpis(),
+            _tiers(),
+            address(vault),
+            address(attribution),
+            address(reputation),
+            oracle,
+            address(this)
         );
     }
 

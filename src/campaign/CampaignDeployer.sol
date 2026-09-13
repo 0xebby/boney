@@ -13,6 +13,7 @@ contract CampaignDeployer is ICampaignDeployer {
     address public immutable override attributionRegistry;
     address public immutable override reputationRegistry;
     address public immutable override oracleCoordinator;
+    address public immutable override automatedReporter;
 
     /// @notice Binds the deployer to one registry and its campaign dependencies.
     /// @param registry_ Registry permitted to deploy campaigns.
@@ -20,16 +21,19 @@ contract CampaignDeployer is ICampaignDeployer {
     /// @param attributionRegistry_ Registry storing attribution touches.
     /// @param reputationRegistry_ Registry backing reputation lookups.
     /// @param oracleCoordinator_ Coordinator authorized to push oracle updates.
+    /// @param automatedReporter_ Protocol reporter passed to each campaign.
     constructor(
         address registry_,
         address escrowVault_,
         address attributionRegistry_,
         address reputationRegistry_,
-        address oracleCoordinator_
+        address oracleCoordinator_,
+        address automatedReporter_
     ) {
         if (
             registry_ == address(0) || escrowVault_ == address(0) || attributionRegistry_ == address(0)
                 || reputationRegistry_ == address(0) || oracleCoordinator_ == address(0)
+                || automatedReporter_ == address(0)
         ) revert ZeroAddress();
 
         registry = registry_;
@@ -37,6 +41,7 @@ contract CampaignDeployer is ICampaignDeployer {
         attributionRegistry = attributionRegistry_;
         reputationRegistry = reputationRegistry_;
         oracleCoordinator = oracleCoordinator_;
+        automatedReporter = automatedReporter_;
     }
 
     /// @inheritdoc ICampaignDeployer
@@ -49,7 +54,14 @@ contract CampaignDeployer is ICampaignDeployer {
 
         campaign = address(
             new Campaign(
-                cfg, kpis, tiers, escrowVault, attributionRegistry, reputationRegistry, oracleCoordinator
+                cfg,
+                kpis,
+                tiers,
+                escrowVault,
+                attributionRegistry,
+                reputationRegistry,
+                oracleCoordinator,
+                automatedReporter
             )
         );
     }

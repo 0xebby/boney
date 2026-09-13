@@ -8,6 +8,18 @@ import {IAttributionRegistry} from "./IAttributionRegistry.sol";
 /// @notice A single performance campaign: escrowed rewards released as attributed KPI progress
 ///         crosses per-promoter thresholds.
 interface ICampaign {
+    /// @notice One cumulative user-action report in a campaign batch.
+    /// @param kpiIndex Index of the KPI being reported against.
+    /// @param user The end user whose action is credited.
+    /// @param newTotal Cumulative amount for the user and KPI pair.
+    /// @param evidence Report-specific proof forwarded to the KPI verifier.
+    struct UserActionReport {
+        uint256 kpiIndex;
+        address user;
+        uint256 newTotal;
+        bytes evidence;
+    }
+
     // ── errors ───────────────────────────────────────────────────
 
     error NotProject();
@@ -41,6 +53,8 @@ interface ICampaign {
     error TooManyKpis(uint256 provided, uint256 max);
     error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
     error TooManyActions(uint256 provided, uint256 max);
+    error EmptyReportBatch();
+    error TooManyReports(uint256 provided, uint256 max);
     error UnorderedEvidence(uint256 index);
     error ExtensionTooLarge(uint64 maximum, uint64 provided);
     error ExtensionNotForward(uint64 current, uint64 provided);
@@ -180,6 +194,11 @@ interface ICampaign {
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external;
 
+    /// @notice Credit an ordered batch of cumulative end-user actions atomically.
+    /// @dev Each item follows `reportUserAction` semantics. A failing item reverts the full batch.
+    /// @param reports Reports to process in caller-supplied order.
+    function reportUserActionsBatch(UserActionReport[] calldata reports) external;
+
     /// @notice Allow or disallow an account to report user actions for this campaign.
     /// @param reporter Account to configure.
     /// @param allowed Whether the account may report.
@@ -217,9 +236,25 @@ interface ICampaign {
     /// @return The current pool ceiling.
     function rewardPool() external view returns (uint256);
 
+    /// @notice Start of the reporting window.
+    /// @return The campaign start time.
+    function startTime() external view returns (uint64);
+
     /// @notice Current reporting deadline.
     /// @return The current end time.
     function endTime() external view returns (uint64);
+
+    /// @notice Timestamp when the campaign entered a terminal status.
+    /// @return The terminal transition time, or zero.
+    function endedAt() external view returns (uint64);
+
+    /// @notice Post-end report and settlement window.
+    /// @return The claim grace duration.
+    function CLAIM_GRACE() external view returns (uint64);
+
+    /// @notice Post-end deadline for applying previously submitted aggregate reports.
+    /// @return The aggregate update deadline.
+    function aggregateUpdateDeadline() external view returns (uint256);
 
     /// @notice Number of KPIs defined on this campaign.
     /// @return The KPI count.

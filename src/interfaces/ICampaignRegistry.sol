@@ -65,6 +65,10 @@ interface ICampaignRegistry {
     /// @return Campaign addresses in creation order.
     function campaignsOf(address project) external view returns (address[] memory);
 
+    /// @notice Protocol reporter authorized by every newly created campaign.
+    /// @return The automated reporter address.
+    function automatedReporter() external view returns (address);
+
     /// @notice Helper bound to this registry for Campaign contract deployment.
     /// @return The campaign deployer address.
     function campaignDeployer() external view returns (address);

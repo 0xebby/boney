@@ -133,8 +133,9 @@ contract BoneyCreReceiverIntegrationTest is Test {
         AttestationVerifier attestation = new AttestationVerifier(address(this), address(this));
         ReputationRegistry reputation = new ReputationRegistry(address(this), address(attestation));
         vault = new EscrowVault(address(this));
-        CampaignRegistry registry =
-            new CampaignRegistry(address(vault), address(reputation), address(attribution), address(0x0BAC));
+        CampaignRegistry registry = new CampaignRegistry(
+            address(vault), address(reputation), address(attribution), address(0x0BAC), address(this)
+        );
         vault.setRegistrar(address(registry));
 
         eventVerifier = new EventMetricKpiVerifier(address(this), REPORTER);

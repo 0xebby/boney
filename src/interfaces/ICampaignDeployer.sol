@@ -29,6 +29,10 @@ interface ICampaignDeployer {
     /// @return The oracle coordinator address.
     function oracleCoordinator() external view returns (address);
 
+    /// @notice Protocol reporter passed to each deployed campaign.
+    /// @return The automated reporter address.
+    function automatedReporter() external view returns (address);
+
     /// @notice Deploys a campaign for the bound registry.
     /// @param cfg Immutable campaign parameters.
     /// @param kpis KPI specifications.

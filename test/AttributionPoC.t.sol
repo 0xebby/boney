@@ -67,7 +67,9 @@ contract AttributionPoCTest is Test {
         reputation = new ReputationRegistry(admin, address(verifier));
 
         vault = new EscrowVault(address(this));
-        registry = new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
+        registry = new CampaignRegistry(
+            address(vault), address(reputation), address(attribution), oracle, address(this)
+        );
         vault.setRegistrar(address(registry));
 
         campaign = _createCampaign();

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
+import {Types} from "../libraries/Types.sol";
+
 /// @title IOracleCoordinator
 /// @notice Coordinates oracle-reported campaign updates through a dispute window.
 /// @dev Dispute authority is governance's.
@@ -22,6 +24,10 @@ interface IOracleCoordinator {
     error RegistryNotSet();
     error ReporterAlreadyListed(address reporter);
     error ReporterNotListed(address reporter);
+    error WrongCampaignStatus(Types.CampaignStatus actual);
+    error CampaignOutsideWindow(uint64 startTime, uint64 endTime);
+    error EmptyReportBatch();
+    error TooManyReports(uint256 provided, uint256 max);
 
     // ── events ───────────────────────────────────────────────────
 
@@ -103,6 +109,25 @@ interface IOracleCoordinator {
     /// @return reportId Content-derived id used to apply or dispute the report.
     function submitUserReport(UserReport calldata report) external returns (bytes32 reportId);
 
+    /// @notice Maximum reports accepted by one batch operation.
+    /// @return The batch item limit.
+    function MAX_REPORTS_PER_BATCH() external view returns (uint256);
+
+    /// @notice Submit ordered aggregate candidates atomically.
+    /// @param reports Candidate updates in input order.
+    /// @return reportIds Sequence-derived ids in input order.
+    function submitReports(Report[] calldata reports) external returns (bytes32[] memory reportIds);
+
+    /// @notice Submit ordered per-user candidates atomically.
+    /// @param reports Candidate updates in input order.
+    /// @return reportIds Sequence-derived ids in input order.
+    function submitUserReports(UserReport[] calldata reports) external returns (bytes32[] memory reportIds);
+
+    /// @notice Apply an ordered mix of aggregate and per-user reports atomically.
+    /// @dev Callable by anyone after every report's dispute window has elapsed.
+    /// @param reportIds Stored report ids in application order.
+    function applyReports(bytes32[] calldata reportIds) external;
+
     /// @notice Apply a previously submitted, un-disputed report to its campaign.
     /// @dev Callable by anyone once the dispute window has elapsed.
     /// @param reportId Id returned by `submitReport`.
@@ -123,6 +148,12 @@ interface IOracleCoordinator {
     /// @param reportId The report id.
     /// @return Timestamp the dispute window closes.
     function reportDeadline(bytes32 reportId) external view returns (uint256);
+
+    /// @notice Campaign and KPI targeted by a report.
+    /// @param reportId The report id.
+    /// @return campaign The target campaign.
+    /// @return kpiIndex The target KPI index.
+    function reportTarget(bytes32 reportId) external view returns (address campaign, uint256 kpiIndex);
 
     /// @notice Whether a report was disputed and permanently voided.
     /// @param reportId The report id.

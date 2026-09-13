@@ -9,6 +9,7 @@ import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
 import {IReputationRegistry} from "../interfaces/IReputationRegistry.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
+import {IOracleCoordinator} from "../interfaces/IOracleCoordinator.sol";
 import {Types} from "../libraries/Types.sol";
 import {Names} from "../libraries/Names.sol";
 
@@ -38,6 +39,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @notice Maximum number of evidence actions a single report may carry.
     /// @dev Bounds the segment walk in `reportUserAction`.
     uint256 public constant MAX_EVIDENCE_ACTIONS = 256;
+    /// @notice Maximum number of reports accepted in one atomic batch.
+    uint256 public constant MAX_REPORTS_PER_BATCH = 32;
 
     // ── dependencies ─────────────────────────────────────────────
 
@@ -132,6 +135,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @param attributionRegistry_ Registry storing attribution touches.
     /// @param reputationRegistry_ Registry backing reputation lookups.
     /// @param oracleCoordinator_ Coordinator authorized to push oracle updates.
+    /// @param automatedReporter_ Protocol reporter authorized at creation.
     constructor(
         Types.CampaignConfig memory cfg,
         Types.KpiSpec[] memory kpis_,
@@ -139,12 +143,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
         address escrowVault_,
         address attributionRegistry_,
         address reputationRegistry_,
-        address oracleCoordinator_
+        address oracleCoordinator_,
+        address automatedReporter_
     ) {
         if (
             cfg.project == address(0) || cfg.token == address(0) || escrowVault_ == address(0)
                 || attributionRegistry_ == address(0) || reputationRegistry_ == address(0)
-                || oracleCoordinator_ == address(0)
+                || oracleCoordinator_ == address(0) || automatedReporter_ == address(0)
         ) revert ZeroAddress();
         if (cfg.rewardPool == 0) revert ZeroRewardPool();
         if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
@@ -210,6 +215,8 @@ contract Campaign is ICampaign, ReentrancyGuard {
         attributionRegistry = IAttributionRegistry(attributionRegistry_);
         reputationRegistry = IReputationRegistry(reputationRegistry_);
         oracleCoordinator = oracleCoordinator_;
+        authorizedReporters[automatedReporter_] = true;
+        emit AuthorizedReporterUpdated(automatedReporter_, true);
 
         /// @dev all campaigns default to pending until activation via escrow funding.
         status = Types.CampaignStatus.Pending;
@@ -383,21 +390,48 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
-    /// @dev Accepted while Active and inside the campaign window, and for `CLAIM_GRACE` after `end()`.
-    ///      Per-action `evidence` splits the credit across the promoters who held the user when each
-    ///      action happened; empty `evidence` credits whoever holds attribution now, and is refused
-    ///      with `AmbiguousAttribution` when more than one promoter held them since the last report.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external
         nonReentrant
     {
+        _requireReportAccess();
+        _reportUserAction(kpiIndex, user, newTotal, evidence);
+    }
+
+    /// @inheritdoc ICampaign
+    function reportUserActionsBatch(UserActionReport[] calldata reports) external nonReentrant {
+        uint256 reportsLength = reports.length;
+        if (reportsLength == 0) revert EmptyReportBatch();
+        if (reportsLength > MAX_REPORTS_PER_BATCH) {
+            revert TooManyReports(reportsLength, MAX_REPORTS_PER_BATCH);
+        }
+
+        _requireReportAccess();
+        for (uint256 i; i < reportsLength; ++i) {
+            UserActionReport calldata report = reports[i];
+            _reportUserAction(report.kpiIndex, report.user, report.newTotal, report.evidence);
+        }
+    }
+
+    /// @dev Checks the shared lifecycle, caller, and window requirements for reporting.
+    function _requireReportAccess() private view {
         _requireReportableStatus();
         if (msg.sender != project && msg.sender != oracleCoordinator && !authorizedReporters[msg.sender]) {
             revert NotReporter();
         }
+        _requireReportWindow();
+    }
+
+    /// @dev Applies one cumulative user-action report.
+    /// @param kpiIndex Index of the KPI being reported against.
+    /// @param user The end user whose action is credited.
+    /// @param newTotal Cumulative amount for the user and KPI pair.
+    /// @param evidence Report-specific proof forwarded to the KPI verifier.
+    function _reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
+        private
+    {
         if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
         if (user == address(0)) revert ZeroAddress();
-        _requireReportWindow();
 
         Types.KpiSpec storage spec = _kpis[kpiIndex];
         if (spec.aggregate) revert AggregateKpi(kpiIndex);
@@ -406,7 +440,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         if (newTotal < already) revert NonMonotonic(already, newTotal);
         if (newTotal == already) return; // idempotent replay
 
-        // With no evidence there is nothing to segment, so attribution is resolved at report time.
+        // With no evidence there is nothing to segment.
         bytes32 currentId;
         address current;
         if (evidence.length == 0) {
@@ -472,7 +506,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
         uint256 credited = _credit(user, kpiIndex, ids, owed, distinct);
         if (credited == 0) return;
 
-        // Advances by what was credited, not to `verifiedTotal`, so skipped actions stay reportable.
         _userCredited[user][kpiIndex] = already + credited;
 
         for (uint256 i; i < distinct; ++i) {
@@ -500,7 +533,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
         uint256 taken;
 
         for (uint256 i; i < actions.length && taken < verifiedTotal; ++i) {
-            // Nobody held attribution then; the amount stays uncredited and reportable later.
             if (owners[i] == bytes32(0)) continue;
 
             uint256 share = verifiedTotal - taken;
@@ -541,7 +573,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
         for (uint256 i; i < distinct; ++i) {
             address promoter = _promoterOf[ids[i]];
             uint256 paid = _creditedTo[user][kpiIndex][ids[i]];
-            // A verifier that revised a total downward can leave a promoter ahead of its tally.
+
             if (promoter == address(0) || owed[i] <= paid) {
                 owed[i] = 0;
                 continue;
@@ -600,11 +632,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     /// @dev Aggregate KPIs (TVL, volume) are campaign-level and never credit an individual promoter.
-    function applyAggregateUpdate(uint256 kpiIndex, uint256 newTotal) external onlyActive {
+    function applyAggregateUpdate(uint256 kpiIndex, uint256 newTotal) external {
         if (msg.sender != oracleCoordinator) revert NotOracle();
         if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
         if (!_kpis[kpiIndex].aggregate) revert NotAggregateKpi(kpiIndex);
-        _requireWindow();
+        _requireAggregateReportWindow();
 
         uint256 current = _totalProgress[kpiIndex];
         if (newTotal < current) revert NonMonotonic(current, newTotal);
@@ -646,7 +678,6 @@ contract Campaign is ICampaign, ReentrancyGuard {
             uint256 remaining = _rewardPool - paidOut;
             uint256 tierPay = reward > remaining ? remaining : reward;
 
-            // Marked settled even when the pool cannot cover it.
             _settledTiers[promoter][kpiIndex] = next + 1;
 
             if (tierPay != 0) {
@@ -718,6 +749,16 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function _requireReportWindow() private view {
         if (status == Types.CampaignStatus.Ended) return;
         _requireWindow();
+    }
+
+    /// @dev Accepts aggregate updates while Active, or during the post-end claim window.
+    function _requireAggregateReportWindow() private view {
+        if (status == Types.CampaignStatus.Active) {
+            _requireWindow();
+            return;
+        }
+        if (status == Types.CampaignStatus.Ended && block.timestamp <= aggregateUpdateDeadline()) return;
+        revert WrongStatus(status);
     }
 
     // ── views ────────────────────────────────────────────────────
@@ -820,6 +861,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @return The current reporting deadline, including successful extensions.
     function endTime() public view returns (uint64) {
         return _endTime;
+    }
+
+    /// @inheritdoc ICampaign
+    function aggregateUpdateDeadline() public view returns (uint256) {
+        uint256 window = IOracleCoordinator(oracleCoordinator).disputeWindow();
+        if (window < CLAIM_GRACE) window = CLAIM_GRACE;
+        return uint256(endedAt) + window;
     }
 
     /// @notice Unpaid reward caused by a depleted pool.

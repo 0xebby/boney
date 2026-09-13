@@ -30,6 +30,7 @@ contract CampaignDeployerTest is Test {
     address internal project = address(0xC0DE);
     address internal attribution = address(0xA771);
     address internal oracle = address(0x0BAC);
+    address internal automatedReporter = address(0xA070);
 
     DeployerToken internal token;
     DeployerReputation internal reputation;
@@ -42,7 +43,8 @@ contract CampaignDeployerTest is Test {
         token = new DeployerToken();
         reputation = new DeployerReputation();
         vault = new EscrowVault(address(this));
-        registry = new CampaignRegistry(address(vault), address(reputation), attribution, oracle);
+        registry =
+            new CampaignRegistry(address(vault), address(reputation), attribution, oracle, automatedReporter);
         deployer = CampaignDeployer(registry.campaignDeployer());
         vault.setRegistrar(address(registry));
     }
@@ -53,6 +55,7 @@ contract CampaignDeployerTest is Test {
         assertEq(deployer.attributionRegistry(), attribution);
         assertEq(deployer.reputationRegistry(), address(reputation));
         assertEq(deployer.oracleCoordinator(), oracle);
+        assertEq(deployer.automatedReporter(), automatedReporter);
     }
 
     function test_RejectsDirectDeployment() public {
@@ -101,8 +104,14 @@ contract CampaignDeployerTest is Test {
         assertEq(address(campaign.attributionRegistry()), attribution);
         assertEq(address(campaign.reputationRegistry()), address(reputation));
         assertEq(campaign.getOracle(), oracle);
+        assertTrue(campaign.authorizedReporters(automatedReporter));
         assertEq(campaign.kpiCount(), 1);
         assertEq(campaign.tiers(0).length, 1);
+    }
+
+    function test_RegistryRejectsZeroAutomatedReporter() public {
+        vm.expectRevert(ICampaignDeployer.ZeroAddress.selector);
+        new CampaignRegistry(address(vault), address(reputation), attribution, oracle, address(0));
     }
 
     function test_ConstructorRevertLeavesRegistryAndNameUnchanged() public {
@@ -120,8 +129,9 @@ contract CampaignDeployerTest is Test {
 
     function test_VaultRegistrationRevertRollsBackCampaignState() public {
         EscrowVault unwiredVault = new EscrowVault(address(this));
-        CampaignRegistry unwired =
-            new CampaignRegistry(address(unwiredVault), address(reputation), attribution, oracle);
+        CampaignRegistry unwired = new CampaignRegistry(
+            address(unwiredVault), address(reputation), attribution, oracle, automatedReporter
+        );
         Types.CampaignConfig memory cfg = _config("Unwired vault");
 
         vm.expectRevert(IEscrowVault.RegistrarNotSet.selector);

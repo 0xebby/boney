@@ -96,7 +96,7 @@ contract ReportWithholdingTest is Test {
         coordinator = new OracleCoordinator(governor, DISPUTE_WINDOW);
         vault = new EscrowVault(address(this));
         registry = new CampaignRegistry(
-            address(vault), address(reputation), address(attribution), address(coordinator)
+            address(vault), address(reputation), address(attribution), address(coordinator), address(this)
         );
         vault.setRegistrar(address(registry));
         vm.prank(governor);

@@ -105,8 +105,9 @@ contract BoneyScoreTest is Test {
         token = new GateMockToken();
         vault = new EscrowVault(address(this));
         attribution = new AttributionRegistry(30 days);
-        campaignRegistry =
-            new CampaignRegistry(address(vault), address(registry), address(attribution), oracle);
+        campaignRegistry = new CampaignRegistry(
+            address(vault), address(registry), address(attribution), oracle, address(this)
+        );
         vault.setRegistrar(address(campaignRegistry));
     }
 
