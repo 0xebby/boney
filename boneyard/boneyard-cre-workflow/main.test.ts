@@ -1,4 +1,4 @@
-import {describe, expect} from "bun:test";
+import {afterEach, beforeEach, describe, expect, setSystemTime} from "bun:test";
 import {
   Report,
   REPORT_METADATA_HEADER_LENGTH,
@@ -11,13 +11,21 @@ import {
   test,
   type ContractMock,
 } from "@chainlink/cre-sdk/test";
-import {decodeAbiParameters, type Address, type Hex} from "viem";
+import {
+  decodeAbiParameters,
+  decodeFunctionData,
+  encodeFunctionResult,
+  type Address,
+  type Hex,
+} from "viem";
 import {
   ATTRIBUTION_ABI,
   CAMPAIGN_ABI,
   CRE_REPORT_PARAMETERS,
   EVENT_VERIFIER_ABI,
   GUARD_ABI,
+  MULTICALL3_ABI,
+  MULTICALL3_ADDRESS,
   RECEIVER_ABI,
   initWorkflow,
   onCronTrigger,
@@ -37,6 +45,9 @@ const USER_C = "0x8888888888888888888888888888888888888888";
 const PROMOTER = `0x${"ab".repeat(32)}` as Hex;
 const ZERO_BYTES32 = `0x${"00".repeat(32)}` as Hex;
 const NOW = 1_800_000_000n;
+
+beforeEach(() => setSystemTime(Number(NOW) * 1_000));
+afterEach(() => setSystemTime());
 
 const config = (overrides: Partial<Config["evm"]> = {}): Config => ({
   schedule: "0 * * * * *",
@@ -96,9 +107,51 @@ type Fixture = {
   receiver: ContractMock<typeof RECEIVER_ABI>;
   writes: {payload: Hex; gasLimit: bigint; receiver: Address}[];
   visited: bigint[];
+  readCalls: () => number;
 };
 
 const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString("base64");
+const bytesToAddress = (bytes: Uint8Array): Address => bytesToHex(bytes) as Address;
+const hexToBytes = (hex: Hex): Uint8Array => Uint8Array.from(Buffer.from(hex.slice(2), "hex"));
+
+const attachMulticall = (evm: ReturnType<typeof EvmMock.testInstance>) => {
+  const directCall = evm.callContract;
+  let capabilityCalls = 0;
+  evm.callContract = (request) => {
+    capabilityCalls++;
+    if (bytesToAddress(request.call!.to).toLowerCase() !== MULTICALL3_ADDRESS.toLowerCase()) {
+      return directCall!(request);
+    }
+    const decoded = decodeFunctionData({
+      abi: MULTICALL3_ABI,
+      data: bytesToHex(request.call!.data),
+    });
+    const calls = decoded.args[0];
+    const returnData = calls.map((call) => {
+      try {
+        const reply = directCall!({
+          ...request,
+          call: {
+            from: request.call?.from,
+            to: hexToBytes(call.target),
+            data: hexToBytes(call.callData),
+          },
+        });
+        return {success: true, returnData: bytesToHex(reply.data)};
+      } catch (error) {
+        if (!call.allowFailure) throw error;
+        return {success: false, returnData: "0x" as Hex};
+      }
+    });
+    const data = encodeFunctionResult({
+      abi: MULTICALL3_ABI,
+      functionName: "aggregate3",
+      result: returnData,
+    });
+    return {data: hexToBytes(data)};
+  };
+  return () => capabilityCalls;
+};
 
 const setup = (options: SetupOptions = {}, runtimeConfig = config()): Fixture => {
   const evm = EvmMock.testInstance(CHAIN_SELECTOR);
@@ -193,6 +246,7 @@ const setup = (options: SetupOptions = {}, runtimeConfig = config()): Fixture =>
     return {txStatus: options.writeStatus ?? "TX_STATUS_SUCCESS"};
   };
 
+  const readCalls = attachMulticall(evm);
   const runtime = newTestRuntime<Config>(null, {}, runtimeConfig);
   if (options.reportThrows) {
     runtime.report = () => ({
@@ -201,7 +255,7 @@ const setup = (options: SetupOptions = {}, runtimeConfig = config()): Fixture =>
       },
     });
   }
-  return {runtime, receiver, writes, visited};
+  return {runtime, receiver, writes, visited, readCalls};
 };
 
 const decodedPayload = (fixture: Fixture) =>
@@ -302,6 +356,16 @@ describe("preflight", () => {
     expect(fixture.writes).toHaveLength(0);
   });
 
+  test("rejects a local clock behind the finalized block", () => {
+    setSystemTime((Number(NOW) - 1) * 1_000);
+    const fixture = setup();
+    expect(run(fixture)).toMatchObject({
+      status: "read-failed",
+      reason: "local-clock-before-finalized-block",
+    });
+    expect(fixture.writes).toHaveLength(0);
+  });
+
   test("classifies contract read exceptions", () => {
     const fixture = setup({readThrows: true});
     expect(run(fixture)).toMatchObject({status: "read-failed", reason: "read exploded"});
@@ -335,6 +399,7 @@ describe("selection and reports", () => {
     expect(decodedPayload(fixture)).toEqual([1, 7n, NOW + 300n, 0n, USER_C, 25n, true]);
     expect(fixture.writes[0]).toMatchObject({receiver: RECEIVER, gasLimit: 3_000_000n});
     expect(fixture.writes).toHaveLength(1);
+    expect(fixture.readCalls()).toBeLessThanOrEqual(15);
   });
 
   test("wraps the circular scan", () => {
@@ -390,6 +455,7 @@ describe("failure handling", () => {
   });
 
   test("rejects report expiry overflow before signing", () => {
+    setSystemTime(Number((1n << 64n) - 1n) * 1_000);
     const fixture = setup({
       blockTimestamp: (1n << 64n) - 1n,
       endTime: (1n << 64n) - 1n,

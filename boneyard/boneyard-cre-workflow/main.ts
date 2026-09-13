@@ -12,6 +12,7 @@ import {
   type Runtime,
 } from "@chainlink/cre-sdk";
 import {
+  decodeAbiParameters,
   decodeFunctionResult,
   encodeAbiParameters,
   encodeFunctionData,
@@ -77,7 +78,7 @@ export const CAMPAIGN_ABI = parseAbi([
   "function endedAt() view returns (uint64)",
   "function CLAIM_GRACE() view returns (uint64)",
   "function kpiCount() view returns (uint256)",
-  "function kpi(uint256) view returns (uint8 kind, address verifier, uint256 target, bool aggregate, bytes params)",
+  "function kpi(uint256) view returns ((uint8,address,uint256,bool,bytes))",
   "function attributionRegistry() view returns (address)",
   "function authorizedReporters(address) view returns (bool)",
   "function userCreditedOf(address,uint256) view returns (uint256)",
@@ -86,11 +87,11 @@ export const CAMPAIGN_ABI = parseAbi([
 
 export const GUARD_ABI = parseAbi([
   "function boneyVerifier() view returns (address)",
-  "function guardOf(address,uint256) view returns (address projectVerifier, uint16 toleranceBps, uint8 mode, bool configured)",
+  "function guardOf(address,uint256) view returns ((address,uint16,uint8,bool))",
 ]);
 
 export const EVENT_VERIFIER_ABI = parseAbi([
-  "function configOf(address,uint256) view returns (address targetContract, string eventSignature, uint8 userParamIndex, uint8 valueParamIndex, uint8 aggregation, uint256 scale, uint256 windowStartBlock, uint256 windowEndBlock, bool configured, uint256 epoch)",
+  "function configOf(address,uint256) view returns ((address,string,uint8,uint8,uint8,uint256,uint256,uint256,bool,uint256))",
   "function observedUserCount(address,uint256) view returns (uint256)",
   "function observedUserAt(address,uint256,uint256) view returns (address)",
   "function observedProgressOf(address,uint256,address) view returns (uint256)",
@@ -100,6 +101,12 @@ export const ATTRIBUTION_ABI = parseAbi([
   "function activePromoter(address,address) view returns (bytes32)",
   "function soleAttributionSince(address,address,uint64) view returns (bytes32)",
 ]);
+
+export const MULTICALL3_ABI = parseAbi([
+  "function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns ((bool success,bytes returnData)[] returnData)",
+]);
+
+export const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11" as Address;
 
 export const CRE_REPORT_PARAMETERS = [
   {type: "uint8"},
@@ -207,21 +214,36 @@ const normalizeAddress = (address: Address): string => address.toLowerCase();
 const addressesEqual = (a: Address, b: Address): boolean =>
   normalizeAddress(a) === normalizeAddress(b);
 
-const readContract = <T>(
-  context: ReadContext,
-  address: Address,
-  abi: Abi,
-  functionName: string,
-  args: readonly unknown[] = [],
-): T => {
-  const data = encodeFunctionData({abi, functionName, args});
+type ContractRead = {
+  address: Address;
+  abi: Abi;
+  functionName: string;
+  args?: readonly unknown[];
+};
+
+const readContracts = (context: ReadContext, reads: readonly ContractRead[]): readonly unknown[] => {
+  const calls = reads.map(({address, abi, functionName, args = []}) => ({
+    target: address,
+    allowFailure: false,
+    callData: encodeFunctionData({abi, functionName, args}),
+  }));
+  const data = encodeFunctionData({abi: MULTICALL3_ABI, functionName: "aggregate3", args: [calls]});
   const response = new cre.capabilities.EVMClient(context.config.chainSelector)
     .callContract(context.runtime, {
-      call: encodeCallMsg({from: ZERO_ADDRESS, to: address, data}),
+      call: encodeCallMsg({from: ZERO_ADDRESS, to: MULTICALL3_ADDRESS, data}),
       blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
     })
     .result();
-  return decodeFunctionResult({abi, functionName, data: bytesToHex(response.data)}) as T;
+  const results = decodeFunctionResult({
+    abi: MULTICALL3_ABI,
+    functionName: "aggregate3",
+    data: bytesToHex(response.data),
+  });
+  return results.map((result, index) => {
+    requireCondition(result.success, `multicall-read-failed-${index}`);
+    const {abi, functionName} = reads[index];
+    return decodeFunctionResult({abi, functionName, data: result.returnData});
+  });
 };
 
 type Preflight = {
@@ -244,104 +266,120 @@ export const preflight = (context: ReadContext): Preflight => {
     .result().header;
   requireCondition(!!header, "finalized-header-unavailable");
   const blockTimestamp = header!.timestamp;
+  const reportTimestamp = BigInt(Math.floor(Date.now() / 1_000));
+  requireCondition(reportTimestamp >= blockTimestamp, "local-clock-before-finalized-block");
 
-  const receiverCampaign = readContract<Address>(context, config.receiverAddress, RECEIVER_ABI, "campaign");
-  const receiverKpi = readContract<bigint>(context, config.receiverAddress, RECEIVER_ABI, "kpiIndex");
-  const receiverVerifier = readContract<Address>(
-    context,
-    config.receiverAddress,
-    RECEIVER_ABI,
-    "eventMetricVerifier",
-  );
-  const receiverProduction = readContract<boolean>(
-    context,
-    config.receiverAddress,
-    RECEIVER_ABI,
-    "production",
-  );
-  const reportVersion = readContract<number>(
-    context,
-    config.receiverAddress,
-    RECEIVER_ABI,
-    "REPORT_VERSION",
-  );
+  const receiverReads = readContracts(context, [
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "campaign"},
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "kpiIndex"},
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "eventMetricVerifier"},
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "production"},
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "REPORT_VERSION"},
+  ]);
+  const receiverCampaign = receiverReads[0] as Address;
+  const receiverKpi = receiverReads[1] as bigint;
+  const receiverVerifier = receiverReads[2] as Address;
+  const receiverProduction = receiverReads[3] as boolean;
+  const reportVersion = receiverReads[4] as number;
   requireCondition(addressesEqual(receiverCampaign, config.campaignAddress), "receiver-campaign-mismatch");
   requireCondition(receiverKpi === config.kpiIndex, "receiver-kpi-mismatch");
   requireCondition(addressesEqual(receiverVerifier, config.verifierAddress), "receiver-verifier-mismatch");
   requireCondition(receiverProduction === (config.mode === "production"), "receiver-mode-mismatch");
   requireCondition(reportVersion === REPORT_VERSION, "receiver-report-version-mismatch");
 
-  const authorized = readContract<boolean>(
-    context,
-    config.campaignAddress,
-    CAMPAIGN_ABI,
-    "authorizedReporters",
-    [config.receiverAddress],
-  );
+  const campaignReads = readContracts(context, [
+    {
+      address: config.campaignAddress,
+      abi: CAMPAIGN_ABI,
+      functionName: "authorizedReporters",
+      args: [config.receiverAddress],
+    },
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "kpiCount"},
+    {
+      address: config.campaignAddress,
+      abi: CAMPAIGN_ABI,
+      functionName: "kpi",
+      args: [config.kpiIndex],
+    },
+  ]);
+  const authorized = campaignReads[0] as boolean;
   requireCondition(authorized, "receiver-not-authorized");
-  const count = readContract<bigint>(context, config.campaignAddress, CAMPAIGN_ABI, "kpiCount");
+  const count = campaignReads[1] as bigint;
   requireCondition(config.kpiIndex < count, "unknown-kpi");
-  const kpi = readContract<readonly [number, Address, bigint, boolean, Hex]>(
-    context,
-    config.campaignAddress,
-    CAMPAIGN_ABI,
-    "kpi",
-    [config.kpiIndex],
-  );
+  const kpi = campaignReads[2] as readonly [number, Address, bigint, boolean, Hex];
   requireCondition(!kpi[3], "aggregate-kpi");
   requireCondition(normalizeAddress(kpi[1]) !== ZERO_ADDRESS, "ungated-kpi");
 
-  const canonicalVerifier = readContract<Address>(context, kpi[1], GUARD_ABI, "boneyVerifier");
+  const verifierReads = readContracts(context, [
+    {address: kpi[1], abi: GUARD_ABI, functionName: "boneyVerifier"},
+    {
+      address: kpi[1],
+      abi: GUARD_ABI,
+      functionName: "guardOf",
+      args: [config.campaignAddress, config.kpiIndex],
+    },
+    {
+      address: config.verifierAddress,
+      abi: EVENT_VERIFIER_ABI,
+      functionName: "configOf",
+      args: [config.campaignAddress, config.kpiIndex],
+    },
+  ]);
+  const canonicalVerifier = verifierReads[0] as Address;
   requireCondition(addressesEqual(canonicalVerifier, config.verifierAddress), "guard-verifier-mismatch");
-  const guard = readContract<readonly [Address, number, number, boolean]>(
-    context,
-    kpi[1],
-    GUARD_ABI,
-    "guardOf",
-    [config.campaignAddress, config.kpiIndex],
-  );
+  const guard = verifierReads[1] as readonly [Address, number, number, boolean];
   requireCondition(guard[3], "guard-not-configured");
   requireCondition(normalizeAddress(guard[0]) === ZERO_ADDRESS, "guard-requires-evidence");
-
-  const verifierConfig = readContract<
-    readonly [Address, string, number, number, number, bigint, bigint, bigint, boolean, bigint]
-  >(context, config.verifierAddress, EVENT_VERIFIER_ABI, "configOf", [
-    config.campaignAddress,
-    config.kpiIndex,
-  ]);
+  const verifierConfig = verifierReads[2] as readonly [
+    Address,
+    string,
+    number,
+    number,
+    number,
+    bigint,
+    bigint,
+    bigint,
+    boolean,
+    bigint,
+  ];
   requireCondition(verifierConfig[8], "event-verifier-not-configured");
 
-  const status = readContract<number>(context, config.campaignAddress, CAMPAIGN_ABI, "status");
+  const campaignState = readContracts(context, [
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "status"},
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "startTime"},
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "endTime"},
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "endedAt"},
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "CLAIM_GRACE"},
+    {address: config.campaignAddress, abi: CAMPAIGN_ABI, functionName: "attributionRegistry"},
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "cursor"},
+    {address: config.receiverAddress, abi: RECEIVER_ABI, functionName: "nonce"},
+    {
+      address: config.verifierAddress,
+      abi: EVENT_VERIFIER_ABI,
+      functionName: "observedUserCount",
+      args: [config.campaignAddress, config.kpiIndex],
+    },
+  ]);
+  const status = campaignState[0] as number;
   if (status === 1) {
-    const start = readContract<bigint>(context, config.campaignAddress, CAMPAIGN_ABI, "startTime");
-    const end = readContract<bigint>(context, config.campaignAddress, CAMPAIGN_ABI, "endTime");
+    const start = campaignState[1] as bigint;
+    const end = campaignState[2] as bigint;
     requireCondition(blockTimestamp >= start && blockTimestamp <= end, "campaign-outside-window");
   } else if (status === 3) {
-    const endedAt = readContract<bigint>(context, config.campaignAddress, CAMPAIGN_ABI, "endedAt");
-    const grace = readContract<bigint>(context, config.campaignAddress, CAMPAIGN_ABI, "CLAIM_GRACE");
+    const endedAt = campaignState[3] as bigint;
+    const grace = campaignState[4] as bigint;
     requireCondition(blockTimestamp <= endedAt + grace, "campaign-claim-grace-closed");
   } else {
     throw new Error("campaign-not-reportable");
   }
 
-  const registryAddress = readContract<Address>(
-    context,
-    config.campaignAddress,
-    CAMPAIGN_ABI,
-    "attributionRegistry",
-  );
+  const registryAddress = campaignState[5] as Address;
   requireCondition(normalizeAddress(registryAddress) !== ZERO_ADDRESS, "missing-attribution-registry");
-  const receiverCursor = readContract<bigint>(context, config.receiverAddress, RECEIVER_ABI, "cursor");
-  const receiverNonce = readContract<bigint>(context, config.receiverAddress, RECEIVER_ABI, "nonce");
-  const observedUserCount = readContract<bigint>(
-    context,
-    config.verifierAddress,
-    EVENT_VERIFIER_ABI,
-    "observedUserCount",
-    [config.campaignAddress, config.kpiIndex],
-  );
+  const receiverCursor = campaignState[6] as bigint;
+  const receiverNonce = campaignState[7] as bigint;
+  const observedUserCount = campaignState[8] as bigint;
 
-  return {blockTimestamp, receiverCursor, receiverNonce, registryAddress, observedUserCount};
+  return {blockTimestamp: reportTimestamp, receiverCursor, receiverNonce, registryAddress, observedUserCount};
 };
 
 type Candidate = {
@@ -367,50 +405,58 @@ export const selectCandidate = (context: ReadContext, state: Preflight): Selecti
   for (let offset = 0n; offset < limit; offset++) {
     const index = (start + offset) % count;
     const nextCursor = (index + 1n) % count;
-    const user = readContract<Address>(
-      context,
-      config.verifierAddress,
-      EVENT_VERIFIER_ABI,
-      "observedUserAt",
-      [config.campaignAddress, config.kpiIndex, index],
-    );
-    const observed = readContract<bigint>(
-      context,
-      config.verifierAddress,
-      EVENT_VERIFIER_ABI,
-      "observedProgressOf",
-      [config.campaignAddress, config.kpiIndex, user],
-    );
-    const credited = readContract<bigint>(
-      context,
-      config.campaignAddress,
-      CAMPAIGN_ABI,
-      "userCreditedOf",
-      [user, config.kpiIndex],
-    );
+    const candidateReads = readContracts(context, [
+      {
+        address: config.verifierAddress,
+        abi: EVENT_VERIFIER_ABI,
+        functionName: "observedUserAt",
+        args: [config.campaignAddress, config.kpiIndex, index],
+      },
+    ]);
+    const user = candidateReads[0] as Address;
+    const progressReads = readContracts(context, [
+      {
+        address: config.verifierAddress,
+        abi: EVENT_VERIFIER_ABI,
+        functionName: "observedProgressOf",
+        args: [config.campaignAddress, config.kpiIndex, user],
+      },
+      {
+        address: config.campaignAddress,
+        abi: CAMPAIGN_ABI,
+        functionName: "userCreditedOf",
+        args: [user, config.kpiIndex],
+      },
+    ]);
+    const observed = progressReads[0] as bigint;
+    const credited = progressReads[1] as bigint;
     if (observed <= credited) continue;
 
-    const sinceBlock = readContract<bigint>(
-      context,
-      config.campaignAddress,
-      CAMPAIGN_ABI,
-      "lastReportBlockOf",
-      [user, config.kpiIndex],
-    );
-    const active = readContract<Hex>(
-      context,
-      state.registryAddress,
-      ATTRIBUTION_ABI,
-      "activePromoter",
-      [config.campaignAddress, user],
-    );
-    const sole = readContract<Hex>(
-      context,
-      state.registryAddress,
-      ATTRIBUTION_ABI,
-      "soleAttributionSince",
-      [config.campaignAddress, user, sinceBlock],
-    );
+    const sinceBlockReads = readContracts(context, [
+      {
+        address: config.campaignAddress,
+        abi: CAMPAIGN_ABI,
+        functionName: "lastReportBlockOf",
+        args: [user, config.kpiIndex],
+      },
+    ]);
+    const sinceBlock = sinceBlockReads[0] as bigint;
+    const attributionReads = readContracts(context, [
+      {
+        address: state.registryAddress,
+        abi: ATTRIBUTION_ABI,
+        functionName: "activePromoter",
+        args: [config.campaignAddress, user],
+      },
+      {
+        address: state.registryAddress,
+        abi: ATTRIBUTION_ABI,
+        functionName: "soleAttributionSince",
+        args: [config.campaignAddress, user, sinceBlock],
+      },
+    ]);
+    const active = attributionReads[0] as Hex;
+    const sole = attributionReads[1] as Hex;
     if (active === ZERO_BYTES32 || active.toLowerCase() !== sole.toLowerCase()) continue;
 
     return {candidate: {user, observed, nextCursor}, nextCursor, scanned: offset + 1n};
@@ -478,7 +524,7 @@ const isIncompatible = (error: unknown): boolean =>
   (INCOMPATIBLE_REASONS.has(error.message) ||
     INCOMPATIBLE_SELECTOR_FAILURES.some((fragment) => error.message.includes(fragment)));
 
-/** Execute one preflight, scan, report-generation, and write cycle. */
+/** Execute one: preflight, scan, report-generation, and write cycle. */
 export const onCronTrigger = (runtime: Runtime<Config>): WorkflowOutcome => {
   let config: ValidatedConfig;
   try {
