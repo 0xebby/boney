@@ -8,7 +8,7 @@
  * The two are deliberately separate processes with separate keys.
  *
  * Trust model: whoever holds `REPORTER_PRIVATE_KEY` is trusted to report honestly.
- *  What it does guarantee is that a project cannot credit itself more than an
+ * What it does guarantee is that a project cannot credit itself more than an
  * independent observer saw.
  */
 import {readFileSync, existsSync} from "node:fs";
@@ -109,14 +109,19 @@ function relayMode(): RelayMode {
 }
 
 function graphEndpoint(): string | undefined {
-  const url = arg("--subgraph-url") ?? process.env.RELAY_SUBGRAPH_URL ?? process.env.NEXT_PUBLIC_SUBGRAPH_URL;
+  const url =
+    arg("--subgraph-url") ??
+    process.env.RELAY_SUBGRAPH_URL ??
+    process.env.NEXT_PUBLIC_SUBGRAPH_URL;
   return url?.trim() || undefined;
 }
 
 function pageCeiling(): number {
   const raw = arg("--graph-max-pages") ?? process.env.RELAY_GRAPH_MAX_PAGES ?? "100";
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid graph page ceiling "${raw}".`);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`Invalid graph page ceiling "${raw}".`);
+  }
   return value;
 }
 
@@ -124,12 +129,17 @@ function pageCeiling(): number {
  * The relayer's key, read the way `indexer.ts:envPrivateKey` reads the project's.
  */
 function reporterKey(): Hex | undefined {
-  if (process.env.REPORTER_PRIVATE_KEY) return process.env.REPORTER_PRIVATE_KEY as Hex;
+  if (process.env.REPORTER_PRIVATE_KEY) {
+    return process.env.REPORTER_PRIVATE_KEY as Hex;
+  }
+
   const path = resolve(REPO_ROOT, ".env");
   if (!existsSync(path)) return undefined;
+
   const line = readFileSync(path, "utf8")
     .split("\n")
     .find((l) => /^\s*REPORTER_PRIVATE_KEY\s*=/.test(l));
+
   const value = line?.split("=").slice(1).join("=").trim().replace(/^["']|["']$/g, "");
   return (value || undefined) as Hex | undefined;
 }
@@ -160,6 +170,7 @@ async function fetchLogs(
 
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
+
     const logs = (await client.request({
       method: "eth_getLogs",
       params: [logRequest(address, topic0, source, chunk.from, chunk.to)],
@@ -170,9 +181,15 @@ async function fetchLogs(
     for (const log of logs) {
       if (log.topics[0]?.toLowerCase() !== topic0.toLowerCase()) continue;
       if (source && !matchesTopicFilter(log, source)) continue;
-      out.push({topics: log.topics, data: log.data, blockNumber: BigInt(log.blockNumber)});
+
+      out.push({
+        topics: log.topics,
+        data: log.data,
+        blockNumber: BigInt(log.blockNumber),
+      });
     }
   }
+
   if (chunks.length > 0) progressDone();
 
   return out;
@@ -187,8 +204,8 @@ async function main(): Promise<void> {
 
   const campaignArg = arg("--campaign");
   if (!campaignArg) throw new Error("--campaign <address> is required");
-  const campaign = getAddress(campaignArg);
 
+  const campaign = getAddress(campaignArg);
   const kpiIndex = BigInt(arg("--kpi") ?? "0");
 
   const client = createPublicClient({
@@ -197,15 +214,18 @@ async function main(): Promise<void> {
       batch: {batchSize: RPC_BATCH_SIZE, wait: 8},
     }),
   }) as PublicClient;
+
   const chainId = await client.getChainId();
 
   const verifierArg = arg("--verifier") ?? getDeployment(chainId)?.eventMetricKpiVerifier;
+
   if (!verifierArg) {
     throw new Error(
       `No EventMetricKpiVerifier known for chain ${chainId}.\n` +
         `Pass --verifier <address>, or deploy and run \`pnpm deployments\`.`,
     );
   }
+
   const verifier = getAddress(verifierArg);
 
   console.log(`Relaying KPI ${kpiIndex} of ${campaign}`);
@@ -256,7 +276,7 @@ async function main(): Promise<void> {
 
   // ── drift guard ────────────────────────────────────────────────
 
-  // The indexer reads its event source from `KpiSpec.params` while this reads `KpiConfig`. 
+  // The indexer reads its event source from `KpiSpec.params` while this reads `KpiConfig`.
   // If the two ever name different events the cap sits at 0 and every report is a silent no-op.
   const spec = await client.readContract({
     address: campaign,
@@ -264,7 +284,9 @@ async function main(): Promise<void> {
     functionName: "kpi",
     args: [kpiIndex],
   });
+
   const indexerSource = decodeEventSource(spec.params);
+
   const drift = describeConfigDrift({
     event,
     verifierTopic0: topic0,
@@ -279,6 +301,7 @@ async function main(): Promise<void> {
     indexerAmountMode: indexerSource?.amountMode,
     indexerActorTopic: indexerSource?.actorTopic,
   });
+
   if (drift) {
     throw new Error(
       `Config drift between the verifier and the KPI's params:\n  ${drift}\n\n` +
@@ -308,11 +331,14 @@ async function main(): Promise<void> {
   });
 
   let graphMeta: Awaited<ReturnType<typeof readRelayGraphMeta>> | undefined;
+
   if (mode !== "rpc") {
     if (!subgraphUrl) {
       throw new Error(`${mode} mode requires --subgraph-url or RELAY_SUBGRAPH_URL.`);
     }
+
     graphMeta = await readRelayGraphMeta({url: subgraphUrl});
+
     const snapshot = relayGraphSnapshot({
       indexedBlock: graphMeta.indexedBlock,
       head,
@@ -320,8 +346,11 @@ async function main(): Promise<void> {
       windowEndBlock: config.windowEndBlock,
       checkpoint,
     });
+
     if (snapshot !== null && range.scan && snapshot !== range.toBlock) {
-      throw new Error(`Subgraph snapshot ${snapshot} does not match RPC pass end ${range.toBlock}.`);
+      throw new Error(
+        `Subgraph snapshot ${snapshot} does not match RPC pass end ${range.toBlock}.`,
+      );
     }
   }
 
@@ -331,6 +360,7 @@ async function main(): Promise<void> {
     console.log(`\n  ${range.reason}`);
     return;
   }
+
   console.log(`  scanning:   ${range.fromBlock} → ${range.toBlock}`);
 
   // ── scan and decode ────────────────────────────────────────────
@@ -341,13 +371,22 @@ async function main(): Promise<void> {
       abi: CampaignAbi,
       functionName: "attributionRegistry",
     }),
-    client.readContract({address: campaign, abi: CampaignAbi, functionName: "startTime"}),
+    client.readContract({
+      address: campaign,
+      abi: CampaignAbi,
+      functionName: "startTime",
+    }),
   ]);
 
   let graphFold: RelayGraphFold | undefined;
+
   if (mode !== "rpc") {
     const snapshotBlock = await client.getBlock({blockNumber: range.toBlock});
-    if (!snapshotBlock.hash) throw new Error(`RPC block ${range.toBlock} has no hash.`);
+
+    if (!snapshotBlock.hash) {
+      throw new Error(`RPC block ${range.toBlock} has no hash.`);
+    }
+
     const history = await readRelayGraphHistory({
       url: subgraphUrl!,
       campaign,
@@ -361,13 +400,17 @@ async function main(): Promise<void> {
       source: indexerSource,
       maxPages: maxGraphPages,
     });
+
     graphFold = foldRelayGraphHistory({
       history,
       event,
       config,
       campaignStartTime: BigInt(startTime),
     });
-    console.log(`\n  graph: ${history.logs.length} action(s), ${history.touches.length} touch(es)`);
+
+    console.log(
+      `\n  graph: ${history.logs.length} action(s), ${history.touches.length} touch(es)`,
+    );
   }
 
   // Subgraph mode has completed and validated its whole historical pass before any total read.
@@ -376,100 +419,125 @@ async function main(): Promise<void> {
   let blockTimestamps: BlockTimestamps = new Map();
   let cachedOnEntry = 0;
 
-  if (mode !== "subgraph") {
-    blockTimestamps = loadTimestampCache(chainId);
-    cachedOnEntry = blockTimestamps.size;
-    logs = await fetchLogs(
-    client,
-    config.targetContract,
-    topic0,
-    indexerSource,
-    range.fromBlock,
-    range.toBlock,
-    blockTimestamps,
-  );
-  const {decoded, undecodable} = decodeUserEvents(logs, event, config);
-
-  console.log(`\n  ${logs.length} matching log(s), ${decoded.length} decoded`);
-  if (undecodable > 0) {
-    console.log(`  ${undecodable} log(s) failed to decode — topic matched but the shape did not`);
-  }
-
-  // ── attribution filtering ──────────────────────────────────────
-
+  // These must live outside the mode check because they are used after it.
   const deltas = new Map<string, bigint>();
   let excludedPreAttribution = 0;
   let unattributed: string[] = [];
 
-  if (decoded.length > 0) {
-    const [registry, startTime] = await Promise.all([
-      client.readContract({
-        address: campaign,
-        abi: CampaignAbi,
-        functionName: "attributionRegistry",
-      }),
-      client.readContract({address: campaign, abi: CampaignAbi, functionName: "startTime"}),
-    ]);
+  if (mode !== "subgraph") {
+    blockTimestamps = loadTimestampCache(chainId);
+    cachedOnEntry = blockTimestamps.size;
 
-    const maxDuration = (await client.readContract({
-      address: registry,
-      abi: AttributionRegistryAbi,
-      functionName: "effectiveMaxDuration",
-      args: [campaign],
-    })) as bigint;
-
-    // Every touch that could still cover creditable work, scanned from before the activity range.
-    const touchFloor = await blockAtTimestamp(
-      async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
-      earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
-      BigInt(readStartBlock(chainId)),
+    logs = await fetchLogs(
+      client,
+      config.targetContract,
+      topic0,
+      indexerSource,
+      range.fromBlock,
       range.toBlock,
       blockTimestamps,
     );
-    const touches: TouchLog[] = [];
-    for (const chunk of blockChunks(touchFloor, range.toBlock, MAX_LOG_RANGE)) {
-      const touchLogs = await client.getLogs({
+
+    const decodeResult = decodeUserEvents(logs, event, config);
+    decoded = decodeResult.decoded;
+
+    console.log(`\n  ${logs.length} matching log(s), ${decoded.length} decoded`);
+
+    if (decodeResult.undecodable > 0) {
+      console.log(
+        `  ${decodeResult.undecodable} log(s) failed to decode — topic matched but the shape did not`,
+      );
+    }
+
+    // ── attribution filtering ──────────────────────────────────────
+
+    if (decoded.length > 0) {
+      const maxDuration = (await client.readContract({
         address: registry,
-        event: TOUCH_STORED,
-        args: {campaign},
-        fromBlock: chunk.from,
-        toBlock: chunk.to,
-      });
-      harvestLogTimestamps(touchLogs, blockTimestamps);
-      for (const log of touchLogs) {
-        if (!log.args.user || !log.args.promoterId) continue;
-        touches.push({
-          user: getAddress(log.args.user),
-          promoterId: log.args.promoterId,
-          signedAt: log.args.signedAt ?? BigInt(0),
-          expiresAt: log.args.expiresAt ?? BigInt(0),
-          blockNumber: log.blockNumber ?? BigInt(0),
+        abi: AttributionRegistryAbi,
+        functionName: "effectiveMaxDuration",
+        args: [campaign],
+      })) as bigint;
+
+      // Every touch that could still cover creditable work, scanned from before the activity range.
+      const touchFloor = await blockAtTimestamp(
+        async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
+        earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
+        BigInt(readStartBlock(chainId)),
+        range.toBlock,
+        blockTimestamps,
+      );
+
+      const touches: TouchLog[] = [];
+
+      for (const chunk of blockChunks(touchFloor, range.toBlock, MAX_LOG_RANGE)) {
+        const touchLogs = await client.getLogs({
+          address: registry,
+          event: TOUCH_STORED,
+          args: {campaign},
+          fromBlock: chunk.from,
+          toBlock: chunk.to,
+        });
+
+        harvestLogTimestamps(touchLogs, blockTimestamps);
+
+        for (const log of touchLogs) {
+          if (!log.args.user || !log.args.promoterId) continue;
+
+          touches.push({
+            user: getAddress(log.args.user),
+            promoterId: log.args.promoterId,
+            signedAt: log.args.signedAt ?? BigInt(0),
+            expiresAt: log.args.expiresAt ?? BigInt(0),
+            blockNumber: log.blockNumber ?? BigInt(0),
+          });
+        }
+      }
+
+      const attribution = attributionLookup(
+        buildAttributionWindows(touches),
+        BigInt(startTime),
+      );
+
+      // One read per distinct block, and only for the blocks nothing has supplied yet.
+      const wanted = uniqueBlocks(decoded);
+      const missing = missingTimestamps(wanted, blockTimestamps);
+
+      let readSoFar = 0;
+
+      for (const batch of timestampBatches(missing, READ_CONCURRENCY)) {
+        readSoFar += batch.length;
+        progress(`reading ${readSoFar}/${missing.length} block timestamps`);
+
+        const read = await Promise.all(
+          batch.map((blockNumber) => client.getBlock({blockNumber})),
+        );
+
+        read.forEach((block, j) => {
+          blockTimestamps.set(batch[j], block.timestamp);
         });
       }
+
+      if (missing.length > 0) progressDone();
+
+      console.log(
+        `  ${wanted.length} distinct block(s), ${missing.length} timestamp read(s) needed` +
+          ` (${cachedOnEntry} cached from earlier passes)`,
+      );
+
+      const aggregate = aggregateDeltas({
+        decoded,
+        attribution,
+        blockTimestamps,
+      });
+
+      for (const [user, delta] of aggregate.deltas) {
+        deltas.set(user, delta);
+      }
+
+      excludedPreAttribution = aggregate.excludedPreAttribution;
+      unattributed = aggregate.unattributed;
     }
-    const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
-
-    // One read per distinct block, and only for the blocks nothing has supplied yet.
-    const wanted = uniqueBlocks(decoded);
-    const missing = missingTimestamps(wanted, blockTimestamps);
-    let readSoFar = 0;
-    for (const batch of timestampBatches(missing, READ_CONCURRENCY)) {
-      readSoFar += batch.length;
-      progress(`reading ${readSoFar}/${missing.length} block timestamps`);
-      const read = await Promise.all(batch.map((blockNumber) => client.getBlock({blockNumber})));
-      read.forEach((block, j) => blockTimestamps.set(batch[j], block.timestamp));
-    }
-    if (missing.length > 0) progressDone();
-
-    console.log(
-      `  ${wanted.length} distinct block(s), ${missing.length} timestamp read(s) needed` +
-        ` (${cachedOnEntry} cached from earlier passes)`,
-    );
-
-    const result = aggregateDeltas({decoded, attribution, blockTimestamps});
-    for (const [user, delta] of result.deltas) deltas.set(user, delta);
-    excludedPreAttribution = result.excludedPreAttribution;
-    unattributed = result.unattributed;
   }
 
   // Stored before the totals reads and the transactions, so a failure past this point still leaves the next pass the timestamps this one paid for.
@@ -481,17 +549,21 @@ async function main(): Promise<void> {
         `their activity is not creditable to any promoter`,
     );
   }
+
   if (excludedPreAttribution > 0) {
     console.log(`  ${excludedPreAttribution} log(s) excluded as unattributed activity`);
   }
+
   console.log(`  creditable activity for ${deltas.size} user(s)`);
 
   // ── totals ─────────────────────────────────────────────────────
 
   const current = new Map<string, bigint>();
   const credited = [...deltas.keys()];
+
   for (let i = 0; i < credited.length; i += READ_CONCURRENCY) {
     const batch = credited.slice(i, i + READ_CONCURRENCY);
+
     const totals = await Promise.all(
       batch.map((user) =>
         client.readContract({
@@ -502,12 +574,16 @@ async function main(): Promise<void> {
         }),
       ),
     );
+
     totals.forEach((total, j) => current.set(batch[j], total));
   }
 
   const {users, totals} = nextTotals(deltas, current);
+
   for (const [i, user] of users.entries()) {
-    console.log(`    ${user}: ${current.get(user.toLowerCase()) ?? BigInt(0)} → ${totals[i]}`);
+    console.log(
+      `    ${user}: ${current.get(user.toLowerCase()) ?? BigInt(0)} → ${totals[i]}`,
+    );
   }
 
   const batches = planReportBatches({
@@ -518,13 +594,16 @@ async function main(): Promise<void> {
   });
 
   if (dryRun) {
-    console.log(`\n  --dry-run: would send ${batches.length} transaction(s), nothing sent.`);
+    console.log(
+      `\n  --dry-run: would send ${batches.length} transaction(s), nothing sent.`,
+    );
     return;
   }
 
   // ── report ─────────────────────────────────────────────────────
 
   const pk = reporterKey();
+
   if (!pk) {
     throw new Error(
       `Reporting needs the relayer's key. Set REPORTER_PRIVATE_KEY in ${resolve(REPO_ROOT, ".env")},\n` +
@@ -533,7 +612,11 @@ async function main(): Promise<void> {
   }
 
   const account = privateKeyToAccount(pk);
-  const wallet = createWalletClient({account, transport: http(rpcUrl)});
+  const wallet = createWalletClient({
+    account,
+    transport: http(rpcUrl),
+  });
+
   console.log(`\n  reporting as ${account.address}`);
 
   const onChainReporter = await client.readContract({
@@ -541,6 +624,7 @@ async function main(): Promise<void> {
     abi: EventMetricKpiVerifierAbi,
     functionName: "reporter",
   });
+
   if (getAddress(onChainReporter) !== account.address) {
     throw new Error(
       `This key is not the verifier's reporter.\n` +
@@ -551,6 +635,7 @@ async function main(): Promise<void> {
 
   for (const [i, batch] of batches.entries()) {
     const empty = batch.users.length === 0;
+
     const hash = empty
       ? await wallet.writeContract({
           chain: null,
@@ -568,7 +653,9 @@ async function main(): Promise<void> {
         });
 
     const label = empty ? "checkpoint only" : `${batch.users.length} user(s)`;
+
     console.log(`    tx ${i + 1}/${batches.length} (${label}): ${hash}`);
+
     await client.waitForTransactionReceipt({hash});
   }
 
