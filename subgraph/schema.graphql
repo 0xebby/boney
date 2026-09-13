@@ -85,6 +85,22 @@ type Touch @entity(immutable: false) {
   blockNumber: BigInt!
 }
 
+"""One accepted attribution touch, retained in chain order."""
+type TouchHistory @entity(immutable: true) {
+  "Fixed-width block and log position, followed by the transaction hash."
+  id: ID!
+  campaign: Campaign!
+  user: Bytes!
+  promoterId: Bytes!
+  signedAt: BigInt!
+  expiresAt: BigInt!
+  relayer: Bytes!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
+  logIndex: BigInt!
+}
+
 """A promoter who joined a campaign. Replaces the `PromoterJoined` log scan."""
 type Promoter @entity(immutable: false) {
   "`<campaign>-<promoterId>`."
@@ -105,17 +121,50 @@ attribution can change after the fact via a promoter switch. Resolving the campa
 would bake in an answer that later becomes wrong. Consumers filter by `source` + `topic0` + `user`.
 """
 type KpiAction @entity(immutable: true) {
-  "`<txHash>-<logIndex>`."
+  "Fixed-width block and log position, followed by the transaction hash."
   id: ID!
   source: Bytes!
   topic0: Bytes!
-  "The acting wallet, per the preset's actor topic."
+  topic1: Bytes
+  topic2: Bytes
+  topic3: Bytes
+  "ABI-encoded unindexed event parameters."
+  data: Bytes!
+  "The compiled event layout used to reconstruct the log."
+  eventShape: String!
+  "The acting wallet, normalized from the compiled event layout."
   user: Bytes!
-  "Raw, unscaled. 1 for count-mode presets."
+  "Raw summable value where supported, otherwise 1."
   value: BigInt!
   blockNumber: BigInt!
   "Block timestamp — the field the pre-attribution filter compares against `Touch.signedAt`."
   timestamp: BigInt!
+  txHash: Bytes!
+  logIndex: BigInt!
+}
+
+"""
+Exact indexing coverage for one KPI event-source commitment.
+
+A covered row proves that the concrete compiled shape was selected and spawned. An uncovered row
+names a decoded commitment the current manifest cannot index.
+"""
+type SourceCoverage @entity(immutable: true) {
+  "The full source commitment, including filter fields."
+  id: ID!
+  campaign: Campaign!
+  kpiIndex: Int!
+  source: Bytes!
+  topic0: Bytes!
+  actorTopic: Int!
+  amountMode: Int!
+  scale: BigInt!
+  filterTopic: Int!
+  filterValue: Bytes!
+  eventShape: String
+  covered: Boolean!
+  spawnedAtBlock: BigInt
+  recordedAtBlock: BigInt!
 }
 
 """

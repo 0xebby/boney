@@ -1,4 +1,4 @@
-import {BigInt, Bytes, ethereum} from "@graphprotocol/graph-ts";
+import {Address, BigInt, Bytes, crypto, ethereum} from "@graphprotocol/graph-ts";
 
 /**
  * The AssemblyScript half of `web/src/lib/kpiSource.ts`.
@@ -8,6 +8,13 @@ import {BigInt, Bytes, ethereum} from "@graphprotocol/graph-ts";
 /** `AMOUNT_MODE` in `kpiSource.ts`. */
 export const AMOUNT_MODE_COUNT: i32 = 0;
 export const AMOUNT_MODE_DATA_WORD_0: i32 = 1;
+
+export const EVENT_SHAPE_ERC20_TRANSFER: string = "erc20-transfer";
+export const EVENT_SHAPE_ERC721_TRANSFER: string = "erc721-transfer";
+export const EVENT_SHAPE_WETH_DEPOSIT: string = "weth-deposit";
+export const EVENT_SHAPE_WETH_WITHDRAWAL: string = "weth-withdrawal";
+export const EVENT_SHAPE_AAVE_SUPPLY: string = "aave-supply";
+export const EVENT_SHAPE_SYGMA_DEPOSIT: string = "sygma-deposit";
 
 /** `keccak256("Transfer(address,address,uint256)")`. */
 export const TRANSFER_TOPIC0: string =
@@ -150,24 +157,39 @@ export function templateFor(src: EventSource): string | null {
   const sum = src.amountMode == AMOUNT_MODE_DATA_WORD_0;
 
   if (topic0 == TRANSFER_TOPIC0 && src.actorTopic == 2) {
-    // ERC-20/721 `Transfer` crediting the recipient. Two modes, two templates: summing `value` is a
-    // volume KPI, counting logs is the `erc721-mint` preset, where the third topic is a token id and
-    // summing ids would be meaningless.
-    return sum ? "TransferToActor" : "TransferToActorCount";
+    return sum ? "Erc20Transfer" : "Erc721Transfer";
   }
 
-  // WETH-shaped `Deposit`/`Withdrawal`: one indexed address, one `uint256` in data. Count mode is not
-  // offered — a "how many deposits" KPI is a legitimate thing to want, but no preset declares it, and
-  // guessing here would index a shape nothing on the TypeScript side knows how to price.
-  if (topic0 == DEPOSIT_TOPIC0 && src.actorTopic == 1 && sum) return "WethDeposit";
-  if (topic0 == WITHDRAWAL_TOPIC0 && src.actorTopic == 1 && sum) return "WethWithdrawal";
-
-  // Real third-party protocols. Both are COUNT-only on purpose, and `sum` is rejected rather than
-  // quietly indexed: `amountMode` can only read the *first* data word, and neither event puts an
-  // amount there — Aave's first word is `user` and Sygma's amount is buried inside `data`. A SUM KPI
-  // over either would have the project and Boney denominating in different things.
+  if (topic0 == DEPOSIT_TOPIC0 && src.actorTopic == 1) return "WethDeposit";
+  if (topic0 == WITHDRAWAL_TOPIC0 && src.actorTopic == 1) return "WethWithdrawal";
   if (topic0 == AAVE_SUPPLY_TOPIC0 && src.actorTopic == 2 && !sum) return "AaveSupply";
   if (topic0 == SYGMA_DEPOSIT_TOPIC0 && src.actorTopic == 1 && !sum) return "SygmaDeposit";
 
   return null;
+}
+
+/** Concrete event layout emitted by a manifest template. */
+export function eventShapeForTemplate(template: string): string | null {
+  if (template == "Erc20Transfer") return EVENT_SHAPE_ERC20_TRANSFER;
+  if (template == "Erc721Transfer") return EVENT_SHAPE_ERC721_TRANSFER;
+  if (template == "WethDeposit") return EVENT_SHAPE_WETH_DEPOSIT;
+  if (template == "WethWithdrawal") return EVENT_SHAPE_WETH_WITHDRAWAL;
+  if (template == "AaveSupply") return EVENT_SHAPE_AAVE_SUPPLY;
+  if (template == "SygmaDeposit") return EVENT_SHAPE_SYGMA_DEPOSIT;
+  return null;
+}
+
+/** Stable identity for the complete decoded KPI source commitment. */
+export function sourceCommitmentId(campaign: Bytes, kpiIndex: i32, src: EventSource): string {
+  const values = new Array<ethereum.Value>(7);
+  values[0] = ethereum.Value.fromAddress(changetype<Address>(src.source));
+  values[1] = ethereum.Value.fromFixedBytes(src.topic0);
+  values[2] = ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(src.actorTopic));
+  values[3] = ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(src.amountMode));
+  values[4] = ethereum.Value.fromUnsignedBigInt(src.scale);
+  values[5] = ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(src.filterTopic));
+  values[6] = ethereum.Value.fromFixedBytes(src.filterValue);
+  const encoded = ethereum.encode(ethereum.Value.fromTuple(changetype<ethereum.Tuple>(values)));
+  if (encoded == null) return campaign.toHexString() + "-" + kpiIndex.toString();
+  return crypto.keccak256(encoded as Bytes).toHexString();
 }

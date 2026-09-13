@@ -1,71 +1,46 @@
-import {BigInt, Bytes} from "@graphprotocol/graph-ts";
-import {Transfer} from "../generated/templates/TransferToActor/ERC20";
-import {Transfer as TransferCount} from "../generated/templates/TransferToActorCount/ERC20";
-import {KpiAction} from "../generated/schema";
-import {TRANSFER_TOPIC0} from "./kpiSource";
+import {BigInt, Bytes, ethereum} from "@graphprotocol/graph-ts";
+import {Transfer as Erc20Transfer} from "../generated/templates/Erc20Transfer/ERC20";
+import {Transfer as Erc721Transfer} from "../generated/templates/Erc721Transfer/ERC721";
+import {addressTopic, eventData, uintTopic, writeAction} from "./action";
+import {
+  EVENT_SHAPE_ERC20_TRANSFER,
+  EVENT_SHAPE_ERC721_TRANSFER,
+  TRANSFER_TOPIC0,
+} from "./kpiSource";
 
-/**
- * The `Transfer`-shaped presets: ERC-20/721 `Transfer` crediting the recipient.
- *
- * Two handlers because the amount mode is baked into the preset, not read at runtime:
- *
- *  - `TransferToActor` sums `value` — a volume KPI.
- *  - `TransferToActorCount` contributes 1 per log — the `erc721-mint` preset, where the third topic is
- *    a token id and summing ids would be meaningless.
- *
- * Two things both handlers deliberately do not do:
- *
- *  - **No scaling.** `value` is stored raw, in the token's own base units. `Kpi.scale` is carried on
- *    the KPI for the consumer to apply, mirroring `EventMetricKpiVerifier`, which also stores raw
- *    totals and divides only inside `verify`. Scaling per log would floor every sub-scale transfer to
- *    zero — the bug `aggregateByActor` has a comment about, and the one that shipped in the fixture.
- *  - **No attribution check.** Whether an action is creditable depends on the acting wallet's
- *    `Touch.signedAt`, which can move later via a promoter switch. Deciding it now would bake in an
- *    answer a re-signature invalidates. The filter runs at query time, in `relayCore.aggregateDeltas`.
- */
+/** Stores one ERC-20 transfer with its raw amount. */
+export function handleErc20Transfer(event: Erc20Transfer): void {
+  const topics = new Array<Bytes>(2);
+  topics[0] = addressTopic(event.params.from);
+  topics[1] = addressTopic(event.params.to);
+  const values = new Array<ethereum.Value>(1);
+  values[0] = ethereum.Value.fromUnsignedBigInt(event.params.value);
 
-export function handleTransferToActor(event: Transfer): void {
-  write(
-    event.transaction.hash,
-    event.logIndex,
-    event.address,
+  writeAction(
+    event,
+    TRANSFER_TOPIC0,
+    topics,
+    eventData(values),
+    EVENT_SHAPE_ERC20_TRANSFER,
     event.params.to,
     event.params.value,
-    event.block.number,
-    event.block.timestamp,
   );
 }
 
-export function handleTransferToActorCount(event: TransferCount): void {
-  write(
-    event.transaction.hash,
-    event.logIndex,
-    event.address,
+/** Stores one ERC-721 transfer with its token id as raw evidence. */
+export function handleErc721Transfer(event: Erc721Transfer): void {
+  const topics = new Array<Bytes>(3);
+  topics[0] = addressTopic(event.params.from);
+  topics[1] = addressTopic(event.params.to);
+  topics[2] = uintTopic(event.params.tokenId);
+
+  writeAction(
+    event,
+    TRANSFER_TOPIC0,
+    topics,
+    Bytes.empty(),
+    EVENT_SHAPE_ERC721_TRANSFER,
     event.params.to,
-    // Count mode: the payload is ignored entirely, so every matching log contributes exactly 1.
     BigInt.fromI32(1),
-    event.block.number,
-    event.block.timestamp,
   );
-}
-
-function write(
-  txHash: Bytes,
-  logIndex: BigInt,
-  source: Bytes,
-  user: Bytes,
-  value: BigInt,
-  blockNumber: BigInt,
-  timestamp: BigInt,
-): void {
-  const action = new KpiAction(txHash.toHexString() + "-" + logIndex.toString());
-  action.source = source;
-  action.topic0 = Bytes.fromHexString(TRANSFER_TOPIC0);
-  action.user = user;
-  action.value = value;
-  action.blockNumber = blockNumber;
-  // The field the pre-attribution filter compares against `Touch.signedAt`. Free here; one `getBlock`
-  // per distinct block in the RPC path this replaces.
-  action.timestamp = timestamp;
-  action.save();
 }

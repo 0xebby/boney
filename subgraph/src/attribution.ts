@@ -1,5 +1,6 @@
+import {BigInt, ethereum} from "@graphprotocol/graph-ts";
 import {TouchStored, PromoterRegistered} from "../generated/AttributionRegistry/AttributionRegistry";
-import {Promoter, Touch} from "../generated/schema";
+import {Promoter, Touch, TouchHistory} from "../generated/schema";
 
 /**
  * Attribution — who a user's activity is creditable to, and from when.
@@ -30,8 +31,20 @@ import {Promoter, Touch} from "../generated/schema";
 export function handleTouchStored(event: TouchStored): void {
   const campaignId = event.params.campaign.toHexString();
   const id = campaignId + "-" + event.params.user.toHexString();
-
   const signedAt = event.params.signedAt;
+
+  const history = new TouchHistory(eventId(event));
+  history.campaign = campaignId;
+  history.user = event.params.user;
+  history.promoterId = event.params.promoterId;
+  history.signedAt = signedAt;
+  history.expiresAt = event.params.expiresAt;
+  history.relayer = event.params.relayer;
+  history.blockNumber = event.block.number;
+  history.timestamp = event.block.timestamp;
+  history.txHash = event.transaction.hash;
+  history.logIndex = event.logIndex;
+  history.save();
 
   const existing = Touch.load(id);
   if (existing != null && existing.signedAt.ge(signedAt)) return;
@@ -64,4 +77,15 @@ export function handlePromoterRegistered(event: PromoterRegistered): void {
   promoter.campaign = campaignId;
   promoter.promoterId = event.params.promoterId;
   promoter.save();
+}
+
+/** Chronological identity for one Ethereum log. */
+function eventId(event: ethereum.Event): string {
+  return pad(event.block.number, 32) + "-" + pad(event.logIndex, 16) + "-" + event.transaction.hash.toHexString();
+}
+
+function pad(value: BigInt, width: i32): string {
+  let result = value.toString();
+  while (result.length < width) result = "0" + result;
+  return result;
 }

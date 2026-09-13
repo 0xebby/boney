@@ -117,10 +117,11 @@ claim at it — **an adapter can discount a report but never inflate one.**
 
 ### Automated reporting with Chainlink CRE
 
-The EventMetric relayer remains the observation authority. A CRE cron automates the claim path for
-guarded, non-aggregate KPIs after observed totals exist. It scans a bounded circular slice of observed
-users and selects only a user whose observed progress exceeds credited progress and whose unreported
-span has one active promoter.
+The EventMetric relayer remains the observation authority. It derives finalized activity and historical
+attribution, then writes cumulative ceilings to `EventMetricKpiVerifier`. A CRE cron automates the claim
+path for guarded, non-aggregate KPIs after those totals exist. It scans a bounded circular slice of
+observed users and selects only a user whose observed progress exceeds credited progress and whose
+unreported span has one active promoter.
 
 Each campaign/KPI pair uses an immutable `BoneyCreReceiver`. The Keystone forwarder delivers a
 versioned report with a nonce, expiry, next cursor, and optionally one cumulative user total. The
@@ -129,15 +130,30 @@ receiver checks the forwarder, workflow identity, target contracts, nonce, and e
 advance quiet scans so a fixed prefix cannot starve later users.
 
 ```text
+Graph-node → immutable touches + source activity → EventMetric relayer
 EventMetric relayer → EventMetricKpiVerifier
 CRE cron → signed report → Keystone forwarder → BoneyCreReceiver
          → Campaign.reportUserAction → inline settlement
 ```
 
-CRE does not replace `eth_getLogs` or construct per-action evidence. The relayer runs first, ambiguous
-attribution stays with the evidence-bearing indexer, and preflight rejects aggregate, ungated, or
-second-verifier KPIs. The package is `boneyard/boneyard-cre-workflow`; its committed simulation and
-production configs keep contract addresses at zero until an operator supplies reviewed values.
+The relay has three explicit historical-source modes. `rpc` retains complete `eth_getLogs` scanning for
+operator rollback. `shadow` computes independent RPC and subgraph plans over the same finalized range,
+compares actions, attribution, deltas, totals, and checkpoint, and permits only the RPC plan to write.
+`subgraph` reads immutable facts from one block-pinned Graph snapshot and performs no historical log or
+block-timestamp scan. A Graph failure never switches sources inside a pass; recovery is a fresh `rpc`
+invocation from the unchanged on-chain checkpoint.
+
+The subgraph path is fail closed. Exact source-shape coverage must predate the KPI range, `_meta` must be
+healthy and caught up to the intended safe block, every query page is pinned to that block, and its hash
+must match RPC. Partial responses, malformed or duplicate rows, pagination limits, missing coverage,
+indexing errors, lag, and hash mismatch all abort before totals or checkpoint writes. Raw topics and data
+still pass through the relay's ABI, filter, attribution, scaling, and aggregation logic; Graph mappings do
+not precompute Campaign-specific credit.
+
+The relayer runs first, ambiguous attribution stays with the evidence-bearing indexer, and CRE preflight
+rejects aggregate, ungated, or second-verifier KPIs. The CRE package is
+`boneyard/boneyard-cre-workflow`; its committed simulation and production configs keep contract addresses
+at zero until an operator supplies reviewed values.
 
 The verifier a campaign should point at is `GuardedKpiVerifier`, which composes:
 
