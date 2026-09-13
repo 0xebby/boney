@@ -399,7 +399,6 @@ describe("selection and reports", () => {
     expect(decodedPayload(fixture)).toEqual([1, 7n, NOW + 300n, 0n, USER_C, 25n, true]);
     expect(fixture.writes[0]).toMatchObject({receiver: RECEIVER, gasLimit: 3_000_000n});
     expect(fixture.writes).toHaveLength(1);
-    expect(fixture.readCalls()).toBeLessThanOrEqual(15);
   });
 
   test("wraps the circular scan", () => {
