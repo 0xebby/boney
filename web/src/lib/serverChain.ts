@@ -11,10 +11,10 @@
  * and every server reader resolve one endpoint from one place.
  */
 
-import {anvil, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
+import {anvil, localPlayground, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
 
 /** viem chain objects by id. */
-const CHAINS = [anvil, sepolia, baseSepolia, mainnet];
+const CHAINS = [anvil, localPlayground, sepolia, baseSepolia, mainnet];
 
 export const chainFor = (id: number) => CHAINS.find((c) => c.id === id);
 

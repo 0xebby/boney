@@ -3,27 +3,12 @@
  *
  * Usage: pnpm relay --campaign <address> --kpi <index> [--rpc <url>] [--verifier <address>] [--dry-run]
  *
- * The independent half of KPI verification. `indexer.ts` reports what a *project* claims; this
- * reports what Boney *observed*, and a claim is capped at the smaller of the two. The two are
- * deliberately separate processes with separate keys — a single process doing both would make the
- * cap a formality.
+ * The independent half of KPI verification. `indexer.ts` reports what a *project* claims;
+ * relayer.ts reports what Boney *observed*, and a claim is capped at the smaller of the two.
+ * The two are deliberately separate processes with separate keys.
  *
- * Deliberately thin, the same way `indexer.ts` is: decoding, attribution filtering, aggregation and
- * batch planning all live in `lib/relayCore.ts` where fixture logs prove them. This file is RPC
- * pagination, key handling, and transaction sending.
- *
- * Three properties worth stating plainly:
- *
- *  - **Stateless.** There is no cursor file. The checkpoint lives on chain (`lastScannedBlock`), so
- *    any instance on any machine resumes exactly where the last one stopped. Losing this host costs
- *    nothing.
- *  - **Bounded on chain.** `reportBatch` rejects a checkpoint past `windowEndBlock`, so even a buggy
- *    run cannot report past the campaign's real reporting close.
- *  - **Retry-safe.** A run split across transactions advances the checkpoint only on the last one, so
- *    a partial failure leaves it untouched and the whole run can simply be repeated.
- *
- * Trust model: whoever holds `REPORTER_PRIVATE_KEY` is trusted to report honestly. This is not a
- * trustless oracle. What it does guarantee is that a project cannot credit itself more than an
+ * Trust model: whoever holds `REPORTER_PRIVATE_KEY` is trusted to report honestly.
+ *  What it does guarantee is that a project cannot credit itself more than an
  * independent observer saw.
  */
 import {readFileSync, existsSync} from "node:fs";
@@ -40,13 +25,8 @@ import {
 import {privateKeyToAccount} from "viem/accounts";
 import {CampaignAbi, EventMetricKpiVerifierAbi, AttributionRegistryAbi} from "../src/lib/abis";
 import {getDeployment} from "../src/lib/chains";
-import {
-  decodeEventSource,
-  matchesTopicFilter,
-  topicFilterArray,
-  type EventSource,
-} from "../src/lib/kpiSource";
-import {blockChunks} from "../src/lib/indexerCore";
+import {decodeEventSource, matchesTopicFilter, type EventSource} from "../src/lib/kpiSource";
+import {blockChunks, logRequest, type RawLog} from "../src/lib/indexerCore";
 import {
   attributionLookup,
   buildAttributionWindows,
@@ -60,6 +40,13 @@ import {
   type BlockTimestamps,
 } from "../src/lib/blockTimestamps";
 import {TOUCH_STORED} from "../src/lib/events";
+import {
+  foldRelayGraphHistory,
+  readRelayGraphHistory,
+  readRelayGraphMeta,
+  relayGraphSnapshot,
+  type RelayGraphFold,
+} from "../src/lib/relayGraph";
 import {progress, progressDone} from "./progress";
 import {loadTimestampCache, saveTimestampCache} from "./timestampCache";
 import {
@@ -82,35 +69,28 @@ const REPO_ROOT = resolve(here, "../..");
 
 /**
  * Base's public endpoint rejects wider `eth_getLogs` ranges outright:
- * `-32602: query exceeds max block range 2000`. Same constant `indexer.ts` uses, same reason.
  */
 const MAX_LOG_RANGE = BigInt(2_000);
 
 /**
  * Blocks left between the head and the end of a scan.
- *
- * The checkpoint is monotonic on chain and cannot be walked back, so a checkpoint set on a block that
- * a reorg then discards is permanent damage. Staying a few blocks behind costs one extra run's
- * latency and removes the failure mode.
  */
 const CONFIRMATIONS = BigInt(5);
 
-/** Users per `reportBatch` transaction. Bounded by block gas, not by anything on chain. */
+/** Users per `reportBatch` transaction. Bounded by block gas. */
 const BATCH_SIZE = 200;
 
 /**
- * Calls packed into one JSON-RPC request. Public endpoints rate-limit by request, not by call, so a
- * pass costs the limiter this many times less than one request per call would.
+ * Calls packed into one JSON-RPC request.
  */
 const RPC_BATCH_SIZE = 100;
 
 /**
- * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests. Wide
- * enough to keep a few requests in flight, narrow enough that a public endpoint answers them.
+ * Reads handed to the transport at once, which it packs into `RPC_BATCH_SIZE`-sized requests.
  */
 const READ_CONCURRENCY = 300;
 
-/** Per-request ceiling. A loaded public endpoint answers a batch of block reads in a few seconds. */
+/** Per-request ceiling. */
 const RPC_TIMEOUT = 60_000;
 
 function arg(flag: string): string | undefined {
@@ -118,12 +98,30 @@ function arg(flag: string): string | undefined {
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
+type RelayMode = "rpc" | "shadow" | "subgraph";
+
+function relayMode(): RelayMode {
+  const mode = arg("--mode") ?? process.env.RELAY_MODE ?? "rpc";
+  if (mode !== "rpc" && mode !== "shadow" && mode !== "subgraph") {
+    throw new Error(`Invalid relay mode "${mode}". Expected rpc, shadow, or subgraph.`);
+  }
+  return mode;
+}
+
+function graphEndpoint(): string | undefined {
+  const url = arg("--subgraph-url") ?? process.env.RELAY_SUBGRAPH_URL ?? process.env.NEXT_PUBLIC_SUBGRAPH_URL;
+  return url?.trim() || undefined;
+}
+
+function pageCeiling(): number {
+  const raw = arg("--graph-max-pages") ?? process.env.RELAY_GRAPH_MAX_PAGES ?? "100";
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`Invalid graph page ceiling "${raw}".`);
+  return value;
+}
+
 /**
  * The relayer's key, read the way `indexer.ts:envPrivateKey` reads the project's.
- *
- * `REPORTER_PRIVATE_KEY` and not `PRIVATE_KEY`: the reporter is meant to be a different account from
- * the project, since the whole point is an independent observation. Falls back to the repo-root
- * `.env` because this is a plain node script and nothing else loads it.
  */
 function reporterKey(): Hex | undefined {
   if (process.env.REPORTER_PRIVATE_KEY) return process.env.REPORTER_PRIVATE_KEY as Hex;
@@ -162,23 +160,17 @@ async function fetchLogs(
 
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
-    const logs = await client.getLogs({
-      address,
-      fromBlock: chunk.from,
-      toBlock: chunk.to,
-      topics: [
-        topic0.toLowerCase() as Hex,
-        ...(source ? topicFilterArray(source) : []),
-      ],
-    });
+    const logs = (await client.request({
+      method: "eth_getLogs",
+      params: [logRequest(address, topic0, source, chunk.from, chunk.to)],
+    })) as RawLog[];
 
     harvestLogTimestamps(logs, timestamps);
 
     for (const log of logs) {
       if (log.topics[0]?.toLowerCase() !== topic0.toLowerCase()) continue;
       if (source && !matchesTopicFilter(log, source)) continue;
-      if (log.blockNumber === null) continue;
-      out.push({topics: log.topics, data: log.data, blockNumber: log.blockNumber});
+      out.push({topics: log.topics, data: log.data, blockNumber: BigInt(log.blockNumber)});
     }
   }
   if (chunks.length > 0) progressDone();
@@ -188,6 +180,9 @@ async function fetchLogs(
 
 async function main(): Promise<void> {
   const rpcUrl = arg("--rpc") ?? "http://127.0.0.1:8545";
+  const mode = relayMode();
+  const subgraphUrl = graphEndpoint();
+  const maxGraphPages = pageCeiling();
   const dryRun = process.argv.includes("--dry-run");
 
   const campaignArg = arg("--campaign");
@@ -216,6 +211,7 @@ async function main(): Promise<void> {
   console.log(`Relaying KPI ${kpiIndex} of ${campaign}`);
   console.log(`  chain:    ${chainId}`);
   console.log(`  verifier: ${verifier}`);
+  console.log(`  source:   ${mode}${subgraphUrl ? ` (${subgraphUrl})` : ""}`);
 
   // ── config ─────────────────────────────────────────────────────
 
@@ -260,9 +256,8 @@ async function main(): Promise<void> {
 
   // ── drift guard ────────────────────────────────────────────────
 
-  // The indexer reads its event source from `KpiSpec.params` while this reads `KpiConfig`. If the two
-  // ever name different events the cap sits at 0 and every report is a silent no-op, so it is worth
-  // one comparison at startup rather than a week of "why is progress not moving".
+  // The indexer reads its event source from `KpiSpec.params` while this reads `KpiConfig`. 
+  // If the two ever name different events the cap sits at 0 and every report is a silent no-op.
   const spec = await client.readContract({
     address: campaign,
     abi: CampaignAbi,
@@ -277,6 +272,7 @@ async function main(): Promise<void> {
     verifierScale: config.scale,
     verifierAggregation: config.aggregation,
     verifierUserParamIndex: config.userParamIndex,
+    verifierValueParamIndex: config.valueParamIndex,
     indexerTopic0: indexerSource?.topic0,
     indexerSource: indexerSource?.source,
     indexerScale: indexerSource?.scale,
@@ -311,6 +307,24 @@ async function main(): Promise<void> {
     confirmations: CONFIRMATIONS,
   });
 
+  let graphMeta: Awaited<ReturnType<typeof readRelayGraphMeta>> | undefined;
+  if (mode !== "rpc") {
+    if (!subgraphUrl) {
+      throw new Error(`${mode} mode requires --subgraph-url or RELAY_SUBGRAPH_URL.`);
+    }
+    graphMeta = await readRelayGraphMeta({url: subgraphUrl});
+    const snapshot = relayGraphSnapshot({
+      indexedBlock: graphMeta.indexedBlock,
+      head,
+      confirmations: CONFIRMATIONS,
+      windowEndBlock: config.windowEndBlock,
+      checkpoint,
+    });
+    if (snapshot !== null && range.scan && snapshot !== range.toBlock) {
+      throw new Error(`Subgraph snapshot ${snapshot} does not match RPC pass end ${range.toBlock}.`);
+    }
+  }
+
   console.log(`  checkpoint: ${checkpoint}  (head ${head})`);
 
   if (!range.scan) {
@@ -321,12 +335,51 @@ async function main(): Promise<void> {
 
   // ── scan and decode ────────────────────────────────────────────
 
-  // One cache for every timestamp this pass needs, shared by the touch search, the touch scan and
-  // the KPI logs, and carried over from earlier passes on this chain.
-  const blockTimestamps = loadTimestampCache(chainId);
-  const cachedOnEntry = blockTimestamps.size;
+  const [registry, startTime] = await Promise.all([
+    client.readContract({
+      address: campaign,
+      abi: CampaignAbi,
+      functionName: "attributionRegistry",
+    }),
+    client.readContract({address: campaign, abi: CampaignAbi, functionName: "startTime"}),
+  ]);
 
-  const logs = await fetchLogs(
+  let graphFold: RelayGraphFold | undefined;
+  if (mode !== "rpc") {
+    const snapshotBlock = await client.getBlock({blockNumber: range.toBlock});
+    if (!snapshotBlock.hash) throw new Error(`RPC block ${range.toBlock} has no hash.`);
+    const history = await readRelayGraphHistory({
+      url: subgraphUrl!,
+      campaign,
+      kpiIndex,
+      snapshot: range.toBlock,
+      expectedHash: snapshotBlock.hash,
+      fromBlock: range.fromBlock,
+      event,
+      topic0,
+      config,
+      source: indexerSource,
+      maxPages: maxGraphPages,
+    });
+    graphFold = foldRelayGraphHistory({
+      history,
+      event,
+      config,
+      campaignStartTime: BigInt(startTime),
+    });
+    console.log(`\n  graph: ${history.logs.length} action(s), ${history.touches.length} touch(es)`);
+  }
+
+  // Subgraph mode has completed and validated its whole historical pass before any total read.
+  let logs: RelayLog[] = [];
+  let decoded: ReturnType<typeof decodeUserEvents>["decoded"] = [];
+  let blockTimestamps: BlockTimestamps = new Map();
+  let cachedOnEntry = 0;
+
+  if (mode !== "subgraph") {
+    blockTimestamps = loadTimestampCache(chainId);
+    cachedOnEntry = blockTimestamps.size;
+    logs = await fetchLogs(
     client,
     config.targetContract,
     topic0,
@@ -365,11 +418,7 @@ async function main(): Promise<void> {
       args: [campaign],
     })) as bigint;
 
-    // Every touch that could still cover creditable work, scanned from before the activity range: a
-    // touch can predate the actions it covers, and a window this cannot see would drop activity the
-    // chain would credit. A touch older than `startTime - effectiveMaxDuration` has already lapsed by
-    // the campaign's own start, so it covers nothing. The floor comes from the broadcast receipt rather
-    // than `lib/deployments.ts`, which can lag a redeploy.
+    // Every touch that could still cover creditable work, scanned from before the activity range.
     const touchFloor = await blockAtTimestamp(
       async (blockNumber) => (await client.getBlock({blockNumber})).timestamp,
       earliestCoveringTouch(BigInt(startTime), BigInt(maxDuration)),
@@ -400,8 +449,7 @@ async function main(): Promise<void> {
     }
     const attribution = attributionLookup(buildAttributionWindows(touches), BigInt(startTime));
 
-    // One read per distinct block, and only for the blocks nothing has supplied yet: the logs
-    // carried their own timestamps, and earlier passes on this chain carried the rest.
+    // One read per distinct block, and only for the blocks nothing has supplied yet.
     const wanted = uniqueBlocks(decoded);
     const missing = missingTimestamps(wanted, blockTimestamps);
     let readSoFar = 0;
@@ -424,8 +472,7 @@ async function main(): Promise<void> {
     unattributed = result.unattributed;
   }
 
-  // Stored before the totals reads and the transactions, so a failure past this point still leaves
-  // the next pass the timestamps this one paid for.
+  // Stored before the totals reads and the transactions, so a failure past this point still leaves the next pass the timestamps this one paid for.
   saveTimestampCache(chainId, blockTimestamps);
 
   if (unattributed.length > 0) {

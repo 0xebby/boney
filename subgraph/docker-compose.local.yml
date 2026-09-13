@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: graph-node
+      POSTGRES_INITDB_ARGS: --locale=C --encoding=UTF8
+    volumes:
+      - graph-postgres:/var/lib/postgresql/data
+    networks:
+      - graph
+
+  ipfs:
+    image: ipfs/kubo:v0.17.0
+    ports:
+      - "5001:5001"
+    networks:
+      - graph
+
+  graph-node:
+    image: graphprotocol/graph-node:v0.35.1
+    depends_on:
+      - postgres
+      - ipfs
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8020:8020"
+      - "8030:8030"
+      - "8040:8040"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      postgres_host: postgres
+      postgres_user: postgres
+      postgres_pass: postgres
+      postgres_db: graph-node
+      ipfs: 'ipfs:5001'
+      ethereum: 'localhost:http://host.docker.internal:8546'
+    networks:
+      - graph
+
+volumes:
+  graph-postgres:
+
+networks:
+  graph:

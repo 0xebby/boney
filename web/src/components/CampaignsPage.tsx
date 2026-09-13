@@ -124,7 +124,7 @@ export function CampaignsPage() {
       <Card>
         <EmptyState
           title="Boneyard is not available on this network"
-          description="Switch your wallet to a supported network to see campaigns."
+          description="Switch your wallet to base sepolia network to see campaigns."
         />
       </Card>
     );
@@ -165,9 +165,6 @@ export function CampaignsPage() {
               Capped to the same measure as the line above it. Left unbounded it was the widest child,
               so it — not the wordmark — decided how wide the box was.
             */}
-            <p className="animate-rise-in mx-auto mt-4 max-w-[15rem] text-balance text-xs leading-snug text-ink-secondary [animation-delay:120ms] sm:mt-5 sm:max-w-none">
-              Set your KPIs. Escrow Reward Pool. Pay for Verifiable Results.
-            </p>
           </div>
         </header>
 
@@ -214,7 +211,7 @@ export function CampaignsPage() {
             </Link>
 
             <p className="text-balance text-center text-xs leading-snug text-brand">
-              Set your KPIs. Escrow reward pool. Pay for verifiable results.
+              <i>Set your KPIs. Escrow reward pool. Pay for verifiable results.</i>
             </p>
           </div>
 

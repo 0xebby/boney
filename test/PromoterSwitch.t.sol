@@ -166,20 +166,27 @@ contract PromoterSwitchTest is Test {
         assertEq(token.balanceOf(promoterA), TIER_REWARD, "and is paid");
     }
 
-    /// @dev A promoter re-signing the same user is not a switch, so the span stays unambiguous.
-    function test_EmptyEvidenceSurvivesARetouchByTheSamePromoter() public {
+    function test_EmptyEvidenceRejectsExpiredSamePromoterRetouch() public {
         bytes32 idA = _join(promoterA);
 
         _touch(idA, 1 days);
-        skip(2 days); // lapses, which is what lets the same promoter touch again
+        _advance(1 hours);
+        vm.prank(project);
+        campaign.reportUserAction(0, user, 10, "");
+        uint64 lastReportBlock = campaign.lastReportBlockOf(user, 0);
+
+        skip(2 days);
         _advance(1 hours);
         _touch(idA, 7 days);
         _advance(1 hours);
 
         vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
         campaign.reportUserAction(0, user, 50, "");
 
-        assertEq(campaign.progressOf(promoterA, 0), 50, "two touches, one promoter");
+        assertEq(campaign.progressOf(promoterA, 0), 10);
+        assertEq(campaign.userCreditedOf(user, 0), 10);
+        assertEq(campaign.lastReportBlockOf(user, 0), lastReportBlock);
     }
 
     /// @dev The span starts at the last report, not at the campaign, so a switch already accounted

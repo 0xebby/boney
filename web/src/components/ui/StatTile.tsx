@@ -8,10 +8,15 @@ import type {ReactNode} from "react";
  * digit the width of a `0`, which makes a number like `121` look loose at display sizes.
  * Tabular figures are reserved for columns that align vertically (table rows, axis ticks).
  *
- * The label is bold brand yellow, matching table headers in `ui/DataTable` — labelling chrome is
- * the register yellow is safe in here (see the token rationale at the top of `globals.css`). The
- * value stays `text-ink`: the tile's hierarchy is carried by size and face, so colouring the number
- * too would leave the label and the figure competing.
+ * The label is an 11px uppercase eyebrow in `text-ink-muted`, matching table headers in
+ * `ui/DataTable` and card titles in `ui/Card`. It used to be bold brand yellow; yellow is reserved
+ * for the brand mark, primary and add buttons, links, the active nav item and the focus ring, so
+ * that seeing it means "brand" or "press this", and a row of stat labels is neither. 11px is below
+ * the project's 12px floor for reading text and is allowed here for the same reason it is allowed
+ * for any eyebrow: uppercase, two or three words, never a sentence.
+ *
+ * The value stays `text-ink`: the tile's hierarchy is carried by size and face, so the label and the
+ * figure are never competing on colour.
  */
 export function StatTile({
   label,
@@ -49,7 +54,9 @@ export function StatTile({
         {accent ? (
           <span aria-hidden className="h-3 w-0.5 rounded-full" style={{background: accent}} />
         ) : null}
-        <span className="text-xs font-bold text-brand">{label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+          {label}
+        </span>
       </div>
 
       <div className="flex flex-wrap items-baseline gap-x-1.5">
@@ -97,7 +104,8 @@ export function StatRow({children}: {children: ReactNode}) {
  *
  * A `StatTile` nested in a card draws a second box around every figure, so a panel of related
  * numbers reads as a grid of separate cards. The typography is `StatTile`'s exactly — proportional
- * figures, brand label, `text-ink` value — so the two forms sit side by side without disagreeing.
+ * figures, uppercase muted label, `text-ink` value — so the two forms sit side by side without
+ * disagreeing.
  */
 export function Figure({
   label,
@@ -119,7 +127,9 @@ export function Figure({
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-bold text-brand">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+        {label}
+      </span>
 
       <div className="flex flex-wrap items-baseline gap-x-1.5">
         <span className={`font-display leading-tight text-ink ${scale}`}>{value}</span>

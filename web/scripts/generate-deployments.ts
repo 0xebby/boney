@@ -1,11 +1,7 @@
 /**
- * Generates `src/lib/deployments.ts` from Foundry's broadcast receipt.
+ * Generates frontend deployments from Foundry broadcast receipts.
  *
- * Hand-transcribing addresses is exactly the class of error that shipped a bricked vault in the
- * contract phase — one wrong character is silent until a call reverts. The broadcast receipt is
- * the source of truth for what actually landed on chain.
- *
- * Usage: pnpm deployments [chainId]   (default 31337)
+ * Usage: `pnpm deployments [chainId]`.
  */
 import {readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync} from "node:fs";
 import {resolve, dirname} from "node:path";
@@ -35,21 +31,19 @@ const KEY_BY_CONTRACT: Record<string, string> = {
   TouchWindowVerifier: "touchWindowVerifier",
 };
 
-/**
- * Keys that may be absent from a receipt without failing the run.
- *
- * The KPI verification layer was added after the live deployments were made, so a receipt from
- * before that lands without these three. Requiring them would make `pnpm deployments`
- * unrunnable against an existing receipt until a full redeploy — which is a bigger hammer than
- * regenerating addresses warrants. They are optional on the `Deployment` type for the same reason,
- * and get filled in automatically by the next deploy.
- */
+/** Optional deployment keys for older receipts. */
 const OPTIONAL_KEYS = new Set([
   "eventMetricKpiVerifier",
   "guardedKpiVerifier",
   "touchWindowVerifier",
 ]);
 
+/**
+ * Reads deployment addresses from one broadcast receipt.
+ *
+ * @param chainId Chain whose receipt to read.
+ * @returns Deployment addresses keyed for the app.
+ */
 export function readBroadcast(chainId: number): Record<string, string> {
   const path = resolve(
     REPO_ROOT,
@@ -73,7 +67,6 @@ export function readBroadcast(chainId: number): Record<string, string> {
     if (!name || !tx.contractAddress) continue;
     const key = KEY_BY_CONTRACT[name];
     if (!key) continue;
-    // Checksum the address: viem rejects malformed ones, so a typo cannot survive this step.
     out[key] = getAddress(tx.contractAddress);
   }
 
@@ -88,15 +81,10 @@ export function readBroadcast(chainId: number): Record<string, string> {
 }
 
 /**
- * The block the protocol was deployed in — the earliest receipt in the run.
+ * Reads the earliest block in one broadcast receipt.
  *
- * This exists so log scans have a floor. Promoters are not enumerable on chain (a campaign emits
- * `PromoterJoined` and stores no list), so listing them means `getLogs`, and public RPCs cap a
- * single query at ~2000 blocks. Without a floor the only honest `fromBlock` is genesis, which on
- * a live L2 is tens of thousands of requests. With it, the scan spans deploy→head.
- *
- * Returns 0 when the receipt carries no block — a scan from genesis is correct on a local chain
- * and merely slow, which is better than guessing a floor that silently hides older events.
+ * @param chainId Chain whose receipt to read.
+ * @returns Earliest receipt block, or zero when unavailable.
  */
 export function readStartBlock(chainId: number): number {
   const path = resolve(REPO_ROOT, `broadcast/DeployBoney.s.sol/${chainId}/run-latest.json`);
@@ -113,6 +101,12 @@ export function readStartBlock(chainId: number): number {
   return blocks.length > 0 ? Math.min(...blocks) : 0;
 }
 
+/**
+ * Emits generated deployment source for all chains.
+ *
+ * @param byChain Deployment addresses keyed by chain ID.
+ * @returns Generated TypeScript source.
+ */
 function emit(byChain: Record<number, Record<string, string>>): string {
   const blocks = Object.keys(byChain)
     .map(Number)
@@ -121,7 +115,6 @@ function emit(byChain: Record<number, Record<string, string>>): string {
       const entries = Object.entries(byChain[chainId])
         .map(([k, v]) => `    ${k}: "${v}",`)
         .join("\n");
-      // BigInt literal: every consumer compares it against a viem block number, which is bigint.
       const start = `    startBlock: ${readStartBlock(chainId)}n,`;
       return [`  ${chainId}: {`, entries, start, "  },"].join("\n");
     });
@@ -141,12 +134,9 @@ function emit(byChain: Record<number, Record<string, string>>): string {
 }
 
 /**
- * Every chain id with a broadcast receipt on disk.
+ * Lists chains with complete broadcast-receipt paths.
  *
- * The receipt directory is the source of truth for what has been deployed, so emitting all of
- * them keeps a local anvil deployment and a testnet deployment side by side. Emitting only the
- * chain named on the command line would silently drop the other — deploy to Base Sepolia and
- * your anvil addresses vanish from the app.
+ * @returns Deployed chain IDs found on disk.
  */
 function deployedChainIds(): number[] {
   const root = resolve(REPO_ROOT, "broadcast/DeployBoney.s.sol");
@@ -157,9 +147,12 @@ function deployedChainIds(): number[] {
     .filter((id) => existsSync(resolve(root, `${id}/run-latest.json`)));
 }
 
+/**
+ * Generates deployments for every usable receipt.
+ *
+ * @returns Nothing.
+ */
 function main(): void {
-  // An explicit chain id is a hard requirement — if it was just deployed and its receipt is
-  // unreadable, that is an error, not something to skip past.
   const requested = process.argv[2] ? Number(process.argv[2]) : undefined;
   const chainIds = [...new Set([...deployedChainIds(), ...(requested ? [requested] : [])])];
 
@@ -169,7 +162,6 @@ function main(): void {
       byChain[chainId] = readBroadcast(chainId);
     } catch (err) {
       if (chainId === requested) throw err;
-      // A partial receipt from an aborted deploy should not block regenerating the others.
       console.warn(`  skipped chain ${chainId}: ${(err as Error).message.split("\n")[0]}`);
     }
   }

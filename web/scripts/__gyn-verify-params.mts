@@ -1,9 +1,4 @@
-/**
- * Decodes the KPI params the Solidity seed encoded, through the app's own event-source decoder.
- *
- * Proves `SeedGyndore`'s `abi.encode` and `web/src/lib/kpiSource.ts` agree on the 224-byte filtered
- * layout — the two halves that must not disagree, and which nothing else checks.
- */
+/** Verifies agreement between seeded KPI parameters and the app decoder. */
 import {readFileSync} from "node:fs";
 import {decodeFunctionData, parseAbi} from "viem";
 import {decodeEventSource, describeTopicFilter, eventSourceSummary} from "../src/lib/kpiSource";

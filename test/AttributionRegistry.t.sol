@@ -117,7 +117,7 @@ contract AttributionRegistryTest is Test {
 
     function test_RegisterPromoter_revertsZeroId() public {
         vm.prank(campaign);
-        vm.expectRevert(IAttributionRegistry.ZeroPromoterId.selector);
+        vm.expectRevert(IAttributionRegistry.InvalidPromoterId.selector);
         attribution.registerPromoter(bytes32(0));
     }
 
@@ -413,13 +413,30 @@ contract AttributionRegistryTest is Test {
         IAttributionRegistry.Touch memory t = _touch(campaign, bytes32(0), uint64(block.timestamp + 1 days));
         bytes memory sig = _sign(userPk, t);
 
-        vm.expectRevert(IAttributionRegistry.ZeroPromoterId.selector);
+        vm.expectRevert(IAttributionRegistry.InvalidPromoterId.selector);
         attribution.storeTouch(user, t, sig, relayer);
     }
 
     function test_Constructor_revertsZeroWindow() public {
         vm.expectRevert(IAttributionRegistry.ZeroWindow.selector);
         new AttributionRegistry(0);
+    }
+
+    function test_Constructor_rejectsTouchDurationAboveProtocolMaximum() public {
+        uint64 provided = attribution.MAX_TOUCH_DURATION() + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAttributionRegistry.TouchDurationTooLong.selector, attribution.MAX_TOUCH_DURATION(), provided
+            )
+        );
+        new AttributionRegistry(provided);
+    }
+
+    function test_Constructor_acceptsProtocolMaximumTouchDuration() public {
+        AttributionRegistry maximum = new AttributionRegistry(attribution.MAX_TOUCH_DURATION());
+
+        assertEq(maximum.maxTouchDuration(), 360 days);
     }
 
     // ── campaign window enforcement ──────────────────────────────
@@ -653,15 +670,16 @@ contract AttributionRegistryTest is Test {
         assertEq(attribution.soleAttributionSince(campaign, user, 0), promoterId);
     }
 
-    /// @dev A re-touch by the same promoter is not a switch, so the span is still unambiguous.
-    function test_SoleAttributionSince_ignoresARetouchByTheSamePromoter() public {
+    function test_SoleAttributionSince_rejectsExpiredSamePromoterRetouchInSpan() public {
         _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 1 days));
 
         vm.warp(block.timestamp + 2 days);
         vm.roll(block.number + 1);
         _storeTouch(userPk, user, _touch(campaign, promoterId, uint64(block.timestamp) + 7 days));
+        uint64 retouchBlock = uint64(block.number);
 
-        assertEq(attribution.soleAttributionSince(campaign, user, 0), promoterId);
+        assertEq(attribution.soleAttributionSince(campaign, user, retouchBlock - 1), bytes32(0));
+        assertEq(attribution.soleAttributionSince(campaign, user, retouchBlock), promoterId);
     }
 
     function test_SoleAttributionSince_aSwitchInTheSpanIsZero() public {

@@ -13,11 +13,8 @@ import type {RewardTier} from "./types";
  * and falls back to the live touch when there is none, reverting `NoAttribution(user)` if nobody
  * holds it. 
  * 
- * So "report for this KOL" is not a call the contract offers — it has to be turned into one
+ * it has to be turned into one
  * call per referral currently attributed to that KOL, which is what `planKolReport` does.
- *
- * Vocabulary, per `indexerCore`'s note: the ABI calls the attributed wallet `user` and those
- * strings are load-bearing, so they stay at the boundary. 
  * 
  */
 
@@ -36,10 +33,9 @@ export type TouchEntry = {
  *
  * `AttributionRegistry` stores only the latest touch per `(campaign, user)` pair and accepts a new
  * one only when `signedAt` is strictly greater, so a referral who re-signed under a *different*
- * promoter appears in the log history under both — but only the newest is live on chain. 
+ * promoter appears in the log history under both but only the newest is live on chain. 
  * 
- * Ordering by `signedAt` (not block number) matches the contract's own comparison, so the row kept here is
- * the row `_resolvePromoterId` will read.
+ * ordering by signedAt mirrors boney's logic
  */
 export function latestTouches(entries: readonly TouchEntry[]): TouchEntry[] {
   const byReferral = new Map<string, TouchEntry>();
@@ -65,9 +61,6 @@ export type KolTarget = {
   /** The subset that would actually credit — `status === "live"`. */
   live: ReferralTarget[];
   /**
-   * Why this KOL cannot be reported for right now, or undefined when it can. Rendered as the
-   * disabled reason rather than hiding the row: "why can't I report for this KOL?" is the question
-   * the dropdown exists to answer, matching how `ProjectActions` treats blocked lifecycle actions.
    */
   blocked?: string;
 };
@@ -76,10 +69,6 @@ export type KolTarget = {
  * Builds the KOL dropdown for a campaign.
  *
  * Every promoter who joined is listed, including those nothing can be reported for.
- *
- * `expired` is reported separately from `none` because the two are different facts and the fix
- * differs: an expired touch needs the referral to re-sign, while `none` means that KOL's link was
- * never used.
  */
 export function buildKolTargets(
   promoters: readonly {promoter: `0x${string}`; promoterId: `0x${string}`}[],
@@ -121,8 +110,7 @@ export function buildKolTargets(
  * Splits `total` into `count` shares, remainder to the last.
  *
  * Integer division loses the remainder, and a report that lands one unit short of a threshold does
- * not cross the tier — the whole point of the call. Giving the remainder to the last share keeps
- * the sum exact, the same correction `indexerCore.splitActions` makes for verifier evidence.
+ * not cross the tier — the whole point of the call.
  */
 export function splitAmount(total: bigint, count: number): bigint[] {
   if (count <= 0) return [];
@@ -159,10 +147,6 @@ export type TierSeed = {
  *
  * `delta` and `reward` are different units and must not be confused: `reportUserAction` credits
  * **KPI units**, and the tier's `reward` is the **token** payout that crossing it releases. 
- * 
- * Seeding the field with `reward` would report a token amount as progress — usually a wildly wrong number,
- * since rewards carry 18 decimals and thresholds are small integers. `reward` is carried here only
- * so the panel can say what the report will pay out.
  *
  * Null when every tier is crossed: there is nothing left to release, and a report at that point is
  * a no-op the contract returns early on (`delta == 0`).
@@ -188,10 +172,6 @@ export type PlannedReport = {
   delta: bigint;
   /**
    * The rest of the call's credit, landing on promoters who held this referral earlier.
-   *
-   * Present because the two are not interchangeable: `newTotal` is per referral and the chain splits
-   * it per promoter, so a report can move progress a panel selected by promoter would not otherwise
-   * account for. Zero on the simulated path, which has no evidence to split.
    */
   elsewhere: bigint;
   /**
@@ -222,15 +202,10 @@ export type ReportPlan =
  * per `(user, kpiIndex)`, so sending the same figure to three referrals credits the KOL three
  * times over, and the projected progress shown next to the button would be a lie.
  *
- * Refusals mirror named contract behavior, so the panel can explain a block without simulating:
- *
  *  - aggregate KPI → `AggregateKpi(kpiIndex)`; those never credit an individual promoter.
  *  - no live referral → `NoAttribution(user)`.
  *  - zero amount → `Campaign` returns early on `delta == 0`. Since the amount is derived from
  *    `nextTierSeed`, zero means the ladder is finished.
- *
- * A referral whose share rounds to zero is dropped, not sent: same early return, and it
- * would show up as a wallet confirmation that did nothing.
  */
 export function planKolReport({
   kol,
@@ -290,8 +265,7 @@ export type ObservedReferral = {
    * `observed` split across the promoters who held this referral, keyed by lowercased promoter id.
    *
    * The referral's own total is the number `reportUserAction` takes, but it is not the number any one
-   * promoter earns: a referral who re-signed under someone else carries both spells at once. Only this
-   * split says which part belongs to the promoter being looked at — see `tallyByPromoter`.
+   * promoter earns: a referral who re-signed under someone else carries both spells at once. 
    */
   byPromoter: ReadonlyMap<string, bigint>;
 };
@@ -299,7 +273,7 @@ export type ObservedReferral = {
 /**
  * Whether Boney's independently observed total will let a report credit anything.
  *
- * ## The failure this exists to make visible
+ * ## The failure this exists to make visible:
  *
  * A gated KPI credits `min(project's claim, Boney's observed total)`, and Boney's total is 0 until
  * `pnpm relay` has scanned. 
@@ -308,8 +282,7 @@ export type ObservedReferral = {
  * when the verified total does not exceed what is already credited, so the transaction *succeeds* and
  * credits nothing.
  *
- * So the ceiling is read and shown *before* the click. `observedProgressOf` exists on
- * `EventMetricKpiVerifier` for precisely this purpose.
+ * So the ceiling is read and shown *before* the click.
  */
 export type CeilingStatus =
   /** The KPI names no verifier, so nothing caps the claim and there is no ceiling to show. */
@@ -343,7 +316,7 @@ export type CeilingStatus =
  * So a gap is either the relayer being behind
  * which the next run closes — or pre-attribution activity, which is excluded permanently and by design. 
  * 
- * Thisfunction cannot tell them apart, so the copy must name both rather than promising either.
+ * Thisfunction cannot tell them apart, so the copy must name both.
  */
 export function describeCeiling(input: {
   /** Whether `KpiSpec.verifier` points at the guard wrapping Boney's verifier. */
@@ -371,7 +344,7 @@ export function describeCeiling(input: {
  * 
  * A referral who did nothing produces no call, so no tier is crossed and
  * nothing pays out. `planKolReport` cannot make that distinction — it credits whatever figure it is
- * handed — which is why this exists alongside it rather than on top of it.
+ * handed — which is why this exists alongside it.
  *
  * Same rules as `scripts/indexer.ts`, which reports the same numbers unattended:
  *
@@ -380,7 +353,7 @@ export function describeCeiling(input: {
  *  - A referral already credited at or above what was observed is dropped, not sent — `delta == 0`
  *    is an early return on chain and a pointless wallet confirmation here. 
  * 
- * This is also what makes the button idempotent: click it twice and the second click has nothing to do.
+ * This is also what makes the button idempotent.
  *
  * ## The cumulative total is not this promoter's figure
  *
@@ -418,10 +391,6 @@ export function planObservedReport({
   credited: ReadonlyMap<string, bigint>;
   /**
    * Each live referral's `creditedToOf(referral, kpiIndex, kol.promoterId)`, keyed lowercase.
-   *
-   * Separate from `credited` because they answer different questions: that one is the referral's total
-   * across every promoter and bounds `newTotal`, this one is what *this* KOL already has for that
-   * referral and bounds what the report can add to it.
    */
   creditedTo: ReadonlyMap<string, bigint>;
   aggregate: boolean;

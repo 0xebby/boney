@@ -1,4 +1,4 @@
-/** Throwaway: per-referral Swap log block numbers, to line up against the ceiling write history. */
+/** Lists per-referral swap blocks for ceiling-history correlation. */
 import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from "viem";
 import {blockChunks} from "../src/lib/indexerCore";
 const c = createPublicClient({transport: http("https://base-sepolia-rpc.publicnode.com",{retryCount:6})}) as PublicClient;

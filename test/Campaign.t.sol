@@ -152,6 +152,14 @@ contract CampaignTest is Test {
         return Campaign(addr);
     }
 
+    function _createCampaignWithPool(uint256 pool) internal returns (Campaign) {
+        Types.CampaignConfig memory cfg = _defaultConfig(0);
+        cfg.rewardPool = pool;
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(cfg, _defaultKpis(), _defaultTiers());
+        return Campaign(addr);
+    }
+
     function _fund(Campaign c, uint256 amount) internal {
         token.mint(project, amount);
         vm.startPrank(project);
@@ -204,6 +212,145 @@ contract CampaignTest is Test {
         assertEq(campaign.remainingPool(), POOL);
         assertEq(vault.tokenOf(address(campaign)), address(token), "registered with vault");
         assertTrue(registry.isCampaign(address(campaign)));
+    }
+
+    function test_Extend_updatesDeadlineAndPreservesTiers() public {
+        _activate(campaign);
+        Types.RewardTier[] memory before = campaign.tiers(0);
+        uint64 newEndTime = endTime + campaign.initialDuration() / 2;
+
+        vm.prank(project);
+        campaign.extend(newEndTime);
+
+        assertEq(campaign.endTime(), newEndTime);
+        assertEq(campaign.tiers(0)[0].threshold, before[0].threshold);
+        assertEq(campaign.tiers(0)[0].reward, before[0].reward);
+        assertEq(campaign.config().rewardPool, POOL);
+    }
+
+    function test_Extend_rejectsBeyondHalfInitialDuration() public {
+        _activate(campaign);
+        uint64 maximum = endTime + campaign.initialDuration() / 2;
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.ExtensionTooLarge.selector, maximum, maximum + 1));
+        campaign.extend(maximum + 1);
+    }
+
+    function test_Extend_capsLongInitialDurationAt360Days() public {
+        Types.CampaignConfig memory cfg = _defaultConfig(0);
+        cfg.endTime = cfg.startTime + 800 days;
+
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(cfg, _defaultKpis(), _defaultTiers());
+        Campaign longCampaign = Campaign(addr);
+
+        assertEq(longCampaign.maximumEndTime(), cfg.endTime + 360 days);
+    }
+
+    function test_Extend_rejectsEndedCampaign() public {
+        _activate(campaign);
+        vm.prank(project);
+        campaign.end();
+
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Ended));
+        campaign.extend(endTime + 1);
+    }
+
+    function test_TopUp_replenishesPoolAndPaysShortfall() public {
+        Campaign depleted = _createCampaignWithPool(6_000 ether);
+        token.mint(project, 6_000 ether);
+        vm.startPrank(project);
+        token.approve(address(vault), 6_000 ether);
+        vault.deposit(address(depleted), 6_000 ether);
+        depleted.activate();
+        vm.stopPrank();
+
+        bytes32 id = _join(depleted, kol);
+        _touch(depleted, userPk, user, id, 7 days);
+        _report(depleted, project, user, 100);
+
+        assertEq(depleted.paidOut(), 6_000 ether);
+        assertEq(depleted.shortfallOf(kol, 0), 2_000 ether);
+
+        token.mint(project, 2_000 ether);
+        vm.startPrank(project);
+        token.approve(address(depleted), 2_000 ether);
+        depleted.topUp(2_000 ether);
+        vm.stopPrank();
+
+        assertEq(depleted.rewardPool(), 8_000 ether);
+        vm.prank(kol);
+        depleted.claimShortfall(0);
+        assertEq(depleted.shortfallOf(kol, 0), 0);
+        assertEq(depleted.paidOut(), 8_000 ether);
+    }
+
+    function test_UserReportsBeforeAndAfterExtensionThenTopUpRepaysShortfall() public {
+        Campaign extended = _createCampaignWithPool(6_000 ether);
+        _fund(extended, 6_000 ether);
+        vm.prank(project);
+        extended.activate();
+
+        bytes32 id = _join(extended, kol);
+        _touch(extended, userPk, user, id, 7 days);
+        _report(extended, project, user, 10);
+        assertEq(extended.progressOf(kol, 0), 10);
+        assertEq(extended.paidOut(), 1_000 ether);
+
+        uint64 newEndTime = endTime + extended.initialDuration() / 2;
+        vm.prank(project);
+        extended.extend(newEndTime);
+        assertEq(extended.endTime(), newEndTime);
+
+        _report(extended, project, user, 100);
+        assertEq(extended.progressOf(kol, 0), 100);
+        assertEq(extended.paidOut(), 6_000 ether);
+        assertEq(extended.shortfallOf(kol, 0), 2_000 ether);
+
+        token.mint(project, 2_000 ether);
+        vm.startPrank(project);
+        token.approve(address(extended), 2_000 ether);
+        extended.topUp(2_000 ether);
+        vm.stopPrank();
+
+        vm.prank(kol);
+        extended.claimShortfall(0);
+        assertEq(extended.shortfallOf(kol, 0), 0);
+        assertEq(extended.paidOut(), 8_000 ether);
+    }
+
+    function test_TopUp_rejectsAmountBelowRecordedShortfall() public {
+        Campaign depleted = _createCampaignWithPool(6_000 ether);
+        _fund(depleted, 6_000 ether);
+        vm.prank(project);
+        depleted.activate();
+
+        bytes32 id = _join(depleted, kol);
+        _touch(depleted, userPk, user, id, 7 days);
+        _report(depleted, project, user, 100);
+
+        assertEq(depleted.shortfallOf(kol, 0), 2_000 ether);
+
+        token.mint(project, 1_500 ether);
+        vm.startPrank(project);
+        token.approve(address(depleted), 1_500 ether);
+        vm.expectRevert(
+            abi.encodeWithSelector(ICampaign.ShortfallUnfunded.selector, 1_500 ether, 2_000 ether)
+        );
+        depleted.topUp(1_500 ether);
+        vm.stopPrank();
+    }
+
+    function test_TopUp_rejectsBeforeDepletion() public {
+        _activate(campaign);
+        token.mint(project, 2_000 ether);
+        vm.startPrank(project);
+        token.approve(address(campaign), 2_000 ether);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TopUpTooEarly.selector, 0, 9_000 ether));
+        campaign.topUp(2_000 ether);
+        vm.stopPrank();
     }
 
     /// @dev The registry allows creating a campaign that names another address as the project,
@@ -535,11 +682,7 @@ contract CampaignTest is Test {
         campaign.reportUserAction(0, user, 5, "");
     }
 
-    /// @dev An expired touch reverts the whole report rather than skipping the user, so the
-    ///      activity is not burned — it is merely unbanked. A fresh touch from the same promoter makes
-    ///      the same cumulative report land, and because `_userCredited` never advanced, the full total
-    ///      is still owed.
-    function test_Report_recoverableAfterAttributionExpires() public {
+    function test_Report_retouchAfterExpiryRequiresEvidence() public {
         _activate(campaign);
         bytes32 id1 = _join(campaign, kol);
         _join(campaign, kol2);
@@ -551,12 +694,13 @@ contract CampaignTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
 
-        // The same KOL re-engages the user and the same report now succeeds.
         _touch(campaign, userPk, user, id1, 7 days);
-        _report(campaign, project, user, 5);
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        campaign.reportUserAction(0, user, 5, "");
 
-        assertEq(campaign.progressOf(kol, 0), 5, "the lapse only deferred it");
-        assertEq(campaign.progressOf(kol2, 0), 0);
+        assertEq(campaign.progressOf(kol, 0), 0);
+        assertEq(campaign.userCreditedOf(user, 0), 0);
     }
 
     /// @dev A lapse no longer hands everything to whoever the user signs for next: the span the report
@@ -575,6 +719,108 @@ contract CampaignTest is Test {
         campaign.reportUserAction(0, user, 5, "");
 
         assertEq(campaign.progressOf(kol2, 0), 0, "kol's backlog is not kol2's to take");
+    }
+
+    // ── authorized reporters ───────────────────────────────────────
+
+    function test_SetAuthorizedReporter_grantsAndRevokes() public {
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+        assertTrue(campaign.authorizedReporters(outsider));
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, false);
+        assertFalse(campaign.authorizedReporters(outsider));
+    }
+
+    function test_SetAuthorizedReporter_onlyProject() public {
+        vm.prank(outsider);
+        vm.expectRevert(ICampaign.NotProject.selector);
+        campaign.setAuthorizedReporter(outsider, true);
+    }
+
+    function test_SetAuthorizedReporter_rejectsZeroAddress() public {
+        vm.prank(project);
+        vm.expectRevert(ICampaign.InvalidReporter.selector);
+        campaign.setAuthorizedReporter(address(0), true);
+    }
+
+    function test_AuthorizedReporterMayReportAndReplayIsNoop() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        _report(campaign, outsider, user, 5);
+        _report(campaign, outsider, user, 5);
+
+        assertEq(campaign.progressOf(kol, 0), 5);
+        assertEq(campaign.userCreditedOf(user, 0), 5);
+    }
+
+    function test_RevokedReporterCannotReport() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.startPrank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+        campaign.setAuthorizedReporter(outsider, false);
+        vm.stopPrank();
+
+        vm.prank(outsider);
+        vm.expectRevert(ICampaign.NotReporter.selector);
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassLifecycle() public {
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Pending));
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassAttribution() public {
+        _activate(campaign);
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassVerifier() public {
+        HalvingVerifier half = new HalvingVerifier();
+        Campaign verified = _createWithVerifier(address(half));
+        _activate(verified);
+        bytes32 id = _join(verified, kol);
+        _touch(verified, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        verified.setAuthorizedReporter(outsider, true);
+        _report(verified, outsider, user, 10);
+
+        assertEq(verified.progressOf(kol, 0), 5);
+    }
+
+    function test_AuthorizedReporterCannotReportAggregateKpi() public {
+        Campaign aggregate = _createAggregateCampaign();
+        _activate(aggregate);
+
+        vm.prank(project);
+        aggregate.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AggregateKpi.selector, 0));
+        aggregate.reportUserAction(0, user, 5, "");
     }
 
     function test_Report_onlyReporters() public {
@@ -1111,5 +1357,61 @@ contract CampaignTest is Test {
 
         assertGe(campaign.progressOf(kol, 0), first, "progress never decreases");
         assertEq(campaign.progressOf(kol, 0), b);
+    }
+
+    function testFuzz_ExtendWithinMaximumSucceeds(uint64 extension) public {
+        extension = uint64(bound(extension, 1, campaign.initialDuration() / 2));
+
+        _activate(campaign);
+        uint64 newEndTime = endTime + extension;
+
+        vm.prank(project);
+        campaign.extend(newEndTime);
+
+        assertEq(campaign.endTime(), newEndTime);
+        assertLe(campaign.endTime(), campaign.maximumEndTime());
+    }
+
+    function testFuzz_ExtendBeyondMaximumReverts(uint64 extra) public {
+        extra = uint64(bound(extra, 1, 30 days));
+
+        _activate(campaign);
+        uint64 maximumEndTime = campaign.maximumEndTime();
+        uint64 newEndTime = maximumEndTime + extra;
+
+        vm.prank(project);
+        vm.expectRevert(
+            abi.encodeWithSelector(ICampaign.ExtensionTooLarge.selector, maximumEndTime, newEndTime)
+        );
+        campaign.extend(newEndTime);
+    }
+
+    function testFuzz_TopUpPreservesPoolAccounting(uint256 amount) public {
+        amount = bound(amount, 2_000 ether, 100_000 ether);
+
+        Campaign depleted = _createCampaignWithPool(6_000 ether);
+        _fund(depleted, 6_000 ether);
+        vm.prank(project);
+        depleted.activate();
+
+        bytes32 id = _join(depleted, kol);
+        _touch(depleted, userPk, user, id, 7 days);
+        _report(depleted, project, user, 100);
+
+        token.mint(project, amount);
+        vm.startPrank(project);
+        token.approve(address(depleted), amount);
+        depleted.topUp(amount);
+        vm.stopPrank();
+
+        assertEq(depleted.rewardPool(), 6_000 ether + amount);
+        assertEq(depleted.paidOut() + depleted.remainingPool(), depleted.rewardPool());
+
+        vm.prank(kol);
+        depleted.claimShortfall(0);
+
+        assertEq(depleted.shortfallOf(kol, 0), 0);
+        assertEq(depleted.paidOut(), 8_000 ether);
+        assertEq(depleted.remainingPool(), amount - 2_000 ether);
     }
 }

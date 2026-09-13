@@ -2,17 +2,26 @@ import {describe, it, expect} from "vitest";
 import {readAbi, CONTRACTS, type AbiEntry} from "./extract-abis";
 
 /**
- * These tests are the guard behind decision F4: the frontend's contract surface is generated,
- * never hand-written. If a Solidity signature changes, the assertions below fail at `pnpm test`
- * rather than as an opaque decode error in the browser.
+ * Lists named functions in an ABI.
+ *
+ * @param abi ABI entries to inspect.
+ * @returns Function names in ABI order.
  */
-
 function fnNames(abi: AbiEntry[]): string[] {
-  return abi.filter((e) => e.type === "function" && e.name).map((e) => e.name!);
+  return abi.flatMap((entry) =>
+    entry.type === "function" && entry.name ? [entry.name] : [],
+  );
 }
 
+/**
+ * Finds a named function in an ABI.
+ *
+ * @param abi ABI entries to inspect.
+ * @param name Function name to find.
+ * @returns The matching entry, if present.
+ */
 function fn(abi: AbiEntry[], name: string): AbiEntry | undefined {
-  return abi.find((e) => e.type === "function" && e.name === name);
+  return abi.find((entry) => entry.type === "function" && entry.name === name);
 }
 
 describe("ABI extraction", () => {
@@ -51,8 +60,7 @@ describe("ABI extraction", () => {
       expect(f?.outputs).toHaveLength(1);
     });
 
-    it("does not expose joinAsKOL — promoters must call Campaign.join() directly", () => {
-      // A facade-relayed join would register the facade as the promoter.
+    it("does not expose joinAsKOL", () => {
       expect(fnNames(abi)).not.toContain("joinAsKOL");
     });
   });
@@ -147,8 +155,7 @@ describe("ABI extraction", () => {
   describe("EscrowVault", () => {
     const abi = readAbi("EscrowVault.sol/EscrowVault.json");
 
-    it("deposit takes (campaign, amount) — no `from` parameter", () => {
-      // The `from` variant was an allowance-drain vector; see todo.md phase 8.
+    it("deposit takes campaign and amount", () => {
       const f = fn(abi, "deposit");
       expect(f?.inputs).toHaveLength(2);
     });

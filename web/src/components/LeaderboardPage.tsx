@@ -320,7 +320,7 @@ function Breakdown({row}: {row: PointsRow}) {
   return (
     <p className="tnum text-xs text-ink-muted">
       {row.counts.joins.toLocaleString("en-US")} joined ·{" "}
-      {row.counts.touches.toLocaleString("en-US")} signed ·{" "}
+      {row.counts.touches.toLocaleString("en-US")} Attributions signed ·{" "}
       {actionsOf(row).toLocaleString("en-US")} actions
     </p>
   );
@@ -495,7 +495,7 @@ function EarningCard() {
         ))}
       </ul>
       <p className="mt-3 text-xs text-ink-muted">
-        Re-signing an attribution earns nothing.
+        Re-signing an attribution earns 0 boneypoints.
       </p>
     </Card>
   );

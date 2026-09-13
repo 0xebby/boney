@@ -1,0 +1,2581 @@
+<title>Boneyard Verification Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..112,400..700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  /* ── tokens: light is the base, both overrides only redefine ───────────── */
+  :root {
+    --ground: #EFF1EF;
+    --surface: #FAFBFA;
+    --surface-sunk: #E5E8E5;
+    --ink: #161A19;
+    --ink-soft: #4A5250;
+    --ink-faint: #7C8582;
+    --rule: #D3D8D5;
+    --rule-soft: #E2E6E3;
+
+    --accent: #1F6F62;
+    --accent-soft: #D7E7E3;
+    --accent-ink: #145046;
+
+    --pass: #3B7A52;
+    --pass-soft: #DCEADF;
+    --warn: #A2670B;
+    --warn-soft: #F4E7CD;
+    --idle: #6E7A85;
+    --idle-soft: #E1E6E9;
+
+    --shadow: 0 1px 2px rgba(22, 26, 25, .05), 0 6px 16px -10px rgba(22, 26, 25, .18);
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101413;
+      --surface: #181D1C;
+      --surface-sunk: #0B0E0E;
+      --ink: #E8EDEB;
+      --ink-soft: #A3AFAB;
+      --ink-faint: #74807C;
+      --rule: #2A3231;
+      --rule-soft: #212827;
+
+      --accent: #55B7A4;
+      --accent-soft: #1B3A35;
+      --accent-ink: #7FCFBF;
+
+      --pass: #6FB587;
+      --pass-soft: #1D3325;
+      --warn: #D69A2E;
+      --warn-soft: #3A2D12;
+      --idle: #8996A0;
+      --idle-soft: #222A2E;
+
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 20px -12px rgba(0, 0, 0, .6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #101413;
+    --surface: #181D1C;
+    --surface-sunk: #0B0E0E;
+    --ink: #E8EDEB;
+    --ink-soft: #A3AFAB;
+    --ink-faint: #74807C;
+    --rule: #2A3231;
+    --rule-soft: #212827;
+
+    --accent: #55B7A4;
+    --accent-soft: #1B3A35;
+    --accent-ink: #7FCFBF;
+
+    --pass: #6FB587;
+    --pass-soft: #1D3325;
+    --warn: #D69A2E;
+    --warn-soft: #3A2D12;
+    --idle: #8996A0;
+    --idle-soft: #222A2E;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 20px -12px rgba(0, 0, 0, .6);
+  }
+  /* ── base ──────────────────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 40px 28px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+  h1 { font-size: 33px; font-weight: 700; letter-spacing: -.022em; font-stretch: 96%; line-height: 1.1; }
+  h2 { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+  h3 { font-size: 14px; font-weight: 650; letter-spacing: -.005em; }
+  p { margin: 0; max-width: 66ch; }
+
+  .eyebrow {
+    font-family: var(--display);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-stretch: 88%;
+  }
+
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  /* ── masthead ──────────────────────────────────────────────────────────── */
+  .masthead { display: flex; flex-direction: column; gap: 18px; }
+  .mast-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 20px; }
+  .mast-top h1 { flex: 1 1 340px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--display); font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 3px; white-space: nowrap;
+  }
+  .pill-pass { background: var(--pass-soft); color: var(--pass); }
+  .pill-warn { background: var(--warn-soft); color: var(--warn); }
+  .pill-idle { background: var(--idle-soft); color: var(--idle); }
+  .pill-accent { background: var(--accent-soft); color: var(--accent-ink); }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .ident {
+    display: flex; flex-wrap: wrap; gap: 2px 26px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint);
+    padding-bottom: 18px; border-bottom: 1px solid var(--rule);
+  }
+  .ident b { color: var(--ink-soft); font-weight: 500; }
+
+  /* ── headline figures: the only place big numbers are spent ─────────────── */
+  .figures { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); }
+  .fig { background: var(--surface); padding: 14px 16px 15px; display: flex; flex-direction: column; gap: 3px; }
+  .fig .v { font-family: var(--display); font-size: 27px; font-weight: 650; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .fig .u { font-size: 12px; color: var(--ink-faint); }
+  .fig .k { font-family: var(--display); font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); }
+
+  /* ── the verdict ───────────────────────────────────────────────────────── */
+  .verdict {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 3px solid var(--warn);
+    padding: 20px 24px; display: flex; flex-direction: column; gap: 10px;
+    box-shadow: var(--shadow);
+  }
+  .verdict h2 { font-size: 17px; }
+  .verdict p { color: var(--ink-soft); }
+  .verdict strong { color: var(--ink); font-weight: 600; }
+
+  /* ── layer rows: the pipeline, in order, because order is the content ───── */
+  .layers { display: flex; flex-direction: column; }
+  .layer {
+    display: grid; grid-template-columns: 52px 1fr; gap: 0 20px;
+    padding: 26px 0; border-top: 1px solid var(--rule);
+  }
+  .layer:last-child { border-bottom: 1px solid var(--rule); }
+
+  .rail { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .rail .n {
+    font-family: var(--display); font-size: 13px; font-weight: 700;
+    font-variant-numeric: tabular-nums; color: var(--ink-faint);
+  }
+  .rail .stripe { flex: 1; width: 3px; border-radius: 2px; min-height: 34px; }
+  .s-pass { background: var(--pass); }
+  .s-warn { background: var(--warn); }
+  .s-idle { background: var(--idle); }
+
+  .lbody { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .lhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+  .lhead h2 { margin-right: 2px; }
+  .lhead .mech { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); }
+  .lbody > p { color: var(--ink-soft); font-size: 14.5px; }
+
+  /* ── readouts: label/value pairs, one object repeated ───────────────────── */
+  .readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 1px; background: var(--rule-soft); }
+  .ro { background: var(--surface); padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ro .k { font-size: 10.5px; font-family: var(--display); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+  .ro .v { font-family: var(--mono); font-size: 13.5px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .ro .v em { font-style: normal; color: var(--ink-faint); font-size: 11.5px; }
+
+  /* ── tables ────────────────────────────────────────────────────────────── */
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 12px; text-align: left; white-space: nowrap; }
+  th {
+    font-family: var(--display); font-size: 10px; font-weight: 600;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-faint);
+    border-bottom: 1px solid var(--rule); background: var(--surface-sunk);
+  }
+  td { border-bottom: 1px solid var(--rule-soft); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  td.t { font-family: var(--body); white-space: normal; }
+  .r { text-align: right; }
+  .off { color: var(--warn); font-weight: 700; }
+  .zero { color: var(--ink-faint); }
+  .agree { color: var(--pass); }
+
+  /* ── charts ────────────────────────────────────────────────────────────── */
+  .chart { background: var(--surface); border: 1px solid var(--rule); padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 12px; }
+  .chart-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; }
+  .chart-head h3 { font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 10px; height: 10px; border-radius: 1px; }
+  .chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .ct { font-family: var(--mono); font-size: 10px; fill: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .cl { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .cv { font-family: var(--mono); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .grid-line { stroke: var(--rule-soft); stroke-width: 1; }
+  .axis-line { stroke: var(--rule); stroke-width: 1; }
+
+  /* ── the trace: two passes, one range ──────────────────────────────────── */
+  .trace { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule); background: var(--surface); }
+  .pass { display: grid; grid-template-columns: 118px 1fr; gap: 0 18px; padding: 13px 16px; border-bottom: 1px solid var(--rule-soft); }
+  .pass:last-child { border-bottom: none; }
+  .pass.bad { background: var(--warn-soft); }
+  .pass .when { display: flex; flex-direction: column; gap: 1px; }
+  .pass .when .b { font-family: var(--mono); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pass .when .h { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); }
+  .pass .what { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 12.5px; }
+  .pass .what .rng { color: var(--ink-faint); }
+  .pass .what .wrote { font-variant-numeric: tabular-nums; }
+
+  .sum {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+    font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
+    background: var(--surface-sunk); border: 1px solid var(--rule);
+    padding: 12px 16px;
+  }
+  .sum .op { color: var(--ink-faint); }
+  .sum .bad { color: var(--warn); font-weight: 700; }
+  .sum .good { color: var(--pass); font-weight: 700; }
+
+  /* ── footer ────────────────────────────────────────────────────────────── */
+  footer {
+    display: flex; flex-direction: column; gap: 6px;
+    padding-top: 20px; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  }
+
+  @media (max-width: 720px) {
+    .page { padding: 28px 18px 56px; gap: 32px; }
+    h1 { font-size: 27px; }
+    .figures { grid-template-columns: repeat(2, 1fr); }
+    .layer { grid-template-columns: 30px 1fr; gap: 0 14px; }
+    .pass { grid-template-columns: 1fr; gap: 6px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+
+
+
+
+  /* ── dashboard-only: the matrix, layer legend and campaign cards ────────── */
+  .lay { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 1px; background: var(--rule); }
+  .lay > div { background: var(--surface); padding: 12px 14px 13px; display: flex; flex-direction: column; gap: 5px; }
+  .lay .k { font-family: var(--display); font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent-ink); }
+  .lay p { font-size: 12.5px; color: var(--ink-soft); max-width: none; }
+  .lay .no { font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
+
+  .badge { display: inline-block; font-family: var(--display); font-size: 10px; font-weight: 700;
+    letter-spacing: .07em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; }
+  .b-pass { background: var(--pass-soft); color: var(--pass); }
+  .b-warn { background: var(--warn-soft); color: var(--warn); }
+  .b-bad  { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+  .b-idle { background: var(--idle-soft); color: var(--idle); }
+
+  .camp { display: flex; flex-direction: column; gap: 14px; padding: 24px 0; border-top: 1px solid var(--rule); }
+  .camp-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px; }
+  .camp-head .id { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
+  .kpi { display: flex; flex-direction: column; gap: 9px; padding: 14px 0 0; border-top: 1px dashed var(--rule-soft); }
+  .kpi-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-family: var(--mono); font-size: 12.5px; }
+  .kpi-head .kn { font-family: var(--display); font-size: 13.5px; font-weight: 650; letter-spacing: -.005em; }
+  .sig { font-family: var(--mono); font-size: 11.5px; color: var(--ink-faint); overflow-wrap: anywhere; }
+  .note { font-size: 12.5px; color: var(--ink-soft); max-width: 84ch; }
+  .note b { color: var(--ink); font-weight: 600; }
+  td.gap { color: var(--warn); font-weight: 700; }
+  .tl { display: flex; flex-direction: column; border: 1px solid var(--rule); background: var(--surface); }
+  .tl-row { display: grid; grid-template-columns: 108px 132px 1fr; gap: 0 16px; padding: 8px 14px;
+    border-bottom: 1px solid var(--rule-soft); font-family: var(--mono); font-size: 12px; }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-row .ev { font-weight: 700; }
+  .tl-row .ar { color: var(--ink-faint); overflow-wrap: anywhere; }
+  .tl-row.cfg { background: var(--surface-sunk); }
+  @media (max-width: 720px) { .tl-row { grid-template-columns: 1fr; gap: 3px; } }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="mast-top">
+      <h1>Every campaign, every layer that could disagree</h1>
+      <span class="pill pill-pass"><span class="dot"></span>
+        subgraph reproduces the chain</span>
+      <span class="pill pill-pass"><span class="dot"></span>
+        subgraph lag 2 blocks</span>
+    </div>
+    <p>Five layers read the same campaigns. Four of them are supposed to produce the same number, and
+    the fifth — escrow — is supposed to follow from it. This page puts them in one row per KPI so the
+    disagreements are the thing you see first, not something you have to go looking for.</p>
+    <div class="ident">
+      <span><b>registry</b> 0x3e0a2fc423dE77bEE9147879308BFfFC6129c4EE</span>
+      <span><b>reporter</b> 0xba954E89cE301415964E9405f09F4Cc7c668976A</span>
+      <span><b>verifier</b> 0xFF69E2B4A1Cb96a59dbDD138fb7215dCa58aEBd6</span>
+      <span><b>head</b> 46,421,496</span>
+      <span><b>read</b> 2026-09-05 12:28:01Z</span>
+    </div>
+  </header>
+
+  <div class="figures">
+    <div class="fig"><span class="v">7</span><span class="u">campaigns, all Active</span><span class="k">registry</span></div>
+    <div class="fig"><span class="v">15</span><span class="u">6 gated, 9 ungated</span><span class="k">KPIs</span></div>
+    <div class="fig"><span class="v">15</span><span class="u">of 15 re-scanned independently</span><span class="k">checked</span></div>
+    <div class="fig"><span class="v">472,500</span><span class="u">paid from escrow, 22 promoters</span><span class="k">settled</span></div>
+  </div>
+
+  <section>
+    <span class="eyebrow">The layers</span>
+    <h2 style="margin: 6px 0 14px">Five readers, one of them independent</h2>
+    <div class="lay">
+      <div><span class="k">Claim</span><p><span class="mono">userCreditedOf</span> — what the project reported and the chain credited, segmented per action block.</p><span class="no">blind to whether it was true</span></div>
+      <div><span class="k">Ceiling</span><p><span class="mono">observedProgressOf</span> — what the relayer saw in the logs, unfiltered. Gated KPIs only.</p><span class="no">blind to the KPI's topic filter, and absent on 9 of 15 KPIs</span></div>
+      <div><span class="k">Subgraph</span><p><span class="mono">Credit</span> and <span class="mono">TierPayout</span> folded — the whole credited history, in two POSTs instead of 45 calls.</p><span class="no">blind to the verifier: no data source watches it</span></div>
+      <div><span class="k">Re-scan</span><p><span class="mono">eth_getLogs</span> replayed against each KPI's own <span class="mono">params</span>, narrowed to that campaign's referrals.</p><span class="no">the only column not produced by the code it checks</span></div>
+      <div><span class="k">Escrow</span><p><span class="mono">paidOut</span> and <span class="mono">remainingPool</span> — money that actually moved.</p><span class="no">blind to which KPI earned it</span></div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">The matrix</span>
+    <h2 style="margin: 6px 0 6px">15 KPIs, and where the layers part company</h2>
+    <p class="note" style="margin-bottom: 14px">Totals are campaign-wide sums across referrals, in the
+    KPI's own scaled units. <b>Claim</b> is what the chain credited; <b>ceiling</b> what the relayer
+    observed; <b>graph</b> the subgraph's fold of <span class="mono">Credit</span>; <b>re-scan</b> an
+    independent replay. A gated KPI's ceiling is read unfiltered, so a ceiling above the claim is
+    expected and harmless — only a ceiling <em>below</em> it binds.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Campaign</th><th>KPI</th><th>Source</th><th>Gate</th>
+        <th class="r">Claim</th><th class="r">Ceiling</th><th class="r">Graph</th><th class="r">Re-scan</th>
+        <th class="r">Logs</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="t">Venus</td>
+          <td>0 <span class="zero">Deposit</span></td>
+          <td class="t">WETH <span class="zero">T1·dataWord0</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">682</td>
+          <td class="r zero">—</td>
+          <td class="r agree">682</td>
+          <td class="r gap">555</td>
+          <td class="r zero">69</td>
+          <td><span class="badge b-bad">inflated</span></td>
+        </tr>
+        <tr>
+          <td class="t">Venus</td>
+          <td>1 <span class="zero">Deposit</span></td>
+          <td class="t">WETH <span class="zero">T1·count</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">97</td>
+          <td class="r zero">—</td>
+          <td class="r agree">97</td>
+          <td class="r gap">69</td>
+          <td class="r zero">69</td>
+          <td><span class="badge b-bad">inflated</span></td>
+        </tr>
+        <tr>
+          <td class="t">Sdy Labs</td>
+          <td>0 <span class="zero">Mint</span></td>
+          <td class="t">OpenMintNFT <span class="zero">T2·count</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">35</td>
+          <td class="r zero">—</td>
+          <td class="r agree">35</td>
+          <td class="r agree">35</td>
+          <td class="r zero">35</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+        <tr>
+          <td class="t">Sdy Labs</td>
+          <td>1 <span class="zero">TokenPurchase</span></td>
+          <td class="t">OpenMintNFT <span class="zero">T1·dataWord0</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">35</td>
+          <td class="r zero">—</td>
+          <td class="r agree">35</td>
+          <td class="r agree">35</td>
+          <td class="r zero">12</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+        <tr>
+          <td class="t">SuperBridge</td>
+          <td>0 <span class="zero">Deposit</span></td>
+          <td class="t">WETH <span class="zero">T1·count</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">550</td>
+          <td class="r zero">—</td>
+          <td class="r agree">550</td>
+          <td class="r gap">286</td>
+          <td class="r zero">286</td>
+          <td><span class="badge b-bad">inflated</span></td>
+        </tr>
+        <tr>
+          <td class="t">SuperBridge</td>
+          <td>1 <span class="zero">withdraw</span></td>
+          <td class="t">WETH <span class="zero">T1·count</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">550</td>
+          <td class="r zero">—</td>
+          <td class="r agree">550</td>
+          <td class="r gap">270</td>
+          <td class="r zero">270</td>
+          <td><span class="badge b-bad">inflated</span></td>
+        </tr>
+        <tr>
+          <td class="t">SuperBridge</td>
+          <td>2 <span class="zero">Volume</span></td>
+          <td class="t">WETH <span class="zero">T1·dataWord0</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">1,320</td>
+          <td class="r zero">—</td>
+          <td class="r agree">1,320</td>
+          <td class="r gap">723</td>
+          <td class="r zero">286</td>
+          <td><span class="badge b-bad">inflated</span></td>
+        </tr>
+        <tr>
+          <td class="t">Gyndore Testnet</td>
+          <td>0 <span class="zero">Swap</span></td>
+          <td class="t">GYND/cbBTC pool <span class="zero">T2·count</span></td>
+          <td><span class="badge b-pass">guarded</span></td>
+          <td class="r">229</td>
+          <td class="r">329</td>
+          <td class="r agree">229</td>
+          <td class="r gap">230</td>
+          <td class="r zero">230</td>
+          <td><span class="badge b-warn">behind</span></td>
+        </tr>
+        <tr>
+          <td class="t">Gyndore Testnet</td>
+          <td>1 <span class="zero">Stake</span></td>
+          <td class="t">GYND staking <span class="zero">T1·count</span></td>
+          <td><span class="badge b-pass">guarded</span></td>
+          <td class="r">131</td>
+          <td class="r">131</td>
+          <td class="r agree">131</td>
+          <td class="r agree">131</td>
+          <td class="r zero">131</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+        <tr>
+          <td class="t">Gyndore Testnet</td>
+          <td>2 <span class="zero">Mint</span></td>
+          <td class="t">position manager <span class="zero">T2·count</span></td>
+          <td><span class="badge b-pass">guarded</span></td>
+          <td class="r">0</td>
+          <td class="r">0</td>
+          <td class="r agree">0</td>
+          <td class="r agree">0</td>
+          <td class="r zero">0</td>
+          <td><span class="badge b-idle">dormant</span></td>
+        </tr>
+        <tr>
+          <td class="t">Boneyard-join-gyndore</td>
+          <td>0 <span class="zero">signUps</span></td>
+          <td class="t">Gyndore campaign <span class="zero">T1·count</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">1</td>
+          <td class="r zero">—</td>
+          <td class="r agree">1</td>
+          <td class="r agree">1</td>
+          <td class="r zero">1</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+        <tr>
+          <td class="t">Uniswap</td>
+          <td>0 <span class="zero">Swap</span></td>
+          <td class="t">WETH/USDC pool <span class="zero">T2·count</span></td>
+          <td><span class="badge b-pass">guarded</span></td>
+          <td class="r">151</td>
+          <td class="r">151</td>
+          <td class="r agree">151</td>
+          <td class="r agree">151</td>
+          <td class="r zero">151</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+        <tr>
+          <td class="t">Uniswap</td>
+          <td>1 <span class="zero">Volume</span></td>
+          <td class="t">USDC <span class="zero">T2·dataWord0</span></td>
+          <td><span class="badge b-pass">guarded</span></td>
+          <td class="r">0</td>
+          <td class="r">2,447</td>
+          <td class="r agree">0</td>
+          <td class="r gap">2,447</td>
+          <td class="r zero">151</td>
+          <td><span class="badge b-bad">unclaimed</span></td>
+        </tr>
+        <tr>
+          <td class="t">Uniswap</td>
+          <td>2 <span class="zero">Deposit</span></td>
+          <td class="t">WETH <span class="zero">T1·count</span></td>
+          <td><span class="badge b-pass">guarded</span></td>
+          <td class="r">6</td>
+          <td class="r">6</td>
+          <td class="r agree">6</td>
+          <td class="r agree">6</td>
+          <td class="r zero">6</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+        <tr>
+          <td class="t">Boneyard-sign-attribution</td>
+          <td>0 <span class="zero">ActiveUser</span></td>
+          <td class="t">AttributionRegistry <span class="zero">T2·count</span></td>
+          <td><span class="badge b-idle">open</span></td>
+          <td class="r">1</td>
+          <td class="r zero">—</td>
+          <td class="r agree">1</td>
+          <td class="r agree">1</td>
+          <td class="r zero">1</td>
+          <td><span class="badge b-pass">exact</span></td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Checkpoints</span>
+    <h2 style="margin: 6px 0 6px">Where the relayer stopped, and what that leaves unobserved</h2>
+    <p class="note" style="margin-bottom: 14px"><span class="mono">lastScannedBlock</span> is keyed
+    <span class="mono">(campaign, kpi, epoch)</span> and lives on chain, because the relayer process keeps no
+    state. Totals are <b>additive</b> — a batch writes stored + delta — so re-folding a range that is
+    already behind the checkpoint counts it twice. That is why the resume point is
+    <span class="mono">checkpoint + 1</span> and why a rescan is refused rather than clamped.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Campaign</th><th>KPI</th><th class="r">Window start</th><th class="r">Checkpoint</th>
+        <th class="r">Window end</th><th class="r">Unscanned to head</th><th class="r">Epoch</th><th>Next pass</th></tr></thead>
+      <tbody>
+        <tr><td class="t">Gyndore Testnet</td><td>0</td>
+          <td class="r zero">46,215,147</td><td class="r">46,367,038</td><td class="r zero">47,521,747</td>
+          <td class="r gap">54,453</td>
+          <td class="r zero">0</td><td class="t">resumes at 46,367,039</td></tr>
+        <tr><td class="t">Gyndore Testnet</td><td>1</td>
+          <td class="r zero">46,215,147</td><td class="r">46,367,060</td><td class="r zero">47,521,747</td>
+          <td class="r gap">54,431</td>
+          <td class="r zero">0</td><td class="t">resumes at 46,367,061</td></tr>
+        <tr><td class="t">Gyndore Testnet</td><td>2</td>
+          <td class="r zero">46,215,147</td><td class="r">46,367,085</td><td class="r zero">47,521,747</td>
+          <td class="r gap">54,406</td>
+          <td class="r zero">0</td><td class="t">resumes at 46,367,086</td></tr>
+        <tr><td class="t">Uniswap</td><td>0</td>
+          <td class="r zero">46,363,409</td><td class="r">46,367,092</td><td class="r zero">47,670,009</td>
+          <td class="r gap">54,399</td>
+          <td class="r zero">0</td><td class="t">resumes at 46,367,093</td></tr>
+        <tr><td class="t">Uniswap</td><td>1</td>
+          <td class="r zero">46,363,409</td><td class="r">46,366,941</td><td class="r zero">47,670,009</td>
+          <td class="r gap">54,550</td>
+          <td class="r zero">0</td><td class="t">resumes at 46,366,942</td></tr>
+        <tr><td class="t">Uniswap</td><td>2</td>
+          <td class="r zero">46,363,409</td><td class="r">46,366,949</td><td class="r zero">47,670,009</td>
+          <td class="r gap">54,542</td>
+          <td class="r zero">0</td><td class="t">resumes at 46,366,950</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Timeline</span>
+    <h2 style="margin: 6px 0 6px">798 relay passes, 23 of which found anything</h2>
+    <p class="note" style="margin-bottom: 14px">This is the only history on the page that no subgraph
+    holds — <span class="mono">subgraph.yaml</span> declares no data source for the verifier, so the
+    observation layer's past exists solely in logs. One transaction is one pass, because
+    <span class="mono">reportBatch</span> moves the totals and the checkpoint together or not at all. The
+    775 passes not listed folded an empty range and advanced the checkpoint only —
+    which is the loop working, not failing.</p>
+    <div class="tl">
+      <div class="tl-row cfg"><span>46,215,164</span>
+        <span class="ev">Kpi Configured</span>
+        <span class="ar">Gyndore Testnet kpi 0 — Swap on GYND/cbBTC pool, actor param 1, window 46,215,147–47,521,747</span></div>
+      <div class="tl-row cfg"><span>46,215,167</span>
+        <span class="ev">Kpi Configured</span>
+        <span class="ar">Gyndore Testnet kpi 1 — Staked on GYND staking, actor param 0, window 46,215,147–47,521,747</span></div>
+      <div class="tl-row cfg"><span>46,215,170</span>
+        <span class="ev">Kpi Configured</span>
+        <span class="ar">Gyndore Testnet kpi 2 — Transfer on position manager, actor param 1, window 46,215,147–47,521,747</span></div>
+      <div class="tl-row cfg"><span>46,363,426</span>
+        <span class="ev">Kpi Configured</span>
+        <span class="ar">Uniswap kpi 0 — Swap on WETH/USDC pool, actor param 1, window 46,363,409–47,670,009</span></div>
+      <div class="tl-row cfg"><span>46,363,427</span>
+        <span class="ev">Kpi Configured</span>
+        <span class="ar">Uniswap kpi 1 — Transfer on USDC, actor param 1, window 46,363,409–47,670,009</span></div>
+      <div class="tl-row cfg"><span>46,363,428</span>
+        <span class="ev">Kpi Configured</span>
+        <span class="ar">Uniswap kpi 2 — Deposit on WETH, actor param 0, window 46,363,409–47,670,009</span></div>
+      <div class="tl-row"><span>46,218,122</span>
+        <span class="ev">wrote 2 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 1 — totals now sum 7 raw, checkpoint → 46,218,011</span></div>
+      <div class="tl-row"><span>46,221,638</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 1 raw, checkpoint → 46,221,334</span></div>
+      <div class="tl-row"><span>46,221,755</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 2 raw, checkpoint → 46,221,479</span></div>
+      <div class="tl-row"><span>46,223,111</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 1 raw, checkpoint → 46,223,088</span></div>
+      <div class="tl-row"><span>46,298,490</span>
+        <span class="ev">wrote 2 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 11 raw, checkpoint → 46,298,398</span></div>
+      <div class="tl-row"><span>46,298,548</span>
+        <span class="ev">wrote 2 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 22 raw, checkpoint → 46,298,451</span></div>
+      <div class="tl-row"><span>46,335,306</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 13 raw, checkpoint → 46,335,282</span></div>
+      <div class="tl-row"><span>46,336,737</span>
+        <span class="ev">wrote 3 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 88 raw, checkpoint → 46,336,714</span></div>
+      <div class="tl-row"><span>46,336,749</span>
+        <span class="ev">wrote 3 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 176 raw, checkpoint → 46,336,728</span></div>
+      <div class="tl-row"><span>46,337,792</span>
+        <span class="ev">wrote 2 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 69 raw, checkpoint → 46,337,772</span></div>
+      <div class="tl-row"><span>46,337,809</span>
+        <span class="ev">wrote 3 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 1 — totals now sum 27 raw, checkpoint → 46,337,789</span></div>
+      <div class="tl-row"><span>46,337,901</span>
+        <span class="ev">wrote 2 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 102 raw, checkpoint → 46,337,879</span></div>
+      <div class="tl-row"><span>46,337,921</span>
+        <span class="ev">wrote 5 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 1 — totals now sum 99 raw, checkpoint → 46,337,901</span></div>
+      <div class="tl-row"><span>46,339,435</span>
+        <span class="ev">wrote 3 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 0 — totals now sum 25 raw, checkpoint → 46,339,413</span></div>
+      <div class="tl-row"><span>46,339,458</span>
+        <span class="ev">wrote 3 ceilings</span>
+        <span class="ar">Gyndore Testnet kpi 1 — totals now sum 25 raw, checkpoint → 46,339,436</span></div>
+      <div class="tl-row"><span>46,364,748</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 2 — totals now sum 6 raw, checkpoint → 46,364,721</span></div>
+      <div class="tl-row"><span>46,366,368</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 0 — totals now sum 1 raw, checkpoint → 46,366,343</span></div>
+      <div class="tl-row"><span>46,366,396</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 1 — totals now sum 162,966 raw, checkpoint → 46,366,370</span></div>
+      <div class="tl-row"><span>46,366,620</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 0 — totals now sum 5 raw, checkpoint → 46,366,595</span></div>
+      <div class="tl-row"><span>46,366,646</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 1 — totals now sum 5,046,456 raw, checkpoint → 46,366,621</span></div>
+      <div class="tl-row"><span>46,366,746</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 0 — totals now sum 131 raw, checkpoint → 46,366,722</span></div>
+      <div class="tl-row"><span>46,366,770</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 1 — totals now sum 24,479,698 raw, checkpoint → 46,366,746</span></div>
+      <div class="tl-row"><span>46,366,939</span>
+        <span class="ev">wrote 1 ceiling</span>
+        <span class="ar">Uniswap kpi 0 — totals now sum 151 raw, checkpoint → 46,366,913</span></div>
+      <div class="tl-row"><span class="zero">46,215,291–46,367,062</span>
+        <span class="ev zero">239 empty passes</span>
+        <span class="ar">Gyndore Testnet kpi 0 — no matching log in range, checkpoint walked to 46,367,038</span></div>
+      <div class="tl-row"><span class="zero">46,215,309–46,367,093</span>
+        <span class="ev zero">249 empty passes</span>
+        <span class="ar">Gyndore Testnet kpi 2 — no matching log in range, checkpoint walked to 46,367,085</span></div>
+      <div class="tl-row"><span class="zero">46,215,338–46,367,085</span>
+        <span class="ev zero">243 empty passes</span>
+        <span class="ar">Gyndore Testnet kpi 1 — no matching log in range, checkpoint walked to 46,367,060</span></div>
+      <div class="tl-row"><span class="zero">46,364,713–46,367,100</span>
+        <span class="ev zero">12 empty passes</span>
+        <span class="ar">Uniswap kpi 0 — no matching log in range, checkpoint walked to 46,367,092</span></div>
+      <div class="tl-row"><span class="zero">46,364,720–46,366,949</span>
+        <span class="ev zero">12 empty passes</span>
+        <span class="ar">Uniswap kpi 1 — no matching log in range, checkpoint walked to 46,366,941</span></div>
+      <div class="tl-row"><span class="zero">46,364,863–46,366,979</span>
+        <span class="ev zero">14 empty passes</span>
+        <span class="ar">Uniswap kpi 2 — no matching log in range, checkpoint walked to 46,366,949</span></div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Campaign by campaign</span>
+    <h2 style="margin: 6px 0 6px">Every referral, every layer</h2>
+    <p class="note">One block per campaign. <b>Claim</b> is <span class="mono">userCreditedOf</span>;
+    <b>to live</b> is <span class="mono">creditedToOf</span> against the promoter who holds the referral
+    <em>now</em> — a gap between them is credit segmented to an earlier promoter, which is correct, not a
+    loss. <b>Last report</b> is the block the claim watermark sits at.</p>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>Venus</h2>
+        <span class="id">id 0 · 0x16FE7197F7Df62D86CD7606FA6F72dBF30A23491</span>
+        <span class="badge b-idle">ungated</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">9,600 <em>of 20,000 bUSD</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">10,400 <em>bUSD</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">19,500</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">30 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">4 <em>4 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,137,425</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">23 <em>credits, 22 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · Deposit</span>
+          <span class="badge b-bad">inflated</span>
+          <span class="zero">total 682 · tiers 1 / 5 / 20 → 200 / 400 / 800 bUSD</span>
+        </div>
+        <div class="sig">WETH <span class="zero">0x4200000000000000000000000000000000000006</span>
+          · topic0 0xe1fffcc492… · actor T1
+          · amount dataWord0 · scale 1,000,000,000,000,000
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x98bEf229…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">402</td>
+              <td class="r zero">382</td>
+              <td class="r agree">402</td>
+
+
+              <td class="r">272</td>
+              <td class="r zero">29</td>
+              <td class="r zero">46,167,988</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xd572Ab30…</td>
+              <td>0x3Ce266…</td>
+              <td class="r gap">5</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+
+
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,137,758</td>
+              <td><span class="badge b-warn">under</span></td>
+            </tr>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">270</td>
+              <td class="r">270</td>
+              <td class="r agree">270</td>
+
+
+              <td class="r">270</td>
+              <td class="r zero">27</td>
+              <td class="r zero">46,167,990</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x030E293A…</td>
+              <td>0xba954E…</td>
+              <td class="r agree">5</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+
+
+              <td class="r">5</td>
+              <td class="r zero">5</td>
+              <td class="r zero">46,159,020</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0xba954E89…</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+              <td class="r">2</td>
+              <td class="r agree">2</td>
+              <td class="r">600 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">20</td>
+              <td class="r agree">20</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">652</td>
+              <td class="r agree">652</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x3Ce2660e…</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+              <td class="r">2</td>
+              <td class="r agree">2</td>
+              <td class="r">600 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 1 · Deposit</span>
+          <span class="badge b-bad">inflated</span>
+          <span class="zero">total 97 · tiers 1 / 3 / 5 → 200 / 400 / 800 bUSD</span>
+        </div>
+        <div class="sig">WETH <span class="zero">0x4200000000000000000000000000000000000006</span>
+          · topic0 0xe1fffcc492… · actor T1
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x98bEf229…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">60</td>
+              <td class="r zero">40</td>
+              <td class="r agree">60</td>
+
+
+              <td class="r">29</td>
+              <td class="r zero">29</td>
+              <td class="r zero">46,168,089</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xd572Ab30…</td>
+              <td>0x3Ce266…</td>
+              <td class="r gap">5</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+
+
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,137,788</td>
+              <td><span class="badge b-warn">under</span></td>
+            </tr>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">27</td>
+              <td class="r">27</td>
+              <td class="r agree">27</td>
+
+
+              <td class="r">27</td>
+              <td class="r zero">27</td>
+              <td class="r zero">46,168,092</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x030E293A…</td>
+              <td>0xba954E…</td>
+              <td class="r agree">5</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+
+
+              <td class="r">5</td>
+              <td class="r zero">5</td>
+              <td class="r zero">46,159,007</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0xba954E89…</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">20</td>
+              <td class="r agree">20</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">67</td>
+              <td class="r agree">67</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x3Ce2660e…</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>Sdy Labs</h2>
+        <span class="id">id 1 · 0xF6f786589391410B41dEfBd02a4B6303Ca372542</span>
+        <span class="badge b-idle">ungated</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">8,400 <em>of 20,000 bUSD</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">11,600 <em>bUSD</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">0</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">30 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">3 <em>6 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,129,802</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">9 <em>credits, 18 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · Mint</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 35 · tiers 1 / 3 / 10 → 200 / 400 / 800 bUSD</span>
+        </div>
+        <div class="sig">OpenMintNFT <span class="zero">0x3bdD104560Ae0F0cC4360E691Cdcd972F4CD1193</span>
+          · topic0 0xddf252ad1b… · actor T2
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">11</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+
+
+              <td class="r">11</td>
+              <td class="r zero">11</td>
+              <td class="r zero">46,360,695</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x0b5bFad0…</td>
+              <td>0xba954E…</td>
+              <td class="r agree">13</td>
+              <td class="r">13</td>
+              <td class="r agree">13</td>
+
+
+              <td class="r">13</td>
+              <td class="r zero">13</td>
+              <td class="r zero">46,360,934</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0x450E47…</td>
+              <td class="r agree">11</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+
+
+              <td class="r">11</td>
+              <td class="r zero">11</td>
+              <td class="r zero">46,360,979</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0xba954E89…</td>
+              <td class="r">13</td>
+              <td class="r agree">13</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 1 · TokenPurchase</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 35 · tiers 1 / 3 / 10 → 200 / 400 / 800 bUSD</span>
+        </div>
+        <div class="sig">OpenMintNFT <span class="zero">0x3bdD104560Ae0F0cC4360E691Cdcd972F4CD1193</span>
+          · topic0 0x25b428dfde… · actor T1
+          · amount dataWord0 · scale 1,000,000,000,000,000
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">11</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+
+
+              <td class="r">11</td>
+              <td class="r zero">3</td>
+              <td class="r zero">46,362,524</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x0b5bFad0…</td>
+              <td>0xba954E…</td>
+              <td class="r agree">13</td>
+              <td class="r">13</td>
+              <td class="r agree">13</td>
+
+
+              <td class="r">13</td>
+              <td class="r zero">3</td>
+              <td class="r zero">46,362,513</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0x450E47…</td>
+              <td class="r agree">11</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+
+
+              <td class="r">11</td>
+              <td class="r zero">6</td>
+              <td class="r zero">46,362,534</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0xba954E89…</td>
+              <td class="r">13</td>
+              <td class="r agree">13</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">11</td>
+              <td class="r agree">11</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1,400 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>SuperBridge</h2>
+        <span class="id">id 2 · 0x0a01B03EBaCBb553AD5b269297921F32D261C45F</span>
+        <span class="badge b-idle">ungated</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">450,000 <em>of 1,000,000 bUSD</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">550,000 <em>bUSD</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">5,000</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">30 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">5 <em>18 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,161,860</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">81 <em>credits, 36 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · Deposit</span>
+          <span class="badge b-bad">inflated</span>
+          <span class="zero">total 550 · tiers 25 / 50 / 75 / 100 → 5,000 / 10,000 / 15,000 / 20,000 bUSD</span>
+        </div>
+        <div class="sig">WETH <span class="zero">0x4200000000000000000000000000000000000006</span>
+          · topic0 0xe1fffcc492… · actor T1
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x98bEf229…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">28</td>
+              <td class="r">28</td>
+              <td class="r agree">28</td>
+
+
+              <td class="r">27</td>
+              <td class="r zero">27</td>
+              <td class="r zero">46,168,119</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">27</td>
+              <td class="r">27</td>
+              <td class="r agree">27</td>
+
+
+              <td class="r">27</td>
+              <td class="r zero">27</td>
+              <td class="r zero">46,164,090</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,577</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3A49b254…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,573</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">31</td>
+              <td class="r zero">31</td>
+              <td class="r zero">46,177,579</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3f790301…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,571</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x0C99648D…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,567</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x73776691…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,575</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,566</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x79C963aD…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">54</td>
+              <td class="r">54</td>
+              <td class="r agree">54</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,580</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xEbb868Cf…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">25</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,569</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xE94c77Df…</td>
+              <td>0xc27a65…</td>
+              <td class="r agree">1</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+
+
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r zero">46,298,526</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x1Ed6E96e…</td>
+              <td class="r">165</td>
+              <td class="r agree">165</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">219</td>
+              <td class="r agree">219</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">165</td>
+              <td class="r agree">165</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0xc27a6559…</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">0</td>
+              <td class="r agree">0</td>
+              <td class="r">0 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 1 · withdraw</span>
+          <span class="badge b-bad">inflated</span>
+          <span class="zero">total 550 · tiers 25 / 50 / 75 / 100 → 5,000 / 10,000 / 15,000 / 20,000 bUSD</span>
+        </div>
+        <div class="sig">WETH <span class="zero">0x4200000000000000000000000000000000000006</span>
+          · topic0 0x7fcf532c15… · actor T1
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x98bEf229…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">28</td>
+              <td class="r">28</td>
+              <td class="r agree">28</td>
+
+
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r zero">46,168,134</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">27</td>
+              <td class="r">27</td>
+              <td class="r agree">27</td>
+
+
+              <td class="r">0</td>
+              <td class="r zero">—</td>
+              <td class="r zero">46,168,135</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,655</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3A49b254…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,653</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,656</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3f790301…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,652</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x0C99648D…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,650</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x73776691…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,654</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,649</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x79C963aD…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">54</td>
+              <td class="r">54</td>
+              <td class="r agree">54</td>
+
+
+              <td class="r">29</td>
+              <td class="r zero">29</td>
+              <td class="r zero">46,177,658</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xEbb868Cf…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">55</td>
+              <td class="r">55</td>
+              <td class="r agree">55</td>
+
+
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,177,651</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xE94c77Df…</td>
+              <td>0xc27a65…</td>
+              <td class="r gap">1</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+
+
+              <td class="r">0</td>
+              <td class="r zero">—</td>
+              <td class="r zero">46,300,030</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x1Ed6E96e…</td>
+              <td class="r">165</td>
+              <td class="r agree">165</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">219</td>
+              <td class="r agree">219</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">165</td>
+              <td class="r agree">165</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0xc27a6559…</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">0</td>
+              <td class="r agree">0</td>
+              <td class="r">0 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 2 · Volume</span>
+          <span class="badge b-bad">inflated</span>
+          <span class="zero">total 1,320 · tiers 10 / 20 / 30 / 40 → 5,000 / 10,000 / 15,000 / 20,000 bUSD</span>
+        </div>
+        <div class="sig">WETH <span class="zero">0x4200000000000000000000000000000000000006</span>
+          · topic0 0xe1fffcc492… · actor T1
+          · amount dataWord0 · scale 10,000,000,000,000,000
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x98bEf229…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">28</td>
+              <td class="r">28</td>
+              <td class="r agree">28</td>
+
+
+              <td class="r">27</td>
+              <td class="r zero">27</td>
+              <td class="r zero">46,168,151</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">27</td>
+              <td class="r">27</td>
+              <td class="r agree">27</td>
+
+
+              <td class="r">27</td>
+              <td class="r zero">27</td>
+              <td class="r zero">46,164,123</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">139</td>
+              <td class="r">139</td>
+              <td class="r agree">139</td>
+
+
+              <td class="r">73</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,701</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3A49b254…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">134</td>
+              <td class="r">134</td>
+              <td class="r agree">134</td>
+
+
+              <td class="r">68</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,699</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x450E47…</td>
+              <td class="r gap">147</td>
+              <td class="r">147</td>
+              <td class="r agree">147</td>
+
+
+              <td class="r">84</td>
+              <td class="r zero">31</td>
+              <td class="r zero">46,177,702</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3f790301…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">145</td>
+              <td class="r">145</td>
+              <td class="r agree">145</td>
+
+
+              <td class="r">76</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,698</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x0C99648D…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">136</td>
+              <td class="r">136</td>
+              <td class="r agree">136</td>
+
+
+              <td class="r">69</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,694</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x73776691…</td>
+              <td>0x1Ed6E9…</td>
+              <td class="r gap">127</td>
+              <td class="r">127</td>
+              <td class="r agree">127</td>
+
+
+              <td class="r">68</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,700</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">152</td>
+              <td class="r">152</td>
+              <td class="r agree">152</td>
+
+
+              <td class="r">81</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,693</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0x79C963aD…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">151</td>
+              <td class="r">151</td>
+              <td class="r agree">151</td>
+
+
+              <td class="r">82</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,703</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+            <tr>
+              <td>0xEbb868Cf…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">134</td>
+              <td class="r">134</td>
+              <td class="r agree">134</td>
+
+
+              <td class="r">68</td>
+              <td class="r zero">25</td>
+              <td class="r zero">46,177,695</td>
+              <td><span class="badge b-bad">over</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x1Ed6E96e…</td>
+              <td class="r">408</td>
+              <td class="r agree">408</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">492</td>
+              <td class="r agree">492</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+            <tr><td>0x450E4775…</td>
+              <td class="r">420</td>
+              <td class="r agree">420</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">50,000 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>Gyndore Testnet</h2>
+        <span class="id">id 3 · 0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc</span>
+        <span class="badge b-pass">guarded KPIs</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">3,500 <em>of 10,000 GYND</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">6,500 <em>GYND</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">10,000</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">30 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">7 <em>17 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,215,729</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">23 <em>credits, 17 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · Swap</span>
+          <span class="badge b-warn">behind</span>
+          <span class="zero">total 229 · tiers 5 / 25 / 100 → 100 / 200 / 400 GYND</span>
+        </div>
+        <div class="sig">GYND/cbBTC pool <span class="zero">0x7B47daC59075aF44046795BA347EC872D5409263</span>
+          · topic0 0xc42079f94a… · actor T2
+          · amount count · scale 1
+          · filter T1 = 0xc7dbf300b6aea3cfe1730f1c692c606b17b514a6</div>
+        <div class="sig">relay config: <b>Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)</b>
+          · actor param 1 · COUNT
+          · scale 1 · window 46,215,147–47,521,747
+          · checkpoint 46,367,038</div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th><th class="r">Ceiling</th><th class="r">Raw</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0xc7dF1888…</td>
+              <td>0xc7dF18…</td>
+              <td class="r agree">1</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">2</td>
+              <td class="r zero">2</td>
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r zero">46,300,085</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x98bEf229…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">1</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r zero">46,300,087</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">7</td>
+              <td class="r">7</td>
+              <td class="r agree">7</td>
+              <td class="r">13</td>
+              <td class="r zero">13</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,336,939</td>
+              <td><span class="badge b-warn">under</span></td>
+            </tr>
+            <tr>
+              <td>0x030E293A…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">5</td>
+              <td class="r">5</td>
+              <td class="r agree">5</td>
+              <td class="r">10</td>
+              <td class="r zero">10</td>
+              <td class="r">5</td>
+              <td class="r zero">5</td>
+              <td class="r zero">46,298,694</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">30</td>
+              <td class="r">30</td>
+              <td class="r agree">30</td>
+              <td class="r">60</td>
+              <td class="r zero">60</td>
+              <td class="r">30</td>
+              <td class="r zero">30</td>
+              <td class="r zero">46,336,809</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x79C963aD…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">29</td>
+              <td class="r">29</td>
+              <td class="r agree">29</td>
+              <td class="r">58</td>
+              <td class="r zero">58</td>
+              <td class="r">29</td>
+              <td class="r zero">29</td>
+              <td class="r zero">46,336,804</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0xEbb868Cf…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">29</td>
+              <td class="r">29</td>
+              <td class="r agree">29</td>
+              <td class="r">58</td>
+              <td class="r zero">58</td>
+              <td class="r">29</td>
+              <td class="r zero">29</td>
+              <td class="r zero">46,336,799</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0xc7dF18…</td>
+              <td class="r agree">51</td>
+              <td class="r">51</td>
+              <td class="r agree">51</td>
+              <td class="r">51</td>
+              <td class="r zero">51</td>
+              <td class="r">51</td>
+              <td class="r zero">51</td>
+              <td class="r zero">46,337,934</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x3f790301…</td>
+              <td>0x0198fa…</td>
+              <td class="r agree">9</td>
+              <td class="r">9</td>
+              <td class="r agree">9</td>
+              <td class="r">9</td>
+              <td class="r zero">9</td>
+              <td class="r">9</td>
+              <td class="r zero">9</td>
+              <td class="r zero">46,339,594</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x0C99648D…</td>
+              <td>0x0198fa…</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,339,589</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x73776691…</td>
+              <td>0x0198fa…</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,339,585</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x3A49b254…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">51</td>
+              <td class="r zero">0</td>
+              <td class="r agree">51</td>
+              <td class="r">51</td>
+              <td class="r zero">51</td>
+              <td class="r">51</td>
+              <td class="r zero">51</td>
+              <td class="r zero">46,337,930</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0xc7dF1888…</td>
+              <td class="r">103</td>
+              <td class="r agree">103</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">700 <span class="zero">GYND</span></td></tr>
+            <tr><td>0x0198fa30…</td>
+              <td class="r">25</td>
+              <td class="r agree">25</td>
+              <td class="r">2</td>
+              <td class="r agree">2</td>
+              <td class="r">300 <span class="zero">GYND</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">101</td>
+              <td class="r agree">101</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">700 <span class="zero">GYND</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 1 · Stake</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 131 · tiers 3 / 15 / 50 → 100 / 200 / 400 GYND</span>
+        </div>
+        <div class="sig">GYND staking <span class="zero">0x5c0E023Ce4A353e5Cd9a43E28D2879Cb9e876865</span>
+          · topic0 0x5dac0c1b11… · actor T1
+          · amount count · scale 1
+          · filter T2 = 0xd442ec7bddb06b531dca3dd39abaff554170776</div>
+        <div class="sig">relay config: <b>Staked(address indexed user, address indexed token, uint256 amount)</b>
+          · actor param 0 · COUNT
+          · scale 1 · window 46,215,147–47,521,747
+          · checkpoint 46,367,060</div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th><th class="r">Ceiling</th><th class="r">Raw</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0xc7dF1888…</td>
+              <td>0xc7dF18…</td>
+              <td class="r agree">4</td>
+              <td class="r">4</td>
+              <td class="r agree">4</td>
+              <td class="r">4</td>
+              <td class="r zero">4</td>
+              <td class="r">4</td>
+              <td class="r zero">4</td>
+              <td class="r zero">46,218,276</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0xd572Ab30…</td>
+              <td>0xc27a65…</td>
+              <td class="r agree">3</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">3</td>
+              <td class="r zero">3</td>
+              <td class="r">3</td>
+              <td class="r zero">3</td>
+              <td class="r zero">46,218,240</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x3fdcedEb…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">17</td>
+              <td class="r">17</td>
+              <td class="r agree">17</td>
+              <td class="r">17</td>
+              <td class="r zero">17</td>
+              <td class="r">17</td>
+              <td class="r zero">17</td>
+              <td class="r zero">46,337,984</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x79C963aD…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">17</td>
+              <td class="r">17</td>
+              <td class="r agree">17</td>
+              <td class="r">17</td>
+              <td class="r zero">17</td>
+              <td class="r">17</td>
+              <td class="r zero">17</td>
+              <td class="r zero">46,337,980</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0xEbb868Cf…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">17</td>
+              <td class="r">17</td>
+              <td class="r agree">17</td>
+              <td class="r">17</td>
+              <td class="r zero">17</td>
+              <td class="r">17</td>
+              <td class="r zero">17</td>
+              <td class="r zero">46,337,976</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x5Ae96df8…</td>
+              <td>0xc7dF18…</td>
+              <td class="r agree">24</td>
+              <td class="r">24</td>
+              <td class="r agree">24</td>
+              <td class="r">24</td>
+              <td class="r zero">24</td>
+              <td class="r">24</td>
+              <td class="r zero">24</td>
+              <td class="r zero">46,337,962</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x3f790301…</td>
+              <td>0x0198fa…</td>
+              <td class="r agree">9</td>
+              <td class="r">9</td>
+              <td class="r agree">9</td>
+              <td class="r">9</td>
+              <td class="r zero">9</td>
+              <td class="r">9</td>
+              <td class="r zero">9</td>
+              <td class="r zero">46,339,658</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x0C99648D…</td>
+              <td>0x0198fa…</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,339,654</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x73776691…</td>
+              <td>0x0198fa…</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r agree">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r">8</td>
+              <td class="r zero">8</td>
+              <td class="r zero">46,339,648</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+            <tr>
+              <td>0x3A49b254…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">24</td>
+              <td class="r zero">0</td>
+              <td class="r agree">24</td>
+              <td class="r">24</td>
+              <td class="r zero">24</td>
+              <td class="r">24</td>
+              <td class="r zero">24</td>
+              <td class="r zero">46,337,958</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0xc27a6559…</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">100 <span class="zero">GYND</span></td></tr>
+            <tr><td>0xc7dF1888…</td>
+              <td class="r">52</td>
+              <td class="r agree">52</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">700 <span class="zero">GYND</span></td></tr>
+            <tr><td>0x0198fa30…</td>
+              <td class="r">25</td>
+              <td class="r agree">25</td>
+              <td class="r">2</td>
+              <td class="r agree">2</td>
+              <td class="r">300 <span class="zero">GYND</span></td></tr>
+            <tr><td>0x98405c57…</td>
+              <td class="r">51</td>
+              <td class="r agree">51</td>
+              <td class="r">3</td>
+              <td class="r agree">3</td>
+              <td class="r">700 <span class="zero">GYND</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 2 · Mint</span>
+          <span class="badge b-idle">dormant</span>
+          <span class="zero">total 0 · tiers 1 / 5 / 20 → 100 / 200 / 400 GYND</span>
+        </div>
+        <div class="sig">position manager <span class="zero">0x76998e42B789d81004f006402b6c62a8BDCAfD5b</span>
+          · topic0 0xddf252ad1b… · actor T2
+          · amount count · scale 1
+          · filter T1 = 0x0</div>
+        <div class="sig">relay config: <b>Transfer(address indexed from, address indexed to, uint256 tokenId)</b>
+          · actor param 1 · COUNT
+          · scale 1 · window 46,215,147–47,521,747
+          · checkpoint 46,367,085</div>
+        <p class="note"><b>Nothing credited, nothing observed, nothing in the logs.</b>
+        An OR-filtered re-scan of every referral against this KPI's own params returns the empty set — not a low count. From outside, "nobody acted" and "the actor slot is wrong" look identical.</p>
+      </div>
+    </div>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>Boneyard-join-gyndore</h2>
+        <span class="id">id 4 · 0x27aCEe5bD884d8944f192C43050596a753377341</span>
+        <span class="badge b-idle">ungated</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">0 <em>of 650,000 bUSD</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">650,000 <em>bUSD</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">12,000</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">20 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">1 <em>3 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,362,894</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">1 <em>credits, 0 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · signUps</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 1 · tiers 5 / 10 / 15 / 25 → 5,000 / 10,000 / 15,000 / 25,000 bUSD</span>
+        </div>
+        <div class="sig">Gyndore campaign <span class="zero">0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc</span>
+          · topic0 0x315333c593… · actor T1
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">1</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+
+
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r zero">46,366,324</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x98405c57…</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">0</td>
+              <td class="r agree">0</td>
+              <td class="r">0 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>Uniswap</h2>
+        <span class="id">id 5 · 0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b</span>
+        <span class="badge b-pass">guarded KPIs</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">1,000 <em>of 700,000 bUSD</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">699,000 <em>bUSD</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">5,000</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">30 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">1 <em>1 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,363,820</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">2 <em>credits, 1 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · Swap</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 151 · tiers 100 / 180 / 250 / 500 → 1,000 / 2,800 / 15,000 / 25,000 bUSD</span>
+        </div>
+        <div class="sig">WETH/USDC pool <span class="zero">0x46880b404CD35c165EDdefF7421019F8dD25F4Ad</span>
+          · topic0 0xc42079f94a… · actor T2
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="sig">relay config: <b>Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)</b>
+          · actor param 1 · COUNT
+          · scale 1 · window 46,363,409–47,670,009
+          · checkpoint 46,367,092</div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th><th class="r">Ceiling</th><th class="r">Raw</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">151</td>
+              <td class="r">151</td>
+              <td class="r agree">151</td>
+              <td class="r">151</td>
+              <td class="r zero">151</td>
+              <td class="r">151</td>
+              <td class="r zero">151</td>
+              <td class="r zero">46,366,952</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x98405c57…</td>
+              <td class="r">151</td>
+              <td class="r agree">151</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">1,000 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 1 · Volume</span>
+          <span class="badge b-bad">unclaimed</span>
+          <span class="zero">total 0 · tiers 100 / 180 / 250 / 500 → 1,000 / 2,800 / 15,000 / 25,000 bUSD</span>
+        </div>
+        <div class="sig">USDC <span class="zero">0x036CbD53842c5426634e7929541eC2318f3dCF7e</span>
+          · topic0 0xddf252ad1b… · actor T2
+          · amount dataWord0 · scale 10,000
+          · filter T1 = 0x46880b404cd35c165eddeff7421019f8dd25f4ad</div>
+        <div class="sig">relay config: <b>Transfer(address indexed from, address indexed to, uint256 value)</b>
+          · actor param 1 · SUM
+          · scale 10,000 · window 46,363,409–47,670,009
+          · checkpoint 46,366,941</div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th><th class="r">Ceiling</th><th class="r">Raw</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x98405c…</td>
+              <td class="r gap">0</td>
+              <td class="r">0</td>
+              <td class="r agree">0</td>
+              <td class="r">2,447</td>
+              <td class="r zero">24,479,698</td>
+              <td class="r">2,447</td>
+              <td class="r zero">151</td>
+              <td class="r zero">0</td>
+              <td><span class="badge b-warn">under</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 2 · Deposit</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 6 · tiers 100 / 180 / 250 / 500 → 1,000 / 2,800 / 15,000 / 25,000 bUSD</span>
+        </div>
+        <div class="sig">WETH <span class="zero">0x4200000000000000000000000000000000000006</span>
+          · topic0 0xe1fffcc492… · actor T1
+          · amount count · scale 1
+          · <em>no filter</em></div>
+        <div class="sig">relay config: <b>Deposit(address indexed dst, uint256 wad)</b>
+          · actor param 0 · COUNT
+          · scale 1 · window 46,363,409–47,670,009
+          · checkpoint 46,366,949</div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th><th class="r">Ceiling</th><th class="r">Raw</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x314464CF…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">6</td>
+              <td class="r">6</td>
+              <td class="r agree">6</td>
+              <td class="r">6</td>
+              <td class="r zero">6</td>
+              <td class="r">6</td>
+              <td class="r zero">6</td>
+              <td class="r zero">46,364,778</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x98405c57…</td>
+              <td class="r">6</td>
+              <td class="r agree">6</td>
+              <td class="r">0</td>
+              <td class="r agree">0</td>
+              <td class="r">0 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div class="camp">
+      <div class="camp-head">
+        <h2>Boneyard-sign-attribution</h2>
+        <span class="id">id 6 · 0x2d9620B0cE9a2d841b4D35fceFEd9aC18Bd4e661</span>
+        <span class="badge b-idle">ungated</span>
+      </div>
+      <div class="readout">
+        <div class="ro"><span class="k">status</span><span class="v">Active</span></div>
+        <div class="ro"><span class="k">escrow paid</span><span class="v">0 <em>of 2,000,000 bUSD</em></span></div>
+        <div class="ro"><span class="k">remaining</span><span class="v">2,000,000 <em>bUSD</em></span></div>
+        <div class="ro"><span class="k">min reputation</span><span class="v">12,000</span></div>
+        <div class="ro"><span class="k">attribution window</span><span class="v">20 <em>days</em></span></div>
+        <div class="ro"><span class="k">promoters</span><span class="v">1 <em>2 referrals</em></span></div>
+        <div class="ro"><span class="k">first touch</span><span class="v">46,364,533</span></div>
+        <div class="ro"><span class="k">graph rows</span><span class="v">1 <em>credits, 0 payouts</em></span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-head">
+          <span class="kn">KPI 0 · ActiveUser</span>
+          <span class="badge b-pass">exact</span>
+          <span class="zero">total 1 · tiers 5 / 10 / 15 / 25 → 5,000 / 10,000 / 15,000 / 25,000 bUSD</span>
+        </div>
+        <div class="sig">AttributionRegistry <span class="zero">0xe04C5185eDd4C9b1c91e31c790843c335766258e</span>
+          · topic0 0xa6b53575a9… · actor T2
+          · amount count · scale 1
+          · filter T1 = 0x27acee5bd884d8944f192c43050596a753377341</div>
+        <div class="scroll"><table>
+          <thead><tr><th>Referral</th><th>Via promoter</th><th class="r">Claim</th><th class="r">To live</th>
+            <th class="r">Graph</th>
+            <th class="r">Re-scan</th><th class="r">Logs</th><th class="r">Last report</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>0x5a597273…</td>
+              <td>0x98405c…</td>
+              <td class="r agree">1</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+
+
+              <td class="r">1</td>
+              <td class="r zero">1</td>
+              <td class="r zero">46,364,813</td>
+              <td><span class="badge b-pass">exact</span></td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="scroll"><table>
+          <thead><tr><th>Promoter</th><th class="r">Progress</th><th class="r">Graph progress</th>
+            <th class="r">Tiers</th><th class="r">Graph tiers</th><th class="r">Paid</th></tr></thead>
+          <tbody>
+            <tr><td>0x98405c57…</td>
+              <td class="r">1</td>
+              <td class="r agree">1</td>
+              <td class="r">0</td>
+              <td class="r agree">0</td>
+              <td class="r">0 <span class="zero">bUSD</span></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Subgraph coverage</span>
+    <h2 style="margin: 6px 0 6px">Exact on the credited side, 8 of 15 on the observed side</h2>
+    <p class="note" style="margin-bottom: 14px">Folding <span class="mono">Credit</span> reproduced
+    <span class="mono">userCreditedOf</span> on <b>15 of 15</b> KPIs and
+    <span class="mono">TierPayout</span> reconciled to escrow on all 7 campaigns — the
+    <span class="mono">Graph</span> columns above are that check, run per referral. The observed side is a
+    different story: a KPI is only observable if a template spawned for its source contract.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Template spawned</th><th>Address</th><th class="r">At block</th></tr></thead>
+      <tbody>
+        <tr><td class="t">TransferToActorCount</td><td>0x3bdd1045… <span class="zero">0x3bdd104560…</span></td><td class="r zero">46,110,282</td></tr>
+        <tr><td class="t">WethDeposit</td><td>WETH <span class="zero">0x4200000000…</span></td><td class="r zero">46,110,275</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note" style="margin: 14px 0 8px"><b>5 event shapes have no template</b>,
+    so every KPI riding them reads <span class="mono">source: null</span> and spawns nothing. Two separate
+    causes hide here: a signature no template declares, and a 224-byte <span class="mono">params</span> blob
+    the deployed mapping refuses even though <span class="mono">subgraph/src/kpiSource.ts</span> handles it —
+    that half is a redeploy away, not a code change.</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Source</th><th>topic0</th><th class="r">Actor</th><th class="r">Mode</th><th class="r">KPIs waiting</th><th class="r">First seen</th></tr></thead>
+      <tbody>
+        <tr><td class="t">0x3bdd1045… <span class="zero">0x3bdd104560…</span></td>
+          <td class="zero">0x25b428dfde…</td><td class="r">T1</td>
+          <td class="r">dataWord0</td>
+          <td class="r">1</td><td class="r zero">46,110,282</td></tr>
+        <tr><td class="t">WETH <span class="zero">0x4200000000…</span></td>
+          <td class="zero">0x7fcf532c15…</td><td class="r">T1</td>
+          <td class="r">count</td>
+          <td class="r">1</td><td class="r zero">46,161,603</td></tr>
+        <tr><td class="t">WETH <span class="zero">0x4200000000…</span></td>
+          <td class="zero">0xe1fffcc492…</td><td class="r">T1</td>
+          <td class="r">count</td>
+          <td class="r">3</td><td class="r zero">46,110,275</td></tr>
+        <tr><td class="t">0x46880b40… <span class="zero">0x46880b404c…</span></td>
+          <td class="zero">0xc42079f94a…</td><td class="r">T2</td>
+          <td class="r">count</td>
+          <td class="r">1</td><td class="r zero">46,363,421</td></tr>
+        <tr><td class="t">0x86b7b22a… <span class="zero">0x86b7b22aed…</span></td>
+          <td class="zero">0x315333c593…</td><td class="r">T1</td>
+          <td class="r">count</td>
+          <td class="r">1</td><td class="r zero">46,362,796</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Silences</span>
+    <h2 style="margin: 6px 0 6px">8 of 9 conditions that fail without reverting are live</h2>
+    <p class="note" style="margin-bottom: 14px">None of these throws, none appears in a transaction receipt,
+    and none is visible on a campaign page. Each row was computed from the readings above rather than
+    asserted, so the list is empty when the fixture is clean.</p>
+    <div class="layers">
+      <div class="layer">
+        <div class="rail"><span class="n">1</span><span class="stripe s-warn"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>A ceiling exists and no claim was ever filed</h2>
+            <span class="badge b-bad">1 live</span></div>
+          <p>The relayer observed activity, the project never reported it, and <span class="mono">min(claim, ceiling)</span> is <span class="mono">min(0, n)</span>. Nothing reverts; the tier ladder simply never advances.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Uniswap kpi 1 — 2,447 units observed, 0 credited</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">5</span><span class="stripe s-warn"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>Credited above an independent re-scan</h2>
+            <span class="badge b-bad">5 live</span></div>
+          <p>The chain credits more than the KPI's own <span class="mono">params</span> can find in the logs. Crediting is monotonic, so the fix stops the growth and retracts nothing — treat these totals as fiction, not as a baseline.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Venus kpi 0 — 682 credited against 555 found, 1.23×</span></div>
+            <div class="ro"><span class="v">Venus kpi 1 — 97 credited against 69 found, 1.41×</span></div>
+            <div class="ro"><span class="v">SuperBridge kpi 0 — 550 credited against 286 found, 1.92×</span></div>
+            <div class="ro"><span class="v">SuperBridge kpi 1 — 550 credited against 270 found, 2.04×</span></div>
+            <div class="ro"><span class="v">SuperBridge kpi 2 — 1,320 credited against 723 found, 1.83×</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">4</span><span class="stripe s-warn"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>Credited below an independent re-scan</h2>
+            <span class="badge b-warn">4 live</span></div>
+          <p>Not necessarily wrong. The relayer excludes activity predating each referral's own <span class="mono">signedAt</span> and drops work nobody held; a plain re-scan does neither, so it is an upper bound on creditable activity. A gap can be permanent rather than a delay.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Venus kpi 0 — 682 credited, 555 found</span></div>
+            <div class="ro"><span class="v">Venus kpi 1 — 97 credited, 69 found</span></div>
+            <div class="ro"><span class="v">Gyndore Testnet kpi 0 — 229 credited, 230 found</span></div>
+            <div class="ro"><span class="v">Uniswap kpi 1 — 0 credited, 2,447 found</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">1</span><span class="stripe s-warn"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>Ceiling well above the claim</h2>
+            <span class="badge b-warn">1 live</span></div>
+          <p>Harmless by direction — an adapter may only discount — but it means the observation double-counted. Additive totals plus two relay passes over one block range write the range in twice.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Gyndore Testnet kpi 0 — 6 of 12 referrals, e.g. 0xc7dF1888… ceiling 2 against claim 1</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">1</span><span class="stripe s-idle"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>A source is declared and nothing has ever matched</h2>
+            <span class="badge b-idle">1 live</span></div>
+          <p>An OR-filtered re-scan of every referral returns the empty set, not a low count. “Nobody acted” and “the actor topic is wrong” are indistinguishable from outside, and the tier ladder is unreachable either way.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Gyndore Testnet kpi 2 — position manager, actor T2</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">6</span><span class="stripe s-warn"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>Observation is stale</h2>
+            <span class="badge b-warn">6 live</span></div>
+          <p>The checkpoint is the relayer's own position. Until it moves, a gated KPI's ceiling cannot rise, and a report landing against a ceiling of 0 succeeds and credits nothing.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Gyndore Testnet kpi 0 — checkpoint 46,367,038, 54,458 blocks behind head</span></div>
+            <div class="ro"><span class="v">Gyndore Testnet kpi 1 — checkpoint 46,367,060, 54,436 blocks behind head</span></div>
+            <div class="ro"><span class="v">Gyndore Testnet kpi 2 — checkpoint 46,367,085, 54,411 blocks behind head</span></div>
+            <div class="ro"><span class="v">Uniswap kpi 0 — checkpoint 46,367,092, 54,404 blocks behind head</span></div>
+            <div class="ro"><span class="v">Uniswap kpi 1 — checkpoint 46,366,941, 54,555 blocks behind head</span></div>
+            <div class="ro"><span class="v">Uniswap kpi 2 — checkpoint 46,366,949, 54,547 blocks behind head</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">1</span><span class="stripe s-warn"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>An unfiltered Transfer counts more than a mint</h2>
+            <span class="badge b-warn">1 live</span></div>
+          <p>With no <span class="mono">filterTopic 1 = 0x0</span>, any transfer *to* a referral credits, not only a mint from the zero address. The same token passed between referrals credits each of them.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Sdy Labs kpi 0 — OpenMintNFT, no filter</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">4</span><span class="stripe s-idle"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>Credit segmented away from the promoter who holds the referral now</h2>
+            <span class="badge b-idle">4 live</span></div>
+          <p>Correct behaviour, not a loss: <span class="mono">Campaign</span> credits whoever held the referral at each action's block. It looks like a zero if you read <span class="mono">creditedToOf</span> against the live promoter alone.</p>
+          <div class="readout">
+            <div class="ro"><span class="v">Venus kpi 0 — 1 referral, e.g. 0x98bEf229… credited 402 with 382 to its live promoter</span></div>
+            <div class="ro"><span class="v">Venus kpi 1 — 1 referral, e.g. 0x98bEf229… credited 60 with 40 to its live promoter</span></div>
+            <div class="ro"><span class="v">Gyndore Testnet kpi 0 — 1 referral, e.g. 0x3A49b254… credited 51 with 0 to its live promoter</span></div>
+            <div class="ro"><span class="v">Gyndore Testnet kpi 1 — 1 referral, e.g. 0x3A49b254… credited 24 with 0 to its live promoter</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="rail"><span class="n">0</span><span class="stripe s-pass"></span></div>
+        <div class="lbody">
+          <div class="lhead"><h2>A re-scan window was dropped</h2>
+            <span class="badge b-pass">not firing</span></div>
+          <p>A failed <span class="mono">eth_getLogs</span> chunk *understates* activity, so it must be surfaced rather than swallowed — an empty result and a lost result look the same in a fold.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Read from Base Sepolia at block 46,421,496 on 2026-09-05. Subgraph https://api.studio.thegraph.com/query/1757958/boney-indexer/v0.5.0 at block 46,421,494.</span>
+    <span>Regenerate: <span class="mono">tsx scripts/__dash-collect.mts</span> then <span class="mono">tsx scripts/__dash-build.mts</span>. Every figure on this page comes from the JSON the first writes.</span>
+    <span>The re-scan column replays each KPI's own <span class="mono">params</span> through <span class="mono">eth_getLogs</span> narrowed to that campaign's referrals. It ignores attribution, so it is an upper bound on creditable activity: a claim above it is conclusive over-crediting, a claim below it is not by itself an error.</span>
+  </footer>
+</div>

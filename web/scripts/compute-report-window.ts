@@ -1,25 +1,10 @@
 /**
- * Derives `windowStartBlock` / `windowEndBlock` for `EventMetricKpiVerifier.setKpiConfig`.
+ * Derives EventMetric block bounds from campaign timestamps.
  *
- * Usage: pnpm report-window --campaign <address> [--rpc <url>]
+ * An ended campaign closes at `endedAt + CLAIM_GRACE`; otherwise the projected close is
+ * `endTime + CLAIM_GRACE`. Future closes use the current head until the config is refreshed.
  *
- * `setKpiConfig` bounds the relayer in *blocks*, but a campaign describes itself in *timestamps*, so
- * something has to convert one to the other. This is that something.
- *
- * **The window end is the subtle half.** A campaign's reporting close is not simply
- * `endTime + CLAIM_GRACE`. `Campaign._requireReportableStatus` closes reporting at
- * `endedAt + CLAIM_GRACE`, and `endedAt` is set when `end()` is actually called — which is
- * permissionless but not automatic, so it can land well after `endTime`. Two cases follow:
- *
- *  - **Already Ended** — `endedAt` is known, so the close is exact.
- *  - **Not yet ended** — the close is unknowable, because it depends on when someone calls `end()`.
- *    The projection uses `endTime + CLAIM_GRACE` as the earliest it could possibly be, and says so.
- *    Since `setKpiConfig` overwrites, re-running this after `end()` lands tightens or extends it
- *    without disturbing any stored total or the checkpoint.
- *
- * Bias high when in doubt. `windowEndBlock` only bounds how far the relayer may checkpoint, and
- * `Campaign` enforces its own report window regardless — so over-estimating wastes a little scanning,
- * while under-estimating stops the relayer early and under-credits promoters.
+ * Usage: `pnpm report-window --campaign <address> [--rpc <url>]`.
  */
 import {createPublicClient, http, getAddress, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
@@ -29,26 +14,42 @@ import {blockAtTimestamp} from "../src/lib/blockSearch";
 /** `Types.CampaignStatus`. Only `Ended` changes how the close is computed. */
 const STATUS_ENDED = 3;
 
+/**
+ * Reads one command-line option.
+ *
+ * @param flag Option name to find.
+ * @returns The following argument, if present.
+ */
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
   return i === -1 ? undefined : process.argv[i + 1];
 }
 
 /**
- * A block-timestamp reader for `blockAtTimestamp`.
+ * Creates a block-timestamp reader.
  *
- * The search is bounded below by the protocol's deployment block rather than genesis: a binary search
- * over an L2's full height is ~25 sequential round trips against an endpoint that 502s often enough to
- * matter, and every block before deployment is known to be too early anyway.
+ * @param client Public client used for block reads.
+ * @returns A timestamp reader for block searches.
  */
-function timestampReader(client: PublicClient) {
+function timestampReader(client: PublicClient): (blockNumber: bigint) => Promise<bigint> {
   return async (blockNumber: bigint) => (await client.getBlock({blockNumber})).timestamp;
 }
 
+/**
+ * Formats a Unix timestamp as ISO 8601.
+ *
+ * @param timestamp Unix timestamp in seconds.
+ * @returns ISO-formatted timestamp.
+ */
 function iso(timestamp: bigint): string {
   return new Date(Number(timestamp) * 1000).toISOString();
 }
 
+/**
+ * Computes and prints report-window block bounds.
+ *
+ * @returns Nothing.
+ */
 async function main(): Promise<void> {
   const rpcUrl = arg("--rpc") ?? "http://127.0.0.1:8545";
   const campaignArg = arg("--campaign");
@@ -81,7 +82,6 @@ async function main(): Promise<void> {
   console.log(`  reporting ends: ${closesAt}  (${iso(closesAt)})${ended ? "" : "  [projected]"}`);
 
   const head = await client.getBlock({blockTag: "latest"});
-  // The protocol's own deployment block is the earliest block that could hold anything relevant.
   const floor = getDeployment(chainId)?.startBlock ?? BigInt(0);
   const readTimestamp = timestampReader(client);
   const probed = new Map<bigint, bigint>();
@@ -94,8 +94,6 @@ async function main(): Promise<void> {
     probed,
   );
 
-  // A close in the future has no block yet. Falling back to the head keeps the relayer working — it
-  // stops at the head each run anyway — and this script gets re-run as chain time catches up.
   const closeInFuture = closesAt > head.timestamp;
   const windowEndBlock = closeInFuture
     ? head.number

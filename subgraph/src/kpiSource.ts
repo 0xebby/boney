@@ -2,11 +2,7 @@ import {BigInt, Bytes, ethereum} from "@graphprotocol/graph-ts";
 
 /**
  * The AssemblyScript half of `web/src/lib/kpiSource.ts`.
- *
- * Same blob, same field order, same "0 means 1" reading of `scale`. Kept deliberately minimal: this
- * decodes the commitment and names which template covers it, and nothing else. Every rule about what
- * the decoded numbers *mean* for crediting stays on the TypeScript side, so there is one
- * implementation of the crediting rules rather than two that can drift.
+ * decodes the commitment and names which template covers it, and nothing else.
  */
 
 /** `AMOUNT_MODE` in `kpiSource.ts`. */
@@ -97,9 +93,7 @@ export class EventSource {
  * the whole handler and stall indexing over a field no campaign is required to set.
  *
  * The fields are static types, so `abi.encode(a,b,…)` and the encoding of the static tuple `(a,b,…)`
- * are byte-identical — which is why one `ethereum.decode` call covers each form. Both lengths are
- * accepted: a source with no fixed-topic filter is encoded short, so every blob written before the
- * filter existed still decodes.
+ * are byte-identical.
  */
 export function decodeEventSource(params: Bytes): EventSource | null {
   const filtered = params.length == FILTERED_PARAMS_BYTE_LENGTH;
@@ -121,9 +115,6 @@ export function decodeEventSource(params: Bytes): EventSource | null {
     ? parts[6].toBytes()
     : Bytes.fromHexString(ZERO_TOPIC);
 
-  // Same validity range the TypeScript decoder enforces: `topics[0]` is the signature, so an actor
-  // at position 0 cannot exist, only two amount modes are defined, and a topic cannot be both the
-  // credited actor and a literal the log must carry.
   if (actorTopic < 1 || actorTopic > 3) return null;
   if (amountMode != AMOUNT_MODE_COUNT && amountMode != AMOUNT_MODE_DATA_WORD_0) return null;
   if (filterTopic < 0 || filterTopic > 3) return null;
@@ -145,11 +136,12 @@ export function decodeEventSource(params: Bytes): EventSource | null {
  *
  * A preset is identified by all three of `(topic0, actorTopic, amountMode)`, not by the event alone:
  * `Transfer` with the recipient as actor and `Transfer` with the sender as actor credit different
- * wallets from the same log, so they cannot share a handler. A fixed-topic filter is not part of the
- * identity: it narrows which logs a consumer credits, not which event shape is indexed, and a
+ * wallets from the same log, so they cannot share a handler. 
+ * 
+ * A fixed-topic filter is not part of the identity: it narrows which logs a consumer credits, not which event shape is indexed, and a
  * template is shared across campaigns whose filters differ.
  *
- * Null is a real answer, not a failure. A subgraph can only index signatures its manifest declares,
+ * A subgraph can only index signatures its manifest declares,
  * and a project may name any event on chain — see `UnsupportedSource` in the schema for what happens
  * to those.
  */

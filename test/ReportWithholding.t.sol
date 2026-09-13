@@ -43,18 +43,16 @@ contract MockToken is ERC20 {
 ///          1. `Campaign` accepts reports for `CLAIM_GRACE` after `end()`, closing on the same
 ///             second `reclaimUnspent` opens — escrow is never reclaimable while credit is owed.
 ///          2. `OracleCoordinator.submitUserReport` / `applyUserReport` route to `reportUserAction`
-///             under the existing stake, dispute and slashing rules, so a stiffed promoter can pay
+///             through the reporter allowlist and dispute window, so a stiffed promoter can pay
 ///             themselves without the project's cooperation.
 contract ReportWithholdingTest is Test {
     uint256 internal constant POOL = 10_000 ether;
     uint64 internal constant MAX_TOUCH = 30 days;
-    uint256 internal constant MIN_STAKE = 100 ether;
     /// @dev Must stay well inside `Campaign.CLAIM_GRACE`: the grace-window tests push an oracle
     ///      report *after* `end()`, and that push has to clear its dispute window while the
     ///      campaign is still reportable. Scaled off CLAIM_GRACE so shortening the constant for
     ///      testing cannot silently invert the two.
     uint256 internal constant DISPUTE_WINDOW = 1 minutes;
-    uint256 internal constant UNSTAKE_DELAY = 2 minutes;
 
     /// @dev Tier 0 pays at 10 units; the referral below delivers 50, clearing it five times over.
     uint256 internal constant THRESHOLD = 10;
@@ -95,7 +93,7 @@ contract ReportWithholdingTest is Test {
 
         // Wire the real coordinator as the campaign's oracle, so "the oracle cannot help" is a
         // fact about the deployed contract rather than about an EOA placeholder.
-        coordinator = new OracleCoordinator(governor, MIN_STAKE, DISPUTE_WINDOW, UNSTAKE_DELAY);
+        coordinator = new OracleCoordinator(governor, DISPUTE_WINDOW);
         vault = new EscrowVault(address(this));
         registry = new CampaignRegistry(
             address(vault), address(reputation), address(attribution), address(coordinator)
@@ -183,8 +181,8 @@ contract ReportWithholdingTest is Test {
     /// @dev The original vector, end to end. A promoter whose referral was attributed and delivered
     ///      5x the tier threshold used to walk away with nothing while the project reclaimed the
     ///      whole pool. The recovery is entirely promoter-side: they end the campaign once its
-    ///      window closes (permissionless), stake a reporter, and push the report through the
-    ///      dispute window. The project signs nothing.
+    ///      window closes, allow a reporter, and push the report through the dispute window. The
+    ///      project signs nothing.
     function test_PromoterRecoversRewardsWithoutTheProject() public {
         _joinAndTouch();
 
@@ -198,7 +196,7 @@ contract ReportWithholdingTest is Test {
         // period: the oracle's window runs from submission, not from the campaign end, so it
         // cannot be interleaved with the reclaim warp below. This is why DISPUTE_WINDOW has to
         // stay comfortably shorter than CLAIM_GRACE.
-        _stakeAndPushUserReport(DELIVERED);
+        _allowAndPushUserReport(DELIVERED);
 
         assertEq(campaign.progressOf(promoter, 0), DELIVERED, "credited after the campaign ended");
         assertEq(token.balanceOf(promoter), TIER_REWARD, "and paid, inline");
@@ -304,19 +302,17 @@ contract ReportWithholdingTest is Test {
         // The push is bound by the grace window, so with the shortened CLAIM_GRACE the dispute
         // window (1 minute) is the constraining one — a hardcoded multi-day skip would land the
         // report after the campaign stopped being reportable.
-        _stakeAndPushUserReport(DELIVERED);
+        _allowAndPushUserReport(DELIVERED);
         assertEq(token.balanceOf(promoter), TIER_REWARD, "paid despite the pause");
     }
 
     // ── the oracle can now credit a promoter ─────────────────────
 
-    /// @dev The gap this fix closes. `applyReport` routes to `applyAggregateUpdate`, which reverts
-    ///      on a per-user KPI — so before `submitUserReport` existed, a fully staked honest oracle
-    ///      could not pay anyone. That failure is still the correct behaviour for the aggregate
-    ///      entry point, and is pinned here so the two paths cannot be conflated.
+    /// @dev The aggregate entry point still rejects per-user KPIs; the dedicated user-report path
+    ///      handles them instead.
     function test_AggregateReportStillRejectsPerUserKpi() public {
         _joinAndTouch();
-        _stake(reporter);
+        _allowReporter(reporter);
 
         vm.prank(reporter);
         bytes32 reportId = coordinator.submitReport(
@@ -337,7 +333,7 @@ contract ReportWithholdingTest is Test {
     ///      be replayed into the wrong campaign function.
     function test_ReportKindsAreNotInterchangeable() public {
         _joinAndTouch();
-        _stake(reporter);
+        _allowReporter(reporter);
 
         vm.prank(reporter);
         bytes32 userReport = coordinator.submitUserReport(
@@ -370,11 +366,10 @@ contract ReportWithholdingTest is Test {
         coordinator.applyUserReport(aggReport);
     }
 
-    /// @dev A disputed user report is slashed and never applied, exactly like an aggregate one —
-    ///      the new path inherits the anti-fraud lever rather than bypassing it.
-    function test_DisputedUserReportIsSlashedAndNeverApplied() public {
+    /// @dev A disputed user report is never applied, matching the aggregate report path.
+    function test_DisputedUserReportIsVoidedAndNeverApplied() public {
         _joinAndTouch();
-        _stake(reporter);
+        _allowReporter(reporter);
 
         vm.prank(reporter);
         bytes32 reportId = coordinator.submitUserReport(
@@ -390,8 +385,6 @@ contract ReportWithholdingTest is Test {
         vm.prank(governor);
         coordinator.disputeReport(reportId);
 
-        assertEq(coordinator.stakeOf(reporter), 0, "reporter slashed");
-
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
         vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportIsDisputed.selector, reportId));
         coordinator.applyUserReport(reportId);
@@ -403,7 +396,7 @@ contract ReportWithholdingTest is Test {
     ///      governance) always has the full window to challenge a fabricated claim.
     function test_UserReportCannotSkipTheDisputeWindow() public {
         _joinAndTouch();
-        _stake(reporter);
+        _allowReporter(reporter);
 
         vm.prank(reporter);
         bytes32 reportId = coordinator.submitUserReport(
@@ -424,8 +417,8 @@ contract ReportWithholdingTest is Test {
         coordinator.applyUserReport(reportId);
     }
 
-    /// @dev Staking is still the gate — an unstaked account cannot file per-user reports either.
-    function test_UnstakedAccountCannotSubmitUserReport() public {
+    /// @dev The reporter allowlist gates per-user report submission.
+    function test_UnlistedAccountCannotSubmitUserReport() public {
         _joinAndTouch();
 
         vm.prank(reporter);
@@ -444,7 +437,7 @@ contract ReportWithholdingTest is Test {
     /// @dev A zero user would be stored as an aggregate report and applied through the wrong
     ///      branch, so it is rejected at submission.
     function test_UserReportRejectsZeroUser() public {
-        _stake(reporter);
+        _allowReporter(reporter);
 
         vm.prank(reporter);
         vm.expectRevert(IOracleCoordinator.ZeroAddress.selector);
@@ -460,11 +453,10 @@ contract ReportWithholdingTest is Test {
     }
 
     /// @dev The oracle cannot invent a payee. An unattributed user has no promoter, so the campaign
-    ///      rejects the report rather than crediting anyone — a staked reporter cannot drain escrow
-    ///      to an address of their choosing.
+    ///      rejects the report rather than crediting anyone.
     function test_OracleCannotCreditAnUnattributedUser() public {
         _joinAndTouch();
-        _stake(reporter);
+        _allowReporter(reporter);
 
         address stranger = address(0xDEAD);
         vm.prank(reporter);
@@ -574,15 +566,14 @@ contract ReportWithholdingTest is Test {
 
     // ── helpers ──────────────────────────────────────────────────
 
-    function _stake(address who) internal {
-        vm.deal(who, MIN_STAKE);
-        vm.prank(who);
-        coordinator.stake{value: MIN_STAKE}();
+    function _allowReporter(address who) internal {
+        vm.prank(governor);
+        coordinator.addReporter(who);
     }
 
-    /// @dev The full promoter-side recovery: stake, file, wait out the dispute window, apply.
-    function _stakeAndPushUserReport(uint256 newTotal) internal {
-        _stake(reporter);
+    /// @dev The full promoter-side recovery: allow, file, wait out the dispute window, apply.
+    function _allowAndPushUserReport(uint256 newTotal) internal {
+        _allowReporter(reporter);
 
         vm.prank(reporter);
         bytes32 reportId = coordinator.submitUserReport(

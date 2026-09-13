@@ -1,4 +1,4 @@
-/** Throwaway: balances, attribution and a simulated 1-GYND stake for every KOL ref wallet. */
+/** Checks balances, attribution, and stake simulation for referral wallets. */
 import {readFileSync} from "node:fs";
 import {createPublicClient, http, getAddress, formatEther, parseAbiItem, parseUnits, type Hex, type PublicClient} from "viem";
 import {privateKeyToAccount} from "viem/accounts";
@@ -35,7 +35,7 @@ for (const {name, addr} of rows) {
     client.getBalance({address: addr}),
     client.readContract({address: GYND, abi: ERC20, functionName: "balanceOf", args: [addr]}) as Promise<bigint>,
     client.readContract({address: GYND, abi: ERC20, functionName: "allowance", args: [addr, STAKING]}) as Promise<bigint>,
-    client.readContract({address: registry, abi: AttributionRegistryAbi, functionName: "touchOf", args: [CAMPAIGN, addr]}) as Promise<any>,
+    client.readContract({address: registry, abi: AttributionRegistryAbi, functionName: "touchOf", args: [CAMPAIGN, addr]}) as Promise<{promoterId: Hex; expiresAt: bigint}> ,
   ]);
   let prom = "none";
   if (touch.promoterId !== `0x${"00".repeat(32)}`) {

@@ -1,4 +1,4 @@
-/** Throwaway: which local ref keys are attributed to which promoter on one campaign. */
+/** Lists local referral-key attribution for one campaign. */
 import {readFileSync} from "node:fs";
 import {getAddress, type Hex} from "viem";
 import {privateKeyToAccount} from "viem/accounts";

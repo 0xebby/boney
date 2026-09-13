@@ -1,9 +1,4 @@
-/**
- * Throwaway check for `useObservedActions`' scan: does the positional topic filter actually return
- * the referral's logs, and does the fold match what the indexer would credit?
- *
- * Run: pnpm tsx scripts/__check-observed.ts <campaign>
- */
+/** Compares observed-action filtering and folding with indexer crediting. */
 import {createPublicClient, http, pad, toHex, type Hex, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
 import {decodeEventSource, topicFilterArray} from "../src/lib/kpiSource";
@@ -48,7 +43,6 @@ async function main() {
       });
       for (const l of logs) if (l.args.user) touchLogs.push({user: l.args.user});
     } catch {
-      /* ignore */
     }
   }
   const referrals = [...new Set(touchLogs.map((t) => t.user.toLowerCase()))] as `0x${string}`[];
@@ -73,8 +67,7 @@ async function main() {
     console.log(`\nkpi ${i}: ${source ? catalogSignature(source.topic0) ?? source.topic0 : "no source"}`);
     if (!source) continue;
 
-    // Same slots the panel narrows on, built by the same helper: the actor position ORs the
-    // referrals, and a fixed-topic filter pins its own index.
+    // Match the production actor and fixed-topic filters.
     const topics: (Hex | Hex[] | null)[] = [
       source.topic0,
       ...topicFilterArray(source, referrals.map((r) => pad(r, {size: 32}))),
@@ -104,7 +97,7 @@ async function main() {
     }
 
     console.log(`  ${logs.length} matched logs, ${failed} failed windows`);
-    // `null` floors — a diagnostic asking what is on chain, not what is creditable.
+    // Null floors include all matching on-chain activity.
     const totals = aggregateByActor(logs, source, null);
     if (totals.size === 0) console.log("  observed: nothing — panel refuses, no payout");
     for (const [addr, t] of totals) {

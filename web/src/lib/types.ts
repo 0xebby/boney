@@ -1,9 +1,5 @@
 /**
  * TypeScript mirrors of the protocol's Solidity types.
- *
- * These match `src/libraries/Types.sol` and the `IBoney.CampaignView` struct. Enum ordering is
- * load-bearing — the contract returns a `uint8` index, so these arrays must stay in the same
- * order as the Solidity enums.
  */
 
 /** Mirrors `Types.CampaignStatus`. Order matters. */
@@ -21,11 +17,22 @@ export const KPI_KIND = [
   "Stake",
   "Bridge",
   "Tvl",
-  "Volume",
-  "ActiveUser",
-  "signUps",
-  "downloads",
-  "withdraw" 
+  "GenerateVolume",
+  "OnboardAnActiveUser",
+  "SignUps",
+  "Downloads",
+  "Withdraw" ,
+  "CreatePool",
+  "ProvideLiquidity",
+  "RemoveLiquidity",
+  "Redeem",
+  "Claim",
+  "Burn",
+  "Repay",
+  "Borrow",
+  "Lend",
+  "Vote",
+  "Referral"
 ] as const;
 
 export type KpiKind = (typeof KPI_KIND)[number];
@@ -40,13 +47,22 @@ export const KPI_KIND_LABEL: Record<KpiKind, string> = {
   Stake: "Staking",
   Bridge: "Bridge txs",
   Tvl: "TVL generated",
-  Volume: "Volume generated",
-  ActiveUser: "Active users",
-  // Lower-camel because the Solidity enum spells them that way (`Types.KpiKind.signUps`), and this
-  // array's job is to mirror it exactly. Renaming here would silently shift every index above 9.
-  signUps: "Sign-ups",
-  downloads: "Downloads",
-  withdraw: "Withdrawals"
+  GenerateVolume: "Volume generated",
+  OnboardAnActiveUser: "Active users",
+  SignUps: "Sign-ups",
+  Downloads: "Downloads",
+  Withdraw: "Withdrawals",
+  CreatePool: "CreatePool",
+  ProvideLiquidity: "ProvideLiquidity",
+  RemoveLiquidity: "RemoveLiquidity",
+  Redeem: "Redeem",
+  Claim: "Claim",
+  Burn: "Burn",
+  Repay: "Repay",
+  Borrow: "Borrow",
+  Lend: "Lend",
+  Vote: "Vote",
+  Referral: "Referral"
 };
 
 export function statusFromIndex(index: number): CampaignStatus {
@@ -114,11 +130,6 @@ export const MAX_SCHEMAS = 64;
 
 /**
  * `Names.MAX_NAME_BYTES` — longest campaign name the contract accepts.
- *
- * Bytes on chain, characters here: `Names` rejects every byte outside printable ASCII, so the two
- * counts are the same and a character counter in the form cannot promise a name the chain refuses.
- * That restriction is also why a name cannot contain emoji or accented letters — see
- * `src/libraries/Names.sol` for why folding Unicode on chain was not worth the impersonation risk.
  */
 export const MAX_CAMPAIGN_NAME_LENGTH = 32;
 

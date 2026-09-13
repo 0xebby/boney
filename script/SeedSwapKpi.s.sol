@@ -195,7 +195,7 @@ contract SeedSwapKpi is Script {
 
         // KPI 1 — how much came out. `amountMode` 1 is dataWord0, which for `Transfer` is `value`.
         kpis[1] = Types.KpiSpec({
-            kind: Types.KpiKind.Volume,
+            kind: Types.KpiKind.GenerateVolume,
             verifier: address(guardedVerifier),
             target: 20,
             aggregate: false,

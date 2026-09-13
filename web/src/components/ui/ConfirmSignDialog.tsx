@@ -57,9 +57,8 @@ function IntentRowLine({row}: {row: IntentRow}) {
 /**
  * The confirmation shown before a wallet prompt opens.
  *
- * States what the signature does, lists the facts it commits to, and names the consequence, so the
- * wallet's own opaque prompt is never the first explanation the signer gets. Rendered by
- * `components/SignatureGate`, which owns the open state and resolves the caller's promise.
+ * States what the signature does, lists the facts it commits to, and names the consequence. 
+ * Rendered by `components/SignatureGate`, which owns the open state and resolves the caller's promise.
  *
  * @param intent What is about to be signed.
  * @param onConfirm Called when the signer accepts; the wallet opens next.

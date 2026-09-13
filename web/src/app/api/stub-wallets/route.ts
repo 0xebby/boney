@@ -16,31 +16,18 @@ import {chainFor, rpcFor} from "@/lib/serverChain";
 
 /**
  * The stub allowlist — which wallets get a fabricated BoneyScore instead of a real Ethos lookup.
+ * an allowlisted wallet is scored by `lib/stubProfile` rather than by Ethos, and `/api/attest` will then
+ * sign those numbers with the attestor key. 
+ * The dev-wallet check in `AppShell` decides whether the *panel* renders.
  *
- * `POST` requires a signature from the admin wallet, and that is the whole security story. An
- * allowlisted wallet is scored by `lib/stubProfile` rather than by Ethos, and `/api/attest` will then
- * sign those numbers with the attestor key — so an unauthenticated write here is a mint button for
- * reputation. The dev-wallet check in `AppShell` decides whether the *panel* renders; it is a
- * convenience, not a boundary, and cannot be one because it runs in the browser.
- *
- * `GET` is open. The list is not a secret — every address on it is one whose score is fabricated, and
- * saying so is the honest thing for a demo deployment to do.
- *
- * What it deliberately does not do:
- *
- *  - **Trust the client's message.** The signed text is rebuilt here from the server's own normalised
- *    action and address, so a client that signs `remove` and sends `add` fails verification.
- *  - **Keep a nonce.** Both actions are idempotent, so the worst a replay inside the TTL achieves is
- *    re-applying a change the admin already authorised. A nonce would need state that survives a
- *    read-only deploy, which the store deliberately does not assume.
- *  - **Refuse when the filesystem is read-only.** Unlike `/api/campaign-guide`, a failed write still
+ * `GET` is open. The list is not a secret.
  *    takes effect for the running instance, so this reports `persisted: false` and a 200 rather than a
  *    501. The change is real; it just will not outlive the instance.
  */
 
 /** Node runtime: `node:fs` in `stubWalletStore`, and viem's verification path wants Node crypto. */
 export const runtime = "nodejs";
-/** The list changes under a running server, and a stale answer is a wrong score. Never cache. */
+/** The list changes under a running server.*/
 export const dynamic = "force-dynamic";
 
 const SIGNATURE_RE = /^0x[0-9a-fA-F]+$/;
@@ -92,7 +79,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Both directions: a stale signature cannot be replayed later, and one timestamped in the future
-  // cannot be minted now to be replayed then. The window is symmetric because clock skew is too.
+  // cannot be minted now to be replayed then.
   const skew = Math.abs(Math.floor(Date.now() / 1000) - issued);
   if (skew > STUB_SIGNATURE_TTL_SECONDS) {
     return json(400, {
@@ -105,8 +92,7 @@ export async function POST(request: NextRequest) {
 
   let valid: boolean;
   try {
-    // The client-side form, so an ERC-1271/6492 smart account holding the admin role verifies too
-    // rather than only an EOA. Mirrors `/api/campaign-guide`.
+    // The client-side form, so an ERC-1271/6492 smart account holding the admin role verifies too.
     valid = await client.verifyMessage({
       address: admin as `0x${string}`,
       message: canonicalStubAllowlistMessage({

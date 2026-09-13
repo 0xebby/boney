@@ -200,7 +200,7 @@ contract SeedFive is Script {
     function _aave(uint256 pool) internal returns (address campaign) {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](2);
         kpis[0] = _kpi(Types.KpiKind.Deposit, AAVE_POOL, AAVE_SUPPLY_TOPIC, 2, COUNT, 1, false);
-        kpis[1] = _kpi(Types.KpiKind.withdraw, AAVE_POOL, AAVE_WITHDRAW_TOPIC, 2, COUNT, 1, false);
+        kpis[1] = _kpi(Types.KpiKind.Withdraw, AAVE_POOL, AAVE_WITHDRAW_TOPIC, 2, COUNT, 1, false);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](2);
         tiers[0] = _tiers(pool, 1, 2, 3);
@@ -230,7 +230,7 @@ contract SeedFive is Script {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](3);
         kpis[0] = _kpi(Types.KpiKind.Deposit, WETH, WETH_DEPOSIT_TOPIC, 1, DATA_WORD0, MILLI, false);
         kpis[1] = _kpi(Types.KpiKind.Deposit, WETH, WETH_DEPOSIT_TOPIC, 1, COUNT, 1, false);
-        kpis[2] = _kpi(Types.KpiKind.withdraw, WETH, WETH_WITHDRAWAL_TOPIC, 1, DATA_WORD0, MILLI, false);
+        kpis[2] = _kpi(Types.KpiKind.Withdraw, WETH, WETH_WITHDRAWAL_TOPIC, 1, DATA_WORD0, MILLI, false);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](3);
         tiers[0] = _tiers(pool, 1, 5, 20);
@@ -245,7 +245,7 @@ contract SeedFive is Script {
     function _uniswap(uint256 pool) internal returns (address campaign) {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](2);
         kpis[0] = _kpi(Types.KpiKind.Swap, UNI_POOL, UNI_SWAP_TOPIC, 2, COUNT, 1, true);
-        kpis[1] = _kpi(Types.KpiKind.Volume, USDC, TRANSFER_TOPIC, 2, DATA_WORD0, WHOLE_USDC, false);
+        kpis[1] = _kpi(Types.KpiKind.GenerateVolume, USDC, TRANSFER_TOPIC, 2, DATA_WORD0, WHOLE_USDC, false);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](2);
         tiers[0] = _tiers(pool, 1, 3, 5);

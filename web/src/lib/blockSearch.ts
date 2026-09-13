@@ -5,7 +5,7 @@
  * that scan on a campaign's behalf all need the same conversion.
  */
 
-/** Reads one block's timestamp, so a fixture can stand in for a chain. */
+/** Reads one block's timestamp. */
 export type ReadTimestamp = (blockNumber: bigint) => Promise<bigint>;
 
 /**
@@ -15,7 +15,7 @@ export type ReadTimestamp = (blockNumber: bigint) => Promise<bigint>;
  * @param target Timestamp to land on or before.
  * @param lo Lowest block the search may return, and the answer when every block is later.
  * @param hi Highest block to consider.
- * @param cache Block timestamps already read, extended in place so repeated searches share probes.
+ * @param cache Block timestamps already read.
  * @returns The block number.
  */
 export async function blockAtTimestamp(

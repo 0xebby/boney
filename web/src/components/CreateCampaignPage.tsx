@@ -1,11 +1,20 @@
 "use client";
 
-import {useState, useCallback, useId} from "react";
+import {useState, useCallback, useId, type ReactNode} from "react";
 import {useRouter} from "next/navigation";
 import {useAccount} from "wagmi";
-import {Card, CardHeader} from "@/components/ui/Card";
+import {Card} from "@/components/ui/Card";
 import {ErrorState} from "@/components/ui/States";
 import {Notice} from "@/components/ui/Notice";
+import {
+  CheckboxField,
+  Field,
+  FieldLabel,
+  FieldNote,
+  SelectField,
+  controlClass,
+  describedBy,
+} from "@/components/ui/Field";
 import {useCreateCampaign, isPending} from "@/hooks/useWriteCampaign";
 import {usePublishGuide} from "@/hooks/usePublishGuide";
 import {useTokenMeta} from "@/hooks/useTokenMeta";
@@ -13,7 +22,16 @@ import {useNameAvailability} from "@/hooks/useNameAvailability";
 import {useScoreCeiling} from "@/hooks/useScoreCeiling";
 import {useNow} from "@/hooks/useNow";
 import {useEventSourceProbe} from "@/hooks/useEventSourceProbe";
-import {validateCampaignDraft, isBoundedScoreCeiling, parseCount, type CampaignDraft, type ValidationIssue, type KpiDraft, type TierDraft, type EventSourceDraft} from "@/lib/validation";
+import {
+  validateCampaignDraft,
+  isBoundedScoreCeiling,
+  parseCount,
+  type CampaignDraft,
+  type ValidationIssue,
+  type KpiDraft,
+  type TierDraft,
+  type EventSourceDraft,
+} from "@/lib/validation";
 import {describeThreshold, describeUnit, type UnitInput} from "@/lib/kpiUnits";
 import {
   MAX_ACTION_LENGTH,
@@ -37,6 +55,41 @@ import {
   toDateTimeLocal,
   type DurationUnit,
 } from "@/lib/format";
+
+/*
+  Layout.
+
+  The form is a single column capped at `max-w-4xl`. Inside `main`'s `max-w-6xl` the old version let
+  every input run the full 1,150px, which is unreadable for an address and absurd for a number. From
+  `lg` up each section splits into a heading rail on the left and a fields column on the right, so a
+  wide screen buys structure — the section's name and what it is for stay beside its fields as you
+  scroll — rather than wider inputs. Below `lg` the rail stacks above the fields.
+
+  Sections are separated by hairlines, not boxed. The page previously stacked seven `Card`s, one per
+  section, with two more bordered boxes nested inside each KPI. A card marks a panel that stands on its
+  own; a form's sections do not, and the borders were most of what the eye had to process. The one box
+  left is the KPI block, because KPIs are repeatable and a repeated thing needs an edge.
+*/
+
+const SECTION_GRID = "lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-x-12";
+
+/*
+  Button register.
+
+  Solid brand is the page's one primary action (Create Campaign), matching the nav's own Create
+  button. Actions that grow the campaign — add a KPI, add a tier — are brand outline: yellow enough
+  to be found at a glance, which a muted dashed box was not, without a second solid block competing
+  with the primary. Neutral outline is for stepping back (Reset, Try again). Removal stays quiet text
+  that only turns critical on hover, so the destructive control is never the loudest thing in a block.
+*/
+const PRIMARY_BUTTON =
+  "inline-flex min-h-11 items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50";
+const SECONDARY_BUTTON =
+  "inline-flex min-h-11 items-center justify-center rounded-md border border-hairline-strong px-4 text-sm font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50";
+const BRAND_OUTLINE_BUTTON =
+  "w-full rounded-lg border border-brand bg-brand/5 px-4 py-3 text-sm font-semibold text-brand transition-colors hover:bg-brand/15";
+const BRAND_OUTLINE_SMALL =
+  "inline-flex min-h-8 items-center justify-center rounded-md border border-brand bg-brand/5 px-2.5 text-xs font-semibold text-brand transition-colors hover:bg-brand/15";
 
 export function CreateCampaignPage() {
   const {isConnected} = useAccount();
@@ -200,374 +253,609 @@ export function CreateCampaignPage() {
 
   if (!isConnected) {
     return (
-      <Card>
-        <ErrorState message="Connect a wallet to create a campaign." />
-      </Card>
+      <div className="max-w-4xl">
+        <PageHeader />
+        <Card>
+          <ErrorState message="Connect a wallet to create a campaign." />
+        </Card>
+      </div>
     );
   }
 
   if (state.status === "confirmed" && campaignId !== undefined) {
     return (
-      <CreatedCard
-        campaignAddress={campaignAddress}
-        campaignId={campaignId}
-        campaignName={draft.name}
-        guide={guide}
-        onView={() => router.push(`/campaign/${campaignId.toString()}`)}
-        publish={publishGuide}
-      />
+      <div className="max-w-2xl">
+        <CreatedCard
+          campaignAddress={campaignAddress}
+          campaignId={campaignId}
+          campaignName={draft.name}
+          guide={guide}
+          onView={() => router.push(`/campaign/${campaignId.toString()}`)}
+          publish={publishGuide}
+        />
+      </div>
     );
   }
 
+  const symbol = token.meta?.symbol;
+  const summaryLength = guide.summary.trim().length;
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <header>
-        <h1 className="font-display text-2xl text-ink">Create a Campaign</h1>
-        <p className="mt-1 text-xs text-ink-bold">
-          Launch a performance-based campaign with escrowed rewards.
-        </p>
-      </header>
+    <form onSubmit={handleSubmit} className="max-w-4xl">
+      <PageHeader />
 
       {state.status === "error" ? (
-        <Card>
-          <ErrorState message={state.message} detail={state.detail} onRetry={reset} />
-        </Card>
+        <Notice
+          tone="critical"
+          title={state.message}
+          detail={state.detail}
+          className="mb-6"
+          action={
+            <button type="button" onClick={reset} className={SECONDARY_BUTTON}>
+              Try again
+            </button>
+          }
+        />
       ) : null}
 
-      <Card>
-        <CardHeader title="Campaign Title" subtitle="How this campaign is listed" />
-        <div className="space-y-3">
+      <div className="divide-y divide-hairline border-t border-hairline">
+        <FormSection
+          title="Campaign"
+          description="The name is written on chain and never changes. The summary and link are published after creation and can be edited from the campaign page."
+        >
           <Field
             label="Campaign name"
             value={draft.name}
             onChange={(v) => updateField("name", v)}
             error={issueFor("name")}
-            hint="Title should reflect KPIs of interest to your protocol."
+            maxLength={MAX_CAMPAIGN_NAME_LENGTH}
+            placeholder="Summer swaps"
+            hint={<NameStatus check={nameCheck} length={draft.name.length} />}
           />
 
-          {/* Live availability, so a taken name is caught before a wallet prompt rather than as a
-              reverted transaction. The contract re-checks on submit and is what actually decides. */}
-          <p className="text-xs" role="status" aria-live="polite">
-            {nameCheck.isIdle ? (
-              <span className="text-ink-muted">
-                {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH}
-              </span>
-            ) : nameCheck.isLoading ? (
-              <span className="text-ink-muted">Checking availability…</span>
-            ) : nameCheck.isUnavailable ? (
-              <span className="text-ink-muted">
-                Could not reach the registry to check this name. Creation will still be rejected on
-                chain if it is taken.
-              </span>
-            ) : nameCheck.isTaken ? (
-              <span className="text-critical">
-                Taken. Names ignore case and extra spaces, so a variant of an existing name counts as
-                the same one.
-              </span>
-            ) : (
-              <span className="text-good">
-                {draft.name.length}/{MAX_CAMPAIGN_NAME_LENGTH}
-              </span>
-            )}
-          </p>
-        </div>
-      </Card>
+          {/*
+            The off-chain half of the campaign, and the only place a project can say what it wants done.
 
-      {/*
-        The off-chain half of the campaign, and the only place a project can say what it wants done.
-
-        None of this reaches the chain — `Types.CampaignConfig` has no slot for a sentence and
-        `KpiSpec.params` is spent on the event source — so it is published separately, signed, after the
-        campaign exists. See `lib/campaignGuide`.
-      */}
-      <Card>
-        <CardHeader title="Additional Campaign Info" />
-        <div className="space-y-3">
+            None of this reaches the chain — `Types.CampaignConfig` has no slot for a sentence and
+            `KpiSpec.params` is spent on the event source — so it is published separately, signed,
+            after the campaign exists. See `lib/campaignGuide`.
+          */}
           <Field
-            error={guideIssueFor("guide.summary")}
-            hint={`${guide.summary.trim().length}/${MAX_SUMMARY_LENGTH}`}
             label="What is this campaign about?"
-            onChange={(v) => updateGuideField("summary", v)}
+            multiline
+            rows={3}
+            maxLength={MAX_SUMMARY_LENGTH}
             value={guide.summary}
+            onChange={(v) => updateGuideField("summary", v)}
+            error={guideIssueFor("guide.summary")}
+            placeholder="What a promoter should tell people, in a sentence or two."
+            hint={
+              <>
+                <span className="tnum">
+                  {summaryLength}/{MAX_SUMMARY_LENGTH}
+                </span>
+                {" · Shown on the campaign page."}
+              </>
+            }
           />
           <Field
-            error={guideIssueFor("guide.siteUrl")}
-            label="Link to Project Frontend."
-            onChange={(v) => updateGuideField("siteUrl", v)}
+            label="Project link"
+            inputMode="url"
             value={guide.siteUrl}
+            onChange={(v) => updateGuideField("siteUrl", v)}
+            error={guideIssueFor("guide.siteUrl")}
+            placeholder="https://"
+            hint="Optional. Where a referral is sent to take part."
           />
-        </div>
-      </Card>
+        </FormSection>
 
-      <Card>
-        <CardHeader title="Token & Reward Pool" subtitle="ERC-20 token used for rewards" />
-        <div className="space-y-3">
+        <FormSection
+          title="Reward pool"
+          description="Rewards are paid in one ERC-20. Creating the campaign moves nothing — the pool is deposited into escrow in a separate step once the campaign exists."
+        >
           <Field
             label="Token address"
+            mono
             value={draft.token}
             onChange={(v) => updateField("token", v)}
             error={issueFor("token")}
+            placeholder="0x…"
+            hint={<TokenStatus token={token} />}
           />
-
-          {/* Resolved from the chain — the decimals that scale every amount below. */}
-          <p className="text-xs" role="status" aria-live="polite">
-            {token.isIdle ? (
-              <span className="text-ink-muted">Enter a token address to read its decimals.</span>
-            ) : token.isLoading ? (
-              <span className="text-ink-muted">Reading token…</span>
-            ) : token.isUnreadable ? (
-              <span className="text-critical">
-                No ERC-20 metadata at this address on the connected network. Amounts cannot be
-                scaled safely, so campaign creation is blocked.
-              </span>
-            ) : (
-              <span className="text-good">
-                {token.meta?.symbol} · {token.meta?.decimals} decimals
-              </span>
-            )}
-          </p>
-
           <Field
             label="Reward pool"
+            inputMode="decimal"
+            className="sm:max-w-xs"
             value={draft.rewardPool}
             onChange={(v) => updateField("rewardPool", v)}
             error={issueFor("rewardPool")}
+            placeholder="25000"
             hint={
               tokenDecimals === undefined
-                ? "Total Rewards escrowed."
-                : `Total escrow amount, in whole ${token.meta?.symbol}`
+                ? "Total to escrow, in whole tokens."
+                : `Total to escrow, in whole ${symbol}.`
             }
           />
-        </div>
-      </Card>
+        </FormSection>
 
-      <Card>
-        <CardHeader title="Campaign Window" />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <DateTimeField
-            label="Starts"
-            value={draft.startTime}
-            onChange={(v) => updateField("startTime", v)}
-            nowSeconds={now}
-          />
-          <DateTimeField
-            label="Ends"
-            value={draft.endTime}
-            onChange={(v) => updateField("endTime", v)}
-            error={issueFor("endTime")}
-          />
+        <FormSection
+          title="Window"
+          description="Reports are credited only between the start and the end. The attribution window is how long a referral's signed visit keeps crediting the promoter who sent them."
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <DateTimeField
+              label="Starts"
+              value={draft.startTime}
+              onChange={(v) => updateField("startTime", v)}
+              nowSeconds={now}
+            />
+            <DateTimeField
+              label="Ends"
+              value={draft.endTime}
+              onChange={(v) => updateField("endTime", v)}
+              error={issueFor("endTime")}
+            />
+          </div>
           <DurationField
             label="Attribution window"
+            className="sm:max-w-xs"
             seconds={draft.attributionWindow}
             onChange={(v) => updateField("attributionWindow", v)}
             error={issueFor("attributionWindow")}
-            hint="How long a visit stays creditable"
+            hint="How long a visit stays creditable."
           />
-        </div>
-      </Card>
+        </FormSection>
 
-      <Card>
-        <CardHeader title="Eligibility" />
-        <Field
-          label="Minimum BoneyScore (0 = open to all)"
-          value={draft.minReputation}
-          onChange={(v) => updateField("minReputation", v)}
-          error={issueFor("minReputation")}
-        />
-        <p className="mt-1.5 text-xs text-ink-muted">
-          BoneyScore ranges from <b>0–{MAX_BONEY_SCORE.toLocaleString()}</b>.
-           Campaign settings [including this score cap] are <b>immutable</b> once created.
-        </p>
-        <CeilingNote ceiling={scoreCeiling.ceiling} />
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="KPIs & Reward Tiers"
-          subtitle={`${draft.kpis.length} KPI${draft.kpis.length === 1 ? "" : "s"}`}
-          action={
-            <button
-              type="button"
-              onClick={addKpi}
-              className="text-xs text-brand hover:underline"
-            >
-              + Add KPI
-            </button>
-          }
-        />
-
-        {issueFor("kpis") ? (
-          <p className="mb-3 text-xs text-critical">{issueFor("kpis")}</p>
-        ) : null}
-
-        <div className="space-y-4">
-          {draft.kpis.map((kpi, i) => (
-            <div key={i} className="rounded border border-hairline p-3">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-xs font-medium text-ink">KPI {i + 1}</span>
-                <button
-                  type="button"
-                  onClick={() => removeKpi(i)}
-                  className="text-xs text-critical hover:underline"
-                >
-                  X
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs text-ink-muted">Kind</label>
-                    <select
-                      value={kpi.kind}
-                      onChange={(e) => updateKpi(i, {kind: e.target.value as KpiKind})}
-                      className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink"
-                    >
-                      {KPI_KIND.map((k) => (
-                        <option key={k} value={k}>
-                          {k}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <Field
-                    label="Target (optional)"
-                    value={kpi.target}
-                    onChange={(v) => updateKpi(i, {target: v})}
-                    error={issueFor(`kpis.${i}.target`)}
-                  />
-                </div>
-
-                <Field
-                  label="Verifier address (optional)"
-                  value={kpi.verifier}
-                  onChange={(v) => updateKpi(i, {verifier: v})}
-                  error={issueFor(`kpis.${i}.verifier`)}
-                />
-
-                <label className="flex items-center gap-2 text-xs text-ink-secondary">
-                  <input
-                    type="checkbox"
-                    checked={kpi.aggregate}
-                    onChange={(e) => updateKpi(i, {aggregate: e.target.checked})}
-                  />
-                  Aggregate-only (no rewards, analytics)
-                </label>
-
-                <EventSourceFields
-                  kpiIndex={i}
-                  kind={kpi.kind}
-                  value={kpi.eventSource}
-                  onChange={(eventSource) => updateKpi(i, {eventSource})}
-                  issueFor={issueFor}
-                />
-
-                {/*
-                  What a referral does about this KPI, in words. Sits beside the event source because
-                  the two describe the same thing from opposite ends: that block says which log credits
-                  progress, this one says what a person has to do to emit it.
-                */}
-                <div className="rounded border border-hairline bg-surface-2 p-2.5">
-                  <p className="text-xs text-ink-secondary">How a referral earns this</p>
-                  <div className="mt-2 space-y-3">
-                    <Field
-                      error={guideIssueFor(`guide.kpis.${i}.action`)}
-                      hint={`One line, up to ${MAX_ACTION_LENGTH} characters.`}
-                      label="Instruction (optional)"
-                      onChange={(v) => updateGuideKpi(i, {action: v})}
-                      value={guide.kpis[i]?.action ?? ""}
-                    />
-                    <Field
-                      error={guideIssueFor(`guide.kpis.${i}.url`)}
-                      hint="If left blank, the campaign page links the watched contract on the block explorer instead."
-                      label="Action link (optional)"
-                      onChange={(v) => updateGuideKpi(i, {url: v})}
-                      value={guide.kpis[i]?.url ?? ""}
-                    />
-                  </div>
-                </div>
-
-                {issueFor(`kpis.${i}.tiers`) ? (
-                  <p className="text-xs text-critical">{issueFor(`kpis.${i}.tiers`)}</p>
-                ) : null}
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-ink-muted">
-                      Tiers ({kpi.tiers.length})
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => addTier(i)}
-                      className="text-xs text-brand hover:underline"
-                    >
-                      + Add tier
-                    </button>
-                  </div>
-
-                  {kpi.tiers.map((tier, j) => (
-                    <div key={j} className="grid grid-cols-[1fr,1fr,auto] gap-2 items-end">
-                      <div>
-                        <Field
-                          label={`Tier ${j + 1} threshold`}
-                          value={tier.threshold}
-                          onChange={(v) => updateTier(i, j, {threshold: v})}
-                          error={issueFor(`kpis.${i}.tiers.${j}.threshold`)}
-                        />
-                        {/*
-                          The threshold restated as the work it takes, right under the number being
-                          typed — the highest-leverage place to catch a scale mistake, since it is the
-                          exact spot the lynx project entered 50 meaning 50 wraps and got 500. Shown
-                          only for a count KPI with a scale above 1; `describeThreshold` returns null
-                          otherwise rather than echoing the figure above it.
-                        */}
-                        <TierActionHint kpi={kpi} threshold={tier.threshold} />
-                      </div>
-                      <Field
-                        label="Reward"
-                        value={tier.reward}
-                        onChange={(v) => updateTier(i, j, {reward: v})}
-                        error={issueFor(`kpis.${i}.tiers.${j}.reward`)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeTier(i, j)}
-                        className="mb-1 text-xs text-critical hover:underline"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={isPending(state) || tokenDecimals === undefined}
-          className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-plane hover:opacity-90 disabled:opacity-50"
+        <FormSection
+          title="Eligibility"
+          description="Gate the campaign to promoters above a BoneyScore, or leave it open to everyone."
         >
-          {state.status === "preparing"
-            ? "Awaiting signature..."
-            : state.status === "submitted"
-              ? "Mining..."
-              : "Create Campaign"}
-        </button>
-        {state.status !== "idle" && state.status !== "error" ? (
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded-md border border-hairline px-4 py-2 text-sm text-ink-secondary hover:bg-surface-hover"
-          >
-            Reset
+          <Field
+            label="Minimum BoneyScore"
+            inputMode="numeric"
+            className="sm:max-w-xs"
+            value={draft.minReputation}
+            onChange={(v) => updateField("minReputation", v)}
+            error={issueFor("minReputation")}
+            hint={
+              <>
+                0 opens it to every promoter. Scores run 0–{MAX_BONEY_SCORE.toLocaleString()}, and
+                the gate cannot be changed once the campaign exists.
+              </>
+            }
+          />
+          <CeilingNote ceiling={scoreCeiling.ceiling} />
+        </FormSection>
+
+        <FormSection
+          title="KPIs and reward tiers"
+          description="Each KPI is one thing you want done and a ladder of rewards for doing it. Progress is credited from on-chain events, or from reports you submit yourself."
+        >
+          {issueFor("kpis") ? (
+            <p role="alert" className="text-xs text-critical">
+              {issueFor("kpis")}
+            </p>
+          ) : null}
+
+          {draft.kpis.map((kpi, i) => (
+            <KpiEditor
+              key={i}
+              index={i}
+              kpi={kpi}
+              guide={guide.kpis[i]}
+              tokenSymbol={symbol}
+              issueFor={issueFor}
+              guideIssueFor={guideIssueFor}
+              onChange={(updates) => updateKpi(i, updates)}
+              onRemove={() => removeKpi(i)}
+              onGuideChange={(updates) => updateGuideKpi(i, updates)}
+              onTierChange={(j, updates) => updateTier(i, j, updates)}
+              onAddTier={() => addTier(i)}
+              onRemoveTier={(j) => removeTier(i, j)}
+            />
+          ))}
+
+          {/* At the end of the list, where the next one would go, rather than a link in a header. */}
+          <button type="button" onClick={addKpi} className={BRAND_OUTLINE_BUTTON}>
+            + Add another KPI
           </button>
-        ) : null}
+        </FormSection>
+      </div>
+
+      <div className={`border-t border-hairline pt-6 ${SECTION_GRID}`}>
+        <div aria-hidden className="hidden lg:block" />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <button
+            type="submit"
+            disabled={isPending(state) || tokenDecimals === undefined}
+            className={PRIMARY_BUTTON}
+          >
+            {state.status === "preparing"
+              ? "Awaiting signature…"
+              : state.status === "submitted"
+                ? "Mining…"
+                : "Create Campaign"}
+          </button>
+          {state.status !== "idle" && state.status !== "error" ? (
+            <button type="button" onClick={reset} className={SECONDARY_BUTTON}>
+              Reset
+            </button>
+          ) : null}
+          {/* Says why the button is off rather than leaving a disabled control to explain itself. */}
+          <p className="text-xs text-ink-muted">
+            {tokenDecimals === undefined
+              ? "Enter a readable ERC-20 token address to enable creation."
+              : "One transaction. Funding and activation follow from the campaign page."}
+          </p>
+        </div>
       </div>
     </form>
+  );
+}
+
+function PageHeader() {
+  return (
+    <header className="pb-6">
+      <h1 className="font-display text-2xl text-ink">Create a Campaign</h1>
+      <p className="mt-1 max-w-prose text-sm text-ink-secondary">
+        Lock a reward pool in escrow, say what counts as progress, and promoters are paid as they
+        cross each tier.
+      </p>
+    </header>
+  );
+}
+
+/**
+ * One section of the form: a heading rail and a column of fields.
+ *
+ * `section` + `aria-labelledby` rather than `fieldset` + `legend`: a legend is rendered outside the
+ * fieldset's box model, which fights the two-column grid in every browser slightly differently, and
+ * a labelled region gives a screen reader the same landmark to jump to.
+ */
+function FormSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  children: ReactNode;
+}) {
+  const headingId = useId();
+
+  return (
+    <section aria-labelledby={headingId} className={`py-8 ${SECTION_GRID}`}>
+      <div className="mb-5 lg:mb-0">
+        <h2 id={headingId} className="text-sm font-bold text-brand">
+          {title}
+        </h2>
+        {description ? (
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">{description}</p>
+        ) : null}
+      </div>
+      <div className="space-y-5">{children}</div>
+    </section>
+  );
+}
+
+/**
+ * Live name availability, as the field's own hint line.
+ *
+ * Under the input rather than in a separate paragraph, so a taken name is caught before a wallet
+ * prompt rather than as a reverted transaction, and the counter sits where every other field's hint
+ * does. The contract re-checks on submit and is what actually decides.
+ */
+function NameStatus({
+  check,
+  length,
+}: {
+  check: ReturnType<typeof useNameAvailability>;
+  length: number;
+}) {
+  const counter = (
+    <span className="tnum">
+      {length}/{MAX_CAMPAIGN_NAME_LENGTH}
+    </span>
+  );
+
+  return (
+    <span role="status" aria-live="polite">
+      {check.isIdle ? (
+        counter
+      ) : check.isLoading ? (
+        <>{counter} · Checking availability…</>
+      ) : check.isUnavailable ? (
+        <>
+          {counter} · Could not reach the registry to check this name. Creation is still rejected on
+          chain if it is taken.
+        </>
+      ) : check.isTaken ? (
+        <span className="text-critical">
+          Taken. Names ignore case and extra spaces, so a variant of an existing name counts as the
+          same one.
+        </span>
+      ) : (
+        <>
+          {counter} · <span className="text-good">Available</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/** The token as resolved from the chain — the decimals that scale every amount on the form. */
+function TokenStatus({token}: {token: ReturnType<typeof useTokenMeta>}) {
+  return (
+    <span role="status" aria-live="polite">
+      {token.isIdle ? (
+        "The ERC-20 rewards are paid in. Its decimals are read from the contract."
+      ) : token.isLoading ? (
+        "Reading token…"
+      ) : token.isUnreadable ? (
+        <span className="text-critical">
+          No ERC-20 metadata at this address on the connected network. Amounts cannot be scaled
+          safely, so creation is blocked.
+        </span>
+      ) : (
+        <span className="text-good">
+          {token.meta?.symbol} · {token.meta?.decimals} decimals
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * One KPI: what it is, where its progress comes from, what a referral is told, and what it pays.
+ *
+ * The only bordered box on the form. Its four parts are separated by hairlines inside it rather
+ * than nested in boxes of their own — the previous version put the event source and the referral
+ * guide each in a second bordered surface, three borders deep by the time you reached a tier.
+ */
+function KpiEditor({
+  index,
+  kpi,
+  guide,
+  tokenSymbol,
+  issueFor,
+  guideIssueFor,
+  onChange,
+  onRemove,
+  onGuideChange,
+  onTierChange,
+  onAddTier,
+  onRemoveTier,
+}: {
+  index: number;
+  kpi: KpiDraft;
+  guide: GuideDraft["kpis"][number] | undefined;
+  tokenSymbol?: string;
+  issueFor: (path: string) => string | undefined;
+  guideIssueFor: (path: string) => string | undefined;
+  onChange: (updates: Partial<KpiDraft>) => void;
+  onRemove: () => void;
+  onGuideChange: (updates: Partial<GuideDraft["kpis"][number]>) => void;
+  onTierChange: (tierIndex: number, updates: Partial<TierDraft>) => void;
+  onAddTier: () => void;
+  onRemoveTier: (tierIndex: number) => void;
+}) {
+  const n = index + 1;
+
+  return (
+    <div className="rounded-lg border border-hairline-strong bg-surface-1 p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-4">
+        <h3 className="text-sm font-bold text-brand">KPI {n}</h3>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove KPI ${n}`}
+          className="text-xs text-ink-muted transition-colors hover:text-critical"
+        >
+          Remove
+        </button>
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectField
+            label="Kind"
+            value={kpi.kind}
+            onChange={(v) => onChange({kind: v as KpiKind})}
+            options={KPI_KIND.map((k) => ({value: k, label: k}))}
+            hint={kpi.kind === "Custom" ? "Custom needs a verifier adapter, below." : undefined}
+          />
+          <Field
+            label="Target"
+            inputMode="numeric"
+            value={kpi.target}
+            onChange={(v) => onChange({target: v})}
+            error={issueFor(`kpis.${index}.target`)}
+            hint="Optional. A campaign-wide goal, for display. Tiers decide payouts."
+          />
+        </div>
+        <Field
+          label="Verifier address"
+          mono
+          value={kpi.verifier}
+          onChange={(v) => onChange({verifier: v})}
+          error={issueFor(`kpis.${index}.verifier`)}
+          placeholder="0x…"
+          hint="Optional. An adapter that caps what a report may claim. Blank credits reports as-is."
+        />
+        <CheckboxField
+          label="Aggregate only"
+          checked={kpi.aggregate}
+          onChange={(aggregate) => onChange({aggregate})}
+          hint="Track progress for analytics. Pays no rewards."
+        />
+      </div>
+
+      <Subsection title="Progress source">
+        <EventSourceFields
+          kpiIndex={index}
+          kind={kpi.kind}
+          value={kpi.eventSource}
+          onChange={(eventSource) => onChange({eventSource})}
+          issueFor={issueFor}
+        />
+      </Subsection>
+
+      {/*
+        What a referral does about this KPI, in words. Sits beside the event source because the two
+        describe the same thing from opposite ends: that block says which log credits progress, this
+        one says what a person has to do to emit it.
+      */}
+      <Subsection title="How a referral earns this">
+        <Field
+          label="Instruction"
+          maxLength={MAX_ACTION_LENGTH}
+          value={guide?.action ?? ""}
+          onChange={(v) => onGuideChange({action: v})}
+          error={guideIssueFor(`guide.kpis.${index}.action`)}
+          placeholder="Swap at least 10 GYND on any pool"
+          hint={`Optional. One line, up to ${MAX_ACTION_LENGTH} characters.`}
+        />
+        <Field
+          label="Action link"
+          inputMode="url"
+          value={guide?.url ?? ""}
+          onChange={(v) => onGuideChange({url: v})}
+          error={guideIssueFor(`guide.kpis.${index}.url`)}
+          placeholder="https://"
+          hint="Optional. Left blank, the campaign page links the watched contract on the block explorer instead."
+        />
+      </Subsection>
+
+      <Subsection
+        title="Reward tiers"
+        action={
+          <button type="button" onClick={onAddTier} className={BRAND_OUTLINE_SMALL}>
+            + Add tier
+          </button>
+        }
+      >
+        {issueFor(`kpis.${index}.tiers`) ? (
+          <p role="alert" className="text-xs text-critical">
+            {issueFor(`kpis.${index}.tiers`)}
+          </p>
+        ) : null}
+        <TierLadder
+          kpi={kpi}
+          kpiIndex={index}
+          tokenSymbol={tokenSymbol}
+          issueFor={issueFor}
+          onTierChange={onTierChange}
+          onRemoveTier={onRemoveTier}
+        />
+      </Subsection>
+    </div>
+  );
+}
+
+/** A titled part of a KPI block, divided from the previous one by a hairline. */
+function Subsection({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mt-5 border-t border-hairline pt-5">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{title}</h4>
+        {action}
+      </div>
+      <div className="space-y-4">{children}</div>
+    </div>
+  );
+}
+
+const TIER_GRID = "grid grid-cols-[1.5rem_minmax(0,1fr)_minmax(0,1fr)_2rem] gap-2";
+
+/**
+ * The tiers as a ladder: one row per tier, threshold beside reward, column headings once.
+ *
+ * The previous markup declared `grid-cols-[1fr,1fr,auto]`, which is not a grid template — commas are
+ * not separators in `grid-template-columns` — so the declaration was dropped and every tier rendered
+ * as three stacked full-width controls with a lone × under them. Labels are kept for assistive tech
+ * but hidden, since the column heading carries the text and repeating "Tier 3 threshold" on every row
+ * was the other half of the clutter.
+ */
+function TierLadder({
+  kpi,
+  kpiIndex,
+  tokenSymbol,
+  issueFor,
+  onTierChange,
+  onRemoveTier,
+}: {
+  kpi: KpiDraft;
+  kpiIndex: number;
+  tokenSymbol?: string;
+  issueFor: (path: string) => string | undefined;
+  onTierChange: (tierIndex: number, updates: Partial<TierDraft>) => void;
+  onRemoveTier: (tierIndex: number) => void;
+}) {
+  if (kpi.tiers.length === 0) {
+    return (
+      <p className="text-xs text-ink-muted">
+        No tiers yet. A KPI with no tiers pays nothing — add one for each threshold that should
+        trigger a payout.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div aria-hidden className={`${TIER_GRID} text-[11px] font-medium text-ink-muted`}>
+        <span />
+        <span>Threshold</span>
+        <span>Reward{tokenSymbol ? ` (${tokenSymbol})` : ""}</span>
+        <span />
+      </div>
+      {kpi.tiers.map((tier, j) => (
+        <div key={j} className={`${TIER_GRID} items-start`}>
+          <span className="tnum pt-2 text-xs font-semibold text-brand">{j + 1}</span>
+          <div>
+            <Field
+              labelHidden
+              label={`Tier ${j + 1} threshold`}
+              inputMode="numeric"
+              value={tier.threshold}
+              onChange={(v) => onTierChange(j, {threshold: v})}
+              error={issueFor(`kpis.${kpiIndex}.tiers.${j}.threshold`)}
+            />
+            {/*
+              The threshold restated as the work it takes, right under the number being typed — the
+              highest-leverage place to catch a scale mistake, since it is the exact spot the lynx
+              project entered 50 meaning 50 wraps and got 500. Shown only for a count KPI with a
+              scale above 1; `describeThreshold` returns null otherwise rather than echoing the
+              figure above it.
+            */}
+            <TierActionHint kpi={kpi} threshold={tier.threshold} />
+          </div>
+          <Field
+            labelHidden
+            label={`Tier ${j + 1} reward`}
+            inputMode="decimal"
+            value={tier.reward}
+            onChange={(v) => onTierChange(j, {reward: v})}
+            error={issueFor(`kpis.${kpiIndex}.tiers.${j}.reward`)}
+          />
+          <button
+            type="button"
+            onClick={() => onRemoveTier(j)}
+            aria-label={`Remove tier ${j + 1}`}
+            className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-hover hover:text-critical"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -763,17 +1051,16 @@ function CeilingNote({ceiling}: {ceiling?: bigint}) {
 
   if (ceiling === BigInt(0)) {
     return (
-      <p className="mt-1.5 text-xs text-brand">
-        On this network no wallet can hold any BoneyScore yet — the reputation registry has no
-        weighted schemas, so a gate above 0 would lock out everyone, permanently. Leave this at 0
-        until the schemas are registered.
-      </p>
+      <Notice tone="warning" title="No wallet can hold a BoneyScore on this network yet.">
+        The reputation registry has no weighted schemas, so a gate above 0 would lock out everyone,
+        permanently. Leave this at 0 until the schemas are registered.
+      </Notice>
     );
   }
 
   if (!isBoundedScoreCeiling(ceiling)) {
     return (
-      <p className="mt-1.5 text-xs text-ink-muted">
+      <p className="text-xs text-ink-muted">
         This network reports no score ceiling — a weighted schema has no value cap — so any gate is
         accepted.
       </p>
@@ -783,11 +1070,12 @@ function CeilingNote({ceiling}: {ceiling?: bigint}) {
   if (ceiling === BigInt(MAX_BONEY_SCORE)) return null;
 
   return (
-    <p className="mt-1.5 text-xs text-brand">
-      This network&rsquo;s registry caps scores at {ceiling.toLocaleString("en-US")}, not{" "}
-      {MAX_BONEY_SCORE.toLocaleString()} — its schema weights differ from the seeded ones. A gate
-      above that is rejected on creation.
-    </p>
+    <Notice
+      tone="warning"
+      title={`This network caps scores at ${ceiling.toLocaleString("en-US")}, not ${MAX_BONEY_SCORE.toLocaleString()}.`}
+    >
+      Its schema weights differ from the seeded ones. A gate above that is rejected on creation.
+    </Notice>
   );
 }
 
@@ -853,33 +1141,30 @@ function EventSourceFields({
       actorTopic: String(preset.source.actorTopic),
       amountMode: preset.source.amountMode === AMOUNT_MODE.count ? "count" : "dataWord0",
       scale: preset.source.scale.toString(),
-      filterTopic: String(preset.source.filterTopic ?? 0),
+      // `in` rather than `??`: each preset keeps its own literal type, and the two without a filter
+      // have no `filterTopic` member at all, which `??` cannot narrow past.
+      filterTopic: String("filterTopic" in preset.source ? preset.source.filterTopic : 0),
       // Left for the project the way a zero source address is: a router preset names the shape, not
       // which router.
       filterValue: preset.filterValueIsPlaceholder
         ? (value?.filterValue ?? "")
-        : (preset.source.filterValue ?? ""),
+        : "filterValue" in preset.source
+          ? preset.source.filterValue
+          : "",
     });
   };
 
   return (
-    <div className="rounded border border-hairline bg-surface-2 p-2.5">
-      <label className="flex items-center gap-2 text-xs text-ink-secondary">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onChange(e.target.checked ? emptyEventSource() : undefined)}
-        />
-        Credit progress from on-chain events
-      </label>
+    <>
+      <CheckboxField
+        label="Credit progress from on-chain events"
+        checked={enabled}
+        onChange={(on) => onChange(on ? emptyEventSource() : undefined)}
+        hint="Off, you report this KPI yourself. On, name a contract and an event, and an indexer credits progress from its logs."
+      />
 
-      {!enabled ? (
-        <p className="mt-1 text-xs text-ink-muted">
-          Leave off to report this KPI yourself. Turn on to name a contract and event an indexer
-          reads instead.
-        </p>
-      ) : (
-        <div className="mt-3 space-y-3">
+      {enabled ? (
+        <div className="space-y-4">
           <SelectField
             label="Preset"
             defaultValue=""
@@ -893,20 +1178,24 @@ function EventSourceFields({
 
           <Field
             label="Source contract"
+            mono
             value={value.source}
             onChange={(v) => set({source: v})}
             error={issueFor(`${path}.source`)}
+            placeholder="0x…"
             hint="The contract whose logs credit this KPI. Only its own events count."
           />
           <Field
             label="Event signature"
+            mono
             value={value.signature}
             onChange={(v) => set({signature: v})}
             error={issueFor(`${path}.signature`)}
+            placeholder="Transfer(address,address,uint256)"
             hint="Types only, no names or spaces — the topic is the keccak of this exact string."
           />
 
-          <div className="grid grid-cols-3 items-start gap-3">
+          <div className="grid gap-4 sm:grid-cols-3">
             <SelectField
               label="Actor topic"
               value={value.actorTopic}
@@ -925,6 +1214,7 @@ function EventSourceFields({
             />
             <Field
               label="Filter value"
+              mono
               value={value.filterValue ?? ""}
               onChange={(v) => set({filterValue: v})}
               error={issueFor(`${path}.filterValue`)}
@@ -932,7 +1222,7 @@ function EventSourceFields({
             />
           </div>
 
-          <div className="grid grid-cols-3 items-start gap-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <SelectField
               label="Amount"
               value={value.amountMode}
@@ -945,6 +1235,7 @@ function EventSourceFields({
             />
             <Field
               label="Scale"
+              inputMode="numeric"
               value={value.scale}
               onChange={(v) => set({scale: v})}
               error={issueFor(`${path}.scale`)}
@@ -963,41 +1254,45 @@ function EventSourceFields({
             base units rather than a token amount, because naming the token would mean reading its
             decimals and this updates faster than a request could land. See `lib/kpiUnits`.
           */}
-          <p className="rounded border border-hairline bg-surface-1 px-2 py-1.5 text-xs text-ink-secondary">
-            {describeUnit(unitFromDraft(kind, value))}
-          </p>
+          <p className="text-xs text-ink-secondary">= {describeUnit(unitFromDraft(kind, value))}</p>
 
+          {/*
+            Probe findings in the app's own `Notice` tones. These used to be Tailwind's light-theme
+            palette (`bg-green-50`, `bg-red-50`) — pastel boxes on a near-black page — and the only
+            place in the app that painted them. `data-probe-severity` stays on the wrapper because the
+            event-probe driver script selects on it.
+          */}
           {probe.findings.length > 0 && (
-            <div className="mt-3 space-y-1.5">
+            <div className="space-y-2">
               {probe.findings.map((f, j) => (
-                <div
-                  key={j}
-                  data-probe-severity={f.severity}
-                  role="status"
-                  className={`rounded px-2 py-1.5 text-xs ${
-                    f.severity === "error"
-                      ? "border border-red-300 bg-red-50 text-red-800"
-                      : f.severity === "warn"
-                        ? "border border-amber-200 bg-amber-50 text-amber-800"
-                        : "border border-green-200 bg-green-50 text-green-800"
-                  }`}
-                >
-                  {f.severity === "error" && <span className="font-semibold">Unusable: </span>}
-                  {f.severity === "warn" && <span className="font-semibold">Unverified: </span>}
-                  {f.message}
+                <div key={j} data-probe-severity={f.severity}>
+                  <Notice
+                    role="status"
+                    tone={f.severity === "error" ? "critical" : f.severity === "warn" ? "warning" : "good"}
+                    title={
+                      <>
+                        {f.severity === "error" ? (
+                          <span className="font-semibold">Unusable: </span>
+                        ) : f.severity === "warn" ? (
+                          <span className="font-semibold">Unverified: </span>
+                        ) : null}
+                        {f.message}
+                      </>
+                    }
+                  />
                 </div>
               ))}
             </div>
           )}
 
           {probe.isLoading && (
-            <p className="mt-2 text-xs text-ink-muted animate-pulse">
+            <p className="animate-pulse text-xs text-ink-muted">
               Checking the chain for this contract and event…
             </p>
           )}
         </div>
-      )}
-    </div>
+      ) : null}
+    </>
   );
 }
 
@@ -1100,7 +1395,6 @@ function DateTimeField({
   nowSeconds?: number;
 }) {
   const id = useId();
-  const describedBy = error ? `${id}-error` : `${id}-hint`;
 
   // A future start is legal but costs real testing time: the campaign funds, activates, reads as
   // Active, and still rejects every report with `OutsideWindow` until it opens.
@@ -1108,39 +1402,33 @@ function DateTimeField({
   const pending = clockReady && value > (nowSeconds as number);
   const delay = pending ? formatDuration(value - (nowSeconds as number)) : null;
 
+  const hint = (
+    <>
+      {formatDateTime(value)} local
+      {!clockReady ? null : pending ? (
+        <>
+          {" · "}
+          <span className="text-brand">no reports credited for {delay}</span>
+        </>
+      ) : (
+        " · opens immediately"
+      )}
+    </>
+  );
+
   return (
     <div>
-      <label htmlFor={id} className="mb-1 block text-xs text-ink-muted">
-        {label}
-      </label>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <input
         id={id}
         type="datetime-local"
         value={toDateTimeLocal(value)}
         onChange={(e) => onChange(fromDateTimeLocal(e.target.value))}
         aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={`w-full rounded border px-2 py-1.5 text-xs text-ink bg-surface-2 ${
-          error ? "border-critical" : "border-hairline"
-        }`}
+        aria-describedby={describedBy(id, error, hint)}
+        className={controlClass(!!error)}
       />
-      {error ? (
-        <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
-          {error}
-        </p>
-      ) : (
-        <p id={`${id}-hint`} className="mt-0.5 text-xs text-ink-muted">
-          {formatDateTime(value)} local
-          {!clockReady ? null : pending ? (
-            <>
-              {" · "}
-              <span className="text-brand">no reports credited for {delay}</span>
-            </>
-          ) : (
-            <>{" · opens immediately"}</>
-          )}
-        </p>
-      )}
+      <FieldNote id={id} error={error} hint={hint} />
     </div>
   );
 }
@@ -1160,35 +1448,33 @@ function DurationField({
   onChange,
   error,
   hint,
+  className = "",
 }: {
   label: string;
   seconds: number;
   onChange: (seconds: number) => void;
   error?: string;
   hint?: string;
+  className?: string;
 }) {
   const id = useId();
   const unitId = useId();
   const {value, unit} = splitDuration(seconds);
-  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
 
   return (
-    <div>
-      <label htmlFor={id} className="mb-1 block text-xs text-ink-muted">
-        {label}
-      </label>
-      <div className="flex gap-1.5">
+    <div className={className}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <div className="flex gap-2">
         <input
           id={id}
           type="number"
           min="0"
+          inputMode="numeric"
           value={String(value)}
           onChange={(e) => onChange(joinDuration(Number(e.target.value), unit))}
           aria-invalid={error ? true : undefined}
-          aria-describedby={describedBy}
-          className={`w-full min-w-0 rounded border px-2 py-1.5 text-xs text-ink bg-surface-2 ${
-            error ? "border-critical" : "border-hairline"
-          }`}
+          aria-describedby={describedBy(id, error, hint)}
+          className={controlClass(!!error)}
         />
         {/* Its own accessible name — a shared label would leave the select reading as the number. */}
         <label htmlFor={unitId} className="sr-only">
@@ -1198,7 +1484,7 @@ function DurationField({
           id={unitId}
           value={unit}
           onChange={(e) => onChange(joinDuration(value, e.target.value as DurationUnit))}
-          className="rounded border border-hairline bg-surface-2 px-1.5 py-1.5 text-xs text-ink"
+          className="shrink-0 rounded-md border border-hairline bg-surface-2 px-2 py-2 text-base text-ink hover:border-hairline-strong sm:text-sm"
         >
           {DURATION_UNITS.map((u) => (
             <option key={u.id} value={u.id}>
@@ -1207,123 +1493,7 @@ function DurationField({
           ))}
         </select>
       </div>
-      {error ? (
-        <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
-          {error}
-        </p>
-      ) : hint ? (
-        <p id={`${id}-hint`} className="mt-0.5 text-xs text-ink-muted">
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  error,
-  hint,
-  type = "text",
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  error?: string;
-  hint?: string;
-  type?: "text" | "number";
-}) {
-  // The label has to be *associated* with the input, not merely adjacent to it: a bare <label>
-  // sibling leaves the input nameless to a screen reader, and to anything else querying by label.
-  const id = useId();
-  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
-
-  return (
-    <div>
-      <label htmlFor={id} className="mb-1 block text-xs text-ink-muted">
-        {label}
-      </label>
-      <input
-        id={id}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={`w-full rounded border px-2 py-1.5 text-xs text-ink bg-surface-2 ${
-          error ? "border-critical" : "border-hairline"
-        }`}
-      />
-      {error ? (
-        <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
-          {error}
-        </p>
-      ) : null}
-      {hint && !error ? (
-        <p id={`${id}-hint`} className="mt-0.5 text-xs text-ink-muted">
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-// `Field`'s counterpart for a `<select>`: same label association, same error-or-hint under the
-// control. `value` for a controlled select, `defaultValue` for one that only fires an action.
-function SelectField({
-  label,
-  options,
-  onChange,
-  value,
-  defaultValue,
-  error,
-  hint,
-}: {
-  label: string;
-  options: readonly {value: string; label: string}[];
-  onChange: (v: string) => void;
-  value?: string;
-  defaultValue?: string;
-  error?: string;
-  hint?: string;
-}) {
-  const id = useId();
-  const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
-
-  return (
-    <div>
-      <label htmlFor={id} className="mb-1 block text-xs text-ink-muted">
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        defaultValue={defaultValue}
-        onChange={(e) => onChange(e.target.value)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        className={`w-full rounded border bg-surface-2 px-2 py-1.5 text-xs text-ink ${
-          error ? "border-critical" : "border-hairline"
-        }`}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      {error ? (
-        <p id={`${id}-error`} className="mt-0.5 text-xs text-critical">
-          {error}
-        </p>
-      ) : null}
-      {hint && !error ? (
-        <p id={`${id}-hint`} className="mt-0.5 text-xs text-ink-muted">
-          {hint}
-        </p>
-      ) : null}
+      <FieldNote id={id} error={error} hint={hint} />
     </div>
   );
 }
@@ -1332,7 +1502,7 @@ function defaultDraft(): CampaignDraft {
   const now = Math.floor(Date.now() / 1000);
   return {
     name: "",
-    
+
     token: "",
     rewardPool: "",
     startTime: now,

@@ -1,9 +1,4 @@
-/**
- * Throwaway probe: run the real read path *and* the real fold against the deployed subgraph.
- *
- * The read path and the fold were both written without ever hitting the endpoint, so this is what
- * catches schema drift and numbers that only look right against hand-written fixtures.
- */
+/** Runs live campaign-history reads through the production fold. */
 process.env.NEXT_PUBLIC_SUBGRAPH_URL =
   process.env.NEXT_PUBLIC_SUBGRAPH_URL ??
   "https://api.studio.thegraph.com/query/1757958/boney-indexer/v0.3.0";
@@ -67,7 +62,7 @@ async function main() {
     }
   }
 
-  // Unsupported chain and unconfigured URL must be distinguishable, not both "network error".
+  // Unsupported chains and unconfigured URLs must remain distinguishable.
   const anvil = await fetchPromoterHistory({chainId: 31337, wallet: WALLETS[0]});
   console.log(
     "\nanvil:",

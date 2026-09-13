@@ -22,7 +22,7 @@ interface ICampaignAttribution {
 ///      projectVerifier: it would cap the report at the current promoter's slice and starve the
 ///      earlier segments.
 ///
-///      What remains is a narrower use — reading a single promoter's window in isolation, and
+///      What remains is a narrower use, reading a single promoter's window in isolation, and
 ///      `windowFloor` for off-chain parity.
 ///
 ///      `lookback` comes from the KPI's `params` and is how far before `signedAt` an action still

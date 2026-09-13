@@ -1,4 +1,4 @@
-/** Throwaway: blocks until Boney's observed ceiling covers the activity just driven. */
+/** Waits for the observed ceiling to cover recent activity. */
 import {createPublicClient, http, getAddress, type Hex, type PublicClient} from "viem";
 import {baseSepolia} from "viem/chains";
 import {EventMetricKpiVerifierAbi} from "../src/lib/abis";

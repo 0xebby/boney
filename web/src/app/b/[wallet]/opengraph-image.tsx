@@ -5,26 +5,6 @@ import {shortAddress} from "@/lib/format";
 
 /**
  * The share image for `/b/<wallet>` — the bone, as a 1200×630 PNG.
- *
- * ## Why this is written in inline styles and not the design system
- *
- * `ImageResponse` renders through Satori, which is not a browser: it supports a subset of CSS, has no
- * cascade and no custom properties, and Tailwind's classes and `globals.css`'s `--brand` tokens do not
- * exist here. So every colour below is the hex value from `globals.css`, copied deliberately, and every
- * container states `display: flex` — Satori errors on a multi-child div without it rather than assuming
- * block layout.
- *
- * No custom font is loaded. The app's faces come from `next/font/google`, and fetching a TTF at image
- * time would add a network dependency — and a failure mode — to the one asset whose whole job is to
- * render reliably for a crawler. Satori's built-in font is used instead; nobody compares a share card's
- * typeface side by side with the page's.
- *
- * ## The fail-soft rule, in the place it matters most
- *
- * No score, no number. No history, no counts. **Never a zero.** A share image is the most-forwarded
- * artefact in the system and the one nobody will see a caveat next to, so a figure that only exists
- * because a fetch failed would be a claim about a person travelling further than any other claim the app
- * makes. Each block below is present only when its data is.
  */
 
 export const alt = "A Boneyard promoter card — BoneyScore, rank, and verified campaign history";
@@ -96,13 +76,7 @@ export default async function Image({params}: {params: Promise<{wallet: string}>
           position: "relative",
         }}
       >
-        {/*
-          Watermark. Absolute so it does not participate in the column's spacing, and placed in the one
-          band nothing else occupies — right of the score, below the level notches, above the count row.
-          It was bleeding off the bottom-right corner, which put its shaft behind the opaque count tiles
-          and left the two lobe pairs reading as a pair of unrelated blobs. A mark that does not read as
-          the mark is worse than no mark.
-        */}
+        {}
         <div style={{position: "absolute", right: 56, top: 172, display: "flex"}}>
           <Bone width={360} opacity={0.09} color={BRAND} />
         </div>
@@ -213,18 +187,14 @@ function Level({level}: {level: number}) {
         ))}
       </div>
       <div style={{fontSize: 24, letterSpacing: 3, color: INK_MUTED, marginTop: 12}}>
-        {/*
-          One template string, not `BONE LEVEL {level}`. JSX would make that two children — a text node
-          and an expression — and Satori rejects a multi-child element without an explicit `display`,
-          which surfaces at request time as "failed to pipe response" and a 500 on the image.
-        */}
+        {}
         {`BONE LEVEL ${level}`}
       </div>
     </div>
   );
 }
 
-/** Nothing to show — a malformed path. The mark, and no claims. */
+/** Nothing to show */
 function Fallback() {
   return (
     <div

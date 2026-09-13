@@ -23,9 +23,7 @@ contract MockToken is ERC20 {
 }
 
 contract OracleCoordinatorTest is Test {
-    uint256 internal constant MIN_STAKE = 100 ether;
     uint256 internal constant DISPUTE_WINDOW = 1 days;
-    uint256 internal constant UNSTAKE_DELAY = 2 days;
     uint256 internal constant POOL = 10_000 ether;
 
     MockToken internal token;
@@ -58,7 +56,7 @@ contract OracleCoordinatorTest is Test {
 
         // The coordinator is deployed first so the registry can reference it, then wired back to
         // the registry. Both directions use one-time setters rather than address prediction.
-        coordinator = new OracleCoordinator(governor, MIN_STAKE, DISPUTE_WINDOW, UNSTAKE_DELAY);
+        coordinator = new OracleCoordinator(governor, DISPUTE_WINDOW);
         vault = new EscrowVault(address(this));
         registry = new CampaignRegistry(
             address(vault), address(reputation), address(attribution), address(coordinator)
@@ -100,10 +98,9 @@ contract OracleCoordinatorTest is Test {
         return Campaign(addr);
     }
 
-    function _stakeReporter(address who) internal {
-        vm.deal(who, MIN_STAKE);
-        vm.prank(who);
-        coordinator.stake{value: MIN_STAKE}();
+    function _allowReporter(address who) internal {
+        vm.prank(governor);
+        coordinator.addReporter(who);
     }
 
     function _submit(address who, address campaign_, uint256 amount) internal returns (bytes32 reportId) {
@@ -126,93 +123,10 @@ contract OracleCoordinatorTest is Test {
         vm.warp(coordinator.reportDeadline(reportId));
     }
 
-    // ── staking ──────────────────────────────────────────────────
-
-    function test_Stake() public {
-        vm.deal(reporter, MIN_STAKE);
-        vm.prank(reporter);
-        coordinator.stake{value: MIN_STAKE}();
-
-        assertEq(coordinator.stakeOf(reporter), MIN_STAKE);
-        assertTrue(coordinator.isReporter(reporter));
-    }
-
-    /// @dev Collateral below the minimum is accepted but confers no reporting rights, so a
-    ///      reporter can accumulate over several transactions.
-    function test_Stake_belowMinimumConfersNoRights() public {
-        vm.deal(reporter, MIN_STAKE);
-        vm.prank(reporter);
-        coordinator.stake{value: MIN_STAKE - 1}();
-
-        assertEq(coordinator.stakeOf(reporter), MIN_STAKE - 1);
-        assertFalse(coordinator.isReporter(reporter), "not eligible below the minimum");
-    }
-
-    function test_Stake_revertsZeroValue() public {
-        vm.prank(reporter);
-        vm.expectRevert(IOracleCoordinator.NothingStaked.selector);
-        coordinator.stake{value: 0}();
-    }
-
-    function test_Stake_topUpReachesMinimum() public {
-        vm.deal(reporter, MIN_STAKE);
-        vm.prank(reporter);
-        coordinator.stake{value: MIN_STAKE / 2}();
-
-        assertFalse(coordinator.isReporter(reporter));
-
-        vm.prank(reporter);
-        coordinator.stake{value: MIN_STAKE / 2}();
-
-        assertTrue(coordinator.isReporter(reporter));
-    }
-
-    function test_Unstake() public {
-        _stakeReporter(reporter);
-        vm.prank(reporter);
-        coordinator.unstake();
-        assertEq(coordinator.stakeOf(reporter), 0);
-        assertEq(reporter.balance, MIN_STAKE);
-    }
-
-    function test_Unstake_revertsNothingStaked() public {
-        vm.prank(reporter);
-        vm.expectRevert(IOracleCoordinator.NothingStaked.selector);
-        coordinator.unstake();
-    }
-
-    /// @dev A reporter with an in-flight report must not be able to pull collateral and dodge a
-    ///      slash.
-    function test_Unstake_blockedWhileReportInFlight() public {
-        _stakeReporter(reporter);
-        _activateAndFund();
-        _submit(reporter, address(campaign), 100);
-
-        vm.prank(reporter);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IOracleCoordinator.StakeLocked.selector, block.timestamp + DISPUTE_WINDOW + UNSTAKE_DELAY
-            )
-        );
-        coordinator.unstake();
-        assertEq(coordinator.stakeOf(reporter), MIN_STAKE);
-    }
-
-    function test_Unstake_allowedAfterLockExpires() public {
-        _stakeReporter(reporter);
-        _activateAndFund();
-        _submit(reporter, address(campaign), 100);
-
-        vm.warp(block.timestamp + DISPUTE_WINDOW + UNSTAKE_DELAY);
-        vm.prank(reporter);
-        coordinator.unstake();
-        assertEq(coordinator.stakeOf(reporter), 0);
-    }
-
     // ── submission ───────────────────────────────────────────────
 
     function test_SubmitReport() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
 
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
@@ -223,7 +137,7 @@ contract OracleCoordinatorTest is Test {
         assertFalse(coordinator.reportApplied(reportId));
     }
 
-    function test_Submit_revertsNoStake() public {
+    function test_Submit_revertsReporterNotListed() public {
         _activateAndFund();
         vm.prank(reporter);
         vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAReporter.selector, reporter));
@@ -233,7 +147,7 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_Submit_revertsUnknownCampaign() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         vm.prank(reporter);
         vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.UnknownCampaign.selector, address(0xDEAD)));
         coordinator.submitReport(
@@ -243,8 +157,8 @@ contract OracleCoordinatorTest is Test {
 
     /// @dev Two reporters can make the same claim independently; ids differ and both may land.
     function test_Submit_independentReportersDontCollide() public {
-        _stakeReporter(reporter);
-        _stakeReporter(otherReporter);
+        _allowReporter(reporter);
+        _allowReporter(otherReporter);
         _activateAndFund();
 
         bytes32 r1 = _submit(reporter, address(campaign), 100);
@@ -256,7 +170,7 @@ contract OracleCoordinatorTest is Test {
     // ── dispute window ───────────────────────────────────────────
 
     function test_ApplyReport_afterWindow() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
 
@@ -268,7 +182,7 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_ApplyReport_revertsInsideWindow() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
 
@@ -282,7 +196,7 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_ApplyReport_revertsTwice() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
         _advancePastDispute(reportId);
@@ -298,10 +212,10 @@ contract OracleCoordinatorTest is Test {
         coordinator.applyReport(bytes32(0));
     }
 
-    // ── dispute & slash ──────────────────────────────────────────
+    // ── dispute ──────────────────────────────────────────────────
 
-    function test_Dispute_slashesAndVoids() public {
-        _stakeReporter(reporter);
+    function test_DisputeVoids() public {
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
 
@@ -309,9 +223,6 @@ contract OracleCoordinatorTest is Test {
         coordinator.disputeReport(reportId);
 
         assertTrue(coordinator.reportDisputed(reportId));
-        assertEq(coordinator.stakeOf(reporter), 0, "collateral slashed");
-        assertEq(coordinator.slashPool(), MIN_STAKE);
-
         _advancePastDispute(reportId);
         vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportIsDisputed.selector, reportId));
         coordinator.applyReport(reportId);
@@ -319,7 +230,7 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_Dispute_onlyGovernor() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
 
@@ -329,7 +240,7 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_Dispute_revertsAfterWindow() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
         _advancePastDispute(reportId);
@@ -342,7 +253,7 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_Dispute_revertsAlreadyApplied() public {
-        _stakeReporter(reporter);
+        _allowReporter(reporter);
         _activateAndFund();
         bytes32 reportId = _submit(reporter, address(campaign), 500_000);
         _advancePastDispute(reportId);
@@ -351,47 +262,6 @@ contract OracleCoordinatorTest is Test {
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReportAlreadyApplied.selector, reportId));
         coordinator.disputeReport(reportId);
-    }
-
-    /// @dev If the reporter's report would have been a no-op anyway, the dispute still burns
-    ///      their collateral — a bad report is a bad report.
-    function test_Dispute_slashesEvenWhenAmountBelowCurrent() public {
-        _stakeReporter(reporter);
-        _activateAndFund();
-
-        bytes32 r1 = _submit(reporter, address(campaign), 100);
-        _advancePastDispute(r1);
-        coordinator.applyReport(r1);
-
-        bytes32 r2 = _submit(reporter, address(campaign), 50);
-        vm.prank(governor);
-        coordinator.disputeReport(r2);
-
-        assertEq(coordinator.stakeOf(reporter), 0);
-        assertEq(campaign.totalProgress(0), 100, "applied value untouched");
-    }
-
-    // ── slash pool withdrawal ────────────────────────────────────
-
-    function test_WithdrawSlashPool() public {
-        _stakeReporter(reporter);
-        _activateAndFund();
-        bytes32 slashed = _submit(reporter, address(campaign), 100);
-        vm.prank(governor);
-        coordinator.disputeReport(slashed);
-
-        uint256 before = address(governor).balance;
-        vm.prank(governor);
-        coordinator.withdrawSlashPool(governor);
-
-        assertEq(coordinator.slashPool(), 0);
-        assertEq(address(governor).balance - before, MIN_STAKE);
-    }
-
-    function test_WithdrawSlashPool_onlyGovernor() public {
-        vm.prank(outsider);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, outsider));
-        coordinator.withdrawSlashPool(outsider);
     }
 
     // ── wiring ───────────────────────────────────────────────────
@@ -403,10 +273,9 @@ contract OracleCoordinatorTest is Test {
     }
 
     function test_Submit_revertsBeforeRegistrySet() public {
-        OracleCoordinator fresh = new OracleCoordinator(governor, MIN_STAKE, DISPUTE_WINDOW, UNSTAKE_DELAY);
-        vm.deal(reporter, MIN_STAKE);
-        vm.prank(reporter);
-        fresh.stake{value: MIN_STAKE}();
+        OracleCoordinator fresh = new OracleCoordinator(governor, DISPUTE_WINDOW);
+        vm.prank(governor);
+        fresh.addReporter(reporter);
 
         vm.prank(reporter);
         vm.expectRevert(IOracleCoordinator.RegistryNotSet.selector);
@@ -415,14 +284,93 @@ contract OracleCoordinatorTest is Test {
         );
     }
 
+    // ── reporter allowlist ─────────────────────────────────────────
+
+    function test_AddReporter_onlyGovernor() public {
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, outsider));
+        coordinator.addReporter(reporter);
+    }
+
+    function test_AddReporter_revertsDuplicate() public {
+        _allowReporter(reporter);
+
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReporterAlreadyListed.selector, reporter));
+        coordinator.addReporter(reporter);
+    }
+
+    function test_AddReporter_enumeratesReporter() public {
+        _allowReporter(reporter);
+        _allowReporter(otherReporter);
+
+        assertTrue(coordinator.isReporter(reporter));
+        assertTrue(coordinator.isReporter(otherReporter));
+        assertEq(coordinator.reporterCount(), 2);
+        assertEq(coordinator.reporterAt(0), reporter);
+        assertEq(coordinator.reporterAt(1), otherReporter);
+    }
+
+    function test_RemoveReporter_onlyGovernor() public {
+        _allowReporter(reporter);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, outsider));
+        coordinator.removeReporter(reporter);
+    }
+
+    function test_RemoveReporter_revertsMissing() public {
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.ReporterNotListed.selector, reporter));
+        coordinator.removeReporter(reporter);
+    }
+
+    function test_RemoveReporter_updatesEnumerationAndBlocksSubmission() public {
+        _allowReporter(reporter);
+        _allowReporter(otherReporter);
+
+        vm.prank(governor);
+        coordinator.removeReporter(reporter);
+
+        assertFalse(coordinator.isReporter(reporter));
+        assertTrue(coordinator.isReporter(otherReporter));
+        assertEq(coordinator.reporterCount(), 1);
+        assertEq(coordinator.reporterAt(0), otherReporter);
+
+        vm.prank(reporter);
+        vm.expectRevert(abi.encodeWithSelector(IOracleCoordinator.NotAReporter.selector, reporter));
+        coordinator.submitReport(
+            IOracleCoordinator.Report({campaign: address(campaign), kpiIndex: 0, amount: 1, evidence: ""})
+        );
+    }
+
+    function test_RemoveReporter_preservesOtherIndexes() public {
+        address thirdReporter = address(0x0BAE);
+        _allowReporter(reporter);
+        _allowReporter(otherReporter);
+        _allowReporter(thirdReporter);
+
+        vm.prank(governor);
+        coordinator.removeReporter(otherReporter);
+
+        assertEq(coordinator.reporterCount(), 2);
+        assertEq(coordinator.reporterAt(0), reporter);
+        assertEq(coordinator.reporterAt(1), thirdReporter);
+
+        vm.prank(governor);
+        coordinator.removeReporter(thirdReporter);
+        assertEq(coordinator.reporterCount(), 1);
+        assertEq(coordinator.reporterAt(0), reporter);
+    }
+
     // ── fuzz ─────────────────────────────────────────────────────
 
     function testFuzz_ApplyIsMonotonicAcrossReporters(uint256 a, uint256 b) public {
         a = bound(a, 1, 1_000_000);
         b = bound(b, 1, 1_000_000);
 
-        _stakeReporter(reporter);
-        _stakeReporter(otherReporter);
+        _allowReporter(reporter);
+        _allowReporter(otherReporter);
         _activateAndFund();
 
         bytes32 ra = _submit(reporter, address(campaign), a);

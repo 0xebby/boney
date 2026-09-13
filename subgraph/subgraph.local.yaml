@@ -1,0 +1,198 @@
+specVersion: 1.2.0
+description: Boney local Anvil playground
+repository: https://github.com/0xcoda/boney
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum/contract
+    name: CampaignRegistry
+    network: localhost
+    source:
+      address: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707"
+      abi: CampaignRegistry
+      startBlock: 1
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/registry.ts
+      entities:
+        - Campaign
+        - Kpi
+        - SpawnedSource
+        - UnsupportedSource
+      abis:
+        - name: CampaignRegistry
+          file: ./abis/CampaignRegistry.json
+        - name: Campaign
+          file: ./abis/Campaign.json
+      eventHandlers:
+        - event: CampaignCreated(indexed uint256,indexed address,indexed address,address,string)
+          handler: handleCampaignCreated
+
+  - kind: ethereum/contract
+    name: AttributionRegistry
+    network: localhost
+    source:
+      address: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      abi: AttributionRegistry
+      startBlock: 1
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/attribution.ts
+      entities:
+        - Touch
+        - Promoter
+      abis:
+        - name: AttributionRegistry
+          file: ./abis/AttributionRegistry.json
+      eventHandlers:
+        - event: TouchStored(indexed address,indexed address,indexed bytes32,uint64,uint64,address)
+          handler: handleTouchStored
+        - event: PromoterRegistered(indexed address,indexed bytes32)
+          handler: handlePromoterRegistered
+
+templates:
+  - kind: ethereum/contract
+    name: CampaignEvents
+    network: localhost
+    source:
+      abi: Campaign
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/campaign.ts
+      entities:
+        - Campaign
+        - Promoter
+        - Credit
+        - TierPayout
+      abis:
+        - name: Campaign
+          file: ./abis/Campaign.json
+      eventHandlers:
+        - event: PromoterJoined(indexed address,indexed bytes32,uint256)
+          handler: handlePromoterJoined
+        - event: ProgressCredited(indexed uint256,indexed bytes32,indexed address,uint256)
+          handler: handleProgressCredited
+        - event: TierSettled(indexed bytes32,indexed address,indexed uint256,uint256,uint256)
+          handler: handleTierSettled
+        - event: StatusChanged(uint8,uint8)
+          handler: handleStatusChanged
+
+  - kind: ethereum/contract
+    name: TransferToActor
+    network: localhost
+    source:
+      abi: ERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/transfer.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransferToActor
+
+  - kind: ethereum/contract
+    name: TransferToActorCount
+    network: localhost
+    source:
+      abi: ERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/transfer.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransferToActorCount
+
+  - kind: ethereum/contract
+    name: WethDeposit
+    network: localhost
+    source:
+      abi: WETH
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/weth.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: WETH
+          file: ./abis/WETH.json
+      eventHandlers:
+        - event: Deposit(indexed address,uint256)
+          handler: handleWethDeposit
+
+  - kind: ethereum/contract
+    name: WethWithdrawal
+    network: localhost
+    source:
+      abi: WETH
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/weth.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: WETH
+          file: ./abis/WETH.json
+      eventHandlers:
+        - event: Withdrawal(indexed address,uint256)
+          handler: handleWethWithdrawal
+
+  - kind: ethereum/contract
+    name: AaveSupply
+    network: localhost
+    source:
+      abi: AavePool
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/protocols.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: AavePool
+          file: ./abis/AavePool.json
+      eventHandlers:
+        - event: Supply(indexed address,address,indexed address,uint256,indexed uint16)
+          handler: handleAaveSupply
+
+  - kind: ethereum/contract
+    name: SygmaDeposit
+    network: localhost
+    source:
+      abi: SygmaBridge
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/protocols.ts
+      entities:
+        - KpiAction
+      abis:
+        - name: SygmaBridge
+          file: ./abis/SygmaBridge.json
+      eventHandlers:
+        - event: Deposit(uint8,bytes32,uint64,indexed address,bytes,bytes)
+          handler: handleSygmaDeposit

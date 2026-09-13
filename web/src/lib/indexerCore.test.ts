@@ -6,6 +6,7 @@ import {
   aggregateByActor,
   blockChunks,
   decideReport,
+  logRequest,
   logScanKey,
   encodeActions,
   foldToLimit,
@@ -465,6 +466,48 @@ describe("aggregateActions", () => {
 });
 
 describe("aggregateByActor — log-shape edge cases", () => {
+  /** WETH9 `Withdrawal(address indexed src, uint256 wad)` — the same shape as `Deposit`. */
+  const WETH_WITHDRAWAL_TOPIC =
+    "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65" as const;
+
+  it("skips a log of another event from the same contract", () => {
+    // WETH's `Withdrawal` carries a wallet at topics[1] and a wad in data, exactly where `Deposit`
+    // does, so a fold that trusted the request would credit withdrawals as deposits.
+    const withdrawal: IndexedLog = {
+      ...depositLog(ALICE, BigInt(5e15), BigInt(10)),
+      topics: [WETH_WITHDRAWAL_TOPIC, pad(ALICE.toLowerCase() as `0x${string}`, {size: 32})],
+    };
+
+    expect(aggregateByActor([withdrawal], source(), null).size).toBe(0);
+    expect(
+      aggregateByActor(
+        [withdrawal, depositLog(ALICE, BigInt(5e15), BigInt(11))],
+        source(),
+        null,
+      ).get(ALICE.toLowerCase())?.amount,
+    ).toBe(BigInt(5));
+  });
+
+  it("skips a log carrying no topics at all", () => {
+    const bare: IndexedLog = {
+      ...depositLog(ALICE, BigInt(5e15), BigInt(10)),
+      topics: [],
+    };
+    expect(aggregateByActor([bare], source(), null).size).toBe(0);
+  });
+
+  it("matches the event signature case-insensitively", () => {
+    const shouted: IndexedLog = {
+      ...depositLog(ALICE, BigInt(5e15), BigInt(10)),
+      topics: [
+        WETH_DEPOSIT_TOPIC.toUpperCase().replace("0X", "0x") as `0x${string}`,
+        pad(ALICE.toLowerCase() as `0x${string}`, {size: 32}),
+      ],
+    };
+    expect(aggregateByActor([shouted], source(), null).get(ALICE.toLowerCase())?.amount).toBe(
+      BigInt(5),
+    );
+  });
 
   it("skips logs whose actor topic is missing", () => {
     const orphan: IndexedLog = {
@@ -881,6 +924,43 @@ describe("tallyByPromoter", () => {
     const tally = tallyByPromoter(ALICE, total.actions, attribution);
     const summed = [...tally.values()].reduce((sum, v) => sum + v, BigInt(0));
     expect(summed).toBe(total.amount);
+  });
+});
+
+describe("logRequest", () => {
+  const FROM = BigInt(46_130_021);
+  const TO = BigInt(46_277_856);
+
+  it("names the event and the range in the shapes eth_getLogs takes", () => {
+    const src = source();
+    expect(logRequest(src.source, src.topic0, src, FROM, TO)).toEqual({
+      address: src.source,
+      fromBlock: toHex(FROM),
+      toBlock: toHex(TO),
+      topics: [WETH_DEPOSIT_TOPIC],
+    });
+  });
+
+  it("puts a fixed-topic filter in its own slot, padding the ones below it", () => {
+    const src = source({filterTopic: 2, filterValue: pad(ALICE.toLowerCase() as Hex, {size: 32})});
+    expect(logRequest(src.source, src.topic0, src, FROM, TO).topics).toEqual([
+      WETH_DEPOSIT_TOPIC,
+      null,
+      pad(ALICE.toLowerCase() as Hex, {size: 32}),
+    ]);
+  });
+
+  it("constrains the signature alone when there is no source to read a filter from", () => {
+    expect(logRequest(source().source, WETH_DEPOSIT_TOPIC, null, FROM, TO).topics).toEqual([
+      WETH_DEPOSIT_TOPIC,
+    ]);
+  });
+
+  it("lower-cases the signature, so a node cannot miss a shouted topic", () => {
+    const shouted = WETH_DEPOSIT_TOPIC.toUpperCase().replace("0X", "0x") as Hex;
+    expect(logRequest(source().source, shouted, null, FROM, TO).topics).toEqual([
+      WETH_DEPOSIT_TOPIC,
+    ]);
   });
 });
 

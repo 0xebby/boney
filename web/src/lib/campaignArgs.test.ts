@@ -57,12 +57,13 @@ describe("kpiKindToIndex", () => {
     });
   });
 
-  it("puts Custom at 0 and ActiveUser last", () => {
+  it("pins the indices the chain reads", () => {
     // Pinned explicitly: a reordering of KPI_KIND would keep the loop above passing while
     // silently changing what every existing campaign's KPIs mean.
     expect(kpiKindToIndex("Custom")).toBe(0);
     expect(kpiKindToIndex("Mint")).toBe(1);
-    expect(kpiKindToIndex("ActiveUser")).toBe(9);
+    expect(kpiKindToIndex("OnboardAnActiveUser")).toBe(9);
+    expect(kpiKindToIndex("Referral")).toBe(KPI_KIND.length - 1);
   });
 
   it("throws on an unknown kind rather than encoding -1", () => {
@@ -273,7 +274,7 @@ describe("toWireKpis", () => {
       draft({
         kpis: [
           {kind: "Swap", verifier: "", target: "", aggregate: false, tiers: [{threshold: "1", reward: "1"}]},
-          {kind: "ActiveUser", verifier: "", target: "", aggregate: true, tiers: []},
+          {kind: "OnboardAnActiveUser", verifier: "", target: "", aggregate: true, tiers: []},
         ],
       }),
       {project: PROJECT, tokenDecimals: 18},

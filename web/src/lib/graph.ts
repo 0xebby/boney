@@ -1,32 +1,24 @@
-import {baseSepolia} from "./chains";
+import {baseSepolia, localPlayground} from "./chains";
 
 /**
  * The subgraph transport — a typed POST to `boney-indexer`, and the rules for when its answer may be
  * believed.
  *
- * First subgraph reader in the web app; `boneyMd/spec/09-offchain.md` records that the app "does not
- * read the subgraph today", and this file is what stops that being true.
+ * First subgraph reader in the web app.
  *
  * ## Why the app needs one at all
- *
- * A campaign stores no promoter list and `Campaign` exposes only point lookups, so `promoters.ts`
- * rebuilds membership from `PromoterJoined` logs — bounded by `MAX_WINDOWS` × `MAX_LOG_RANGE`, which
- * is 45,600 blocks, about 25 hours of Base. That is fine for "who is promoting this campaign now" and
- * useless for accumulated history, which is the half of the BoneyCard that has to reach back to a
- * promoter's first campaign.
  *
  * ## The one rule this module exists to enforce
  *
  * **A failed or partial read is never a zero.** Every count the card derives from this data is a
  * statement about a person — "0 campaigns, 0 tiers, 0 referrals" is not a neutral default, it is a
- * claim, and a fetch that did not complete has not earned the right to make one. So nothing here
+ * claim. So nothing here
  * returns an empty array on failure: `GraphResult` is a two-armed union and the caller cannot reach
  * the rows without first handling `unavailable`.
  *
  * That is also why a GraphQL response carrying **both** `data` and `errors` is treated as a failure
- * rather than as partial success. graph-node will happily return a filled `data` alongside an error
- * on one field, and folding that into counts yields numbers that are quietly too low — which is
- * strictly worse than saying "history unavailable", because it is wrong and looks right.
+ * graph-node will happily return a filled `data` alongside an error
+ * on one field, and folding that into counts yields numbers that are quietly too low.
  *
  * Pure and React-free apart from `graphRequest`'s single `fetch`, which takes its implementation as
  * an argument so the tests need no network (decision F6).
@@ -36,26 +28,24 @@ import {baseSepolia} from "./chains";
  * Chains with a deployed subgraph.
  *
  * Base Sepolia only. This matters more than it looks: `wagmi.ts` lists anvil first, so a browser with
- * no wallet connected reads chain 31337, and a local fixture has no indexer behind it. Without this
- * check the card would report "history unavailable — network error" on anvil forever; with it, the
- * reason is `unsupported-chain` and the copy can say so.
+ * no wallet connected reads chain 31337, and a local fixture has no indexer behind it.
  */
-export const SUBGRAPH_CHAINS: readonly number[] = [baseSepolia.id];
+export const SUBGRAPH_CHAINS: readonly number[] = [baseSepolia.id, localPlayground.id];
 
 /**
  * The Studio query endpoint.
  *
  * Studio URLs are per-account and per-deployment, so there is no sensible default to hard-code and a
- * wrong one would look exactly like an outage. Unset is therefore a first-class state
- * (`not-configured`), distinct from every failure — the card can then say "history is not wired up on
- * this deployment" rather than blaming a service that was never called.
+ * wrong one would look exactly like an outage.
  *
  * The endpoint needs no API key (`boneyMd/spec/09-offchain.md`), which is why it can be a
  * `NEXT_PUBLIC_` variable and be read from the browser at all.
  */
 export function subgraphUrl(chainId: number | undefined): string | undefined {
   if (chainId === undefined || !SUBGRAPH_CHAINS.includes(chainId)) return undefined;
-  const url = process.env.NEXT_PUBLIC_SUBGRAPH_URL?.trim();
+  const url = chainId === localPlayground.id
+    ? process.env.NEXT_PUBLIC_LOCAL_SUBGRAPH_URL?.trim()
+    : process.env.NEXT_PUBLIC_SUBGRAPH_URL?.trim();
   return url ? url : undefined;
 }
 
@@ -102,8 +92,7 @@ export function graphUnavailable(
  *
  * Only `block.number` and `hasIndexingErrors` are selected. `_Block_.timestamp` exists on current
  * graph-node but a field the deployment does not have fails *validation*, taking the whole document
- * with it — and the block number is all a lag figure needs, so the extra field would be risk for
- * nothing.
+ * with it.
  *
  * `hasIndexingErrors` is surfaced rather than ignored because it means some handler threw and the
  * data behind it is incomplete in a way no count can detect. The card treats it the same way it
@@ -128,10 +117,9 @@ export function decodeMeta(raw: RawMeta): GraphMeta {
 /**
  * How far behind the chain the subgraph is, in blocks.
  *
- * Clamped at zero rather than allowed to go negative. The two numbers come from different sources —
+ * Clamped at zero and can't be negative. The two numbers come from different sources —
  * `_meta` from graph-node, the head from an RPC — and on Base, where blocks are two seconds apart, an
  * indexer that is genuinely current routinely reports one block *ahead* of a cached `eth_blockNumber`.
- * Rendering "-1 blocks behind" for the healthy case would be an odd way to describe it.
  */
 export function graphLag(indexedBlock: bigint, chainHead: bigint | undefined): bigint | undefined {
   if (chainHead === undefined) return undefined;
@@ -144,12 +132,9 @@ export function graphLag(indexedBlock: bigint, chainHead: bigint | undefined): b
  *
  * The Graph serialises `BigInt` as a JSON **string** — `"1000000000000000000"`, not a number — because
  * the values routinely exceed `Number.MAX_SAFE_INTEGER`. So every amount, block number and timestamp
- * arrives as text and has to be parsed, and a decoder that forgot would produce `NaN` or, worse, a
- * silently rounded 18-decimal token amount.
+ * arrives as text and has to be parsed.
  *
- * Anything unparseable becomes 0. That is safe *here* and only here: this is a field-level default
- * inside a response that already succeeded, not a stand-in for a failed request — the failure case is
- * `GraphResult.unavailable`, several levels up, and it is the one the card renders.
+ * Anything unparseable becomes 0.
  */
 export function toBigInt(raw: unknown): bigint {
   if (typeof raw === "bigint") return raw;
@@ -171,9 +156,6 @@ export function toBigInt(raw: unknown): bigint {
  * checksummed address in a `where` clause matches **nothing** — and it fails by returning an empty
  * list, not an error. A card built on that reads "0 campaigns" for a promoter with twenty, and every
  * layer above would be working correctly.
- *
- * Every address reaching a filter goes through here. Wallets arrive checksummed from wagmi
- * (`useAccount().address`), so this is not a hypothetical.
  */
 export function hexLower<T extends string>(value: T): Lowercase<T> {
   return value.toLowerCase() as Lowercase<T>;
@@ -192,9 +174,7 @@ export type GraphFetch = (
  * an answer, and which are failures wearing a 200. Testable without a server, which is the point.
  *
  * `pick` pulls the caller's shape out of `data`, returning `undefined` if the payload is not what was
- * asked for. That distinguishes a schema drift (`malformed`) from a legitimately empty result — an
- * empty `promoters` array is a *fact* about a wallet that has joined nothing, and must not be reported
- * as a failure.
+ * asked for.
  */
 export function classifyGraphBody<T>(
   status: number,
@@ -212,8 +192,7 @@ export function classifyGraphBody<T>(
 
   const envelope = body as {data?: unknown; errors?: unknown} | null;
 
-  // Checked before `data`, deliberately. graph-node returns a populated `data` alongside a
-  // field-level error, and folding that into counts produces figures that are quietly too low.
+  // Checked before `data`, deliberately.
   const errors = envelope?.errors;
   if (Array.isArray(errors) && errors.length > 0) {
     const first = errors[0] as {message?: unknown} | null;
@@ -240,9 +219,7 @@ export function classifyGraphBody<T>(
 /**
  * POST one GraphQL document.
  *
- * Never throws. A transport that threw would push the fail-soft rule out to every call site, and the
- * one place it must not be forgotten is the one where a thrown error would be caught by react-query
- * and rendered as an empty card.
+ * Never throws.
  */
 export async function graphRequest<T>(input: {
   url: string;
@@ -289,17 +266,12 @@ export async function graphRequest<T>(input: {
 /**
  * Rows per page.
  *
- * 1,000 is graph-node's hard ceiling on `first`; asking for more is an error, not a larger page.
+ * 1,000 is graph-node's hard ceiling on `first`.
  */
 export const GRAPH_PAGE_SIZE = 1000;
 
 /**
  * Pages per collection.
- *
- * A cap rather than an unbounded loop, for the same reason `promoters.ts` caps its log windows: this
- * runs in a browser against a shared endpoint, and one wallet's card must not be able to fire a
- * hundred requests. 10 pages is 10,000 rows, far past any real promoter, and hitting it sets
- * `truncated` so the counts are labelled as lower bounds rather than presented as totals.
  */
 export const GRAPH_MAX_PAGES = 10;
 
@@ -314,14 +286,11 @@ export type Paged<T> = {
  *
  * Cursored rather than `skip`-based because graph-node caps `skip` at 5,000 and because a cursor is
  * stable against rows arriving mid-walk. It orders by `id`, which for `Credit` and `TierPayout` is
- * `<txHash>-<logIndex>` — lexicographic, so **not** chronological. That is fine for pagination, which
- * needs only a total order, but it means anything time-ordered (the milestone list, "promoting since")
- * has to sort on `timestamp` after the fact and must not lean on arrival order.
+ * `<txHash>-<logIndex>` — lexicographic, so **not** chronological.
  *
  * `seed` is a first page already in hand. It exists so a collection can ride along in a combined
  * document — the history read asks for memberships, payouts and `_meta` in one POST — and then only
- * pay for further requests if that page came back full. For every realistic promoter the seed *is* the
- * whole collection and this function makes no request at all.
+ * pay for further requests if that page came back full.
  */
 export async function paginate<T extends {id: string}>(
   fetchPage: (cursor: string) => Promise<GraphResult<T[]>>,

@@ -1,41 +1,80 @@
 import {describe, expect, it} from "vitest";
-import {isActiveNav, navItems} from "./nav";
+import {drawerNavItems, isActiveNav, navItems, walletNavItems} from "./nav";
 
 /**
- * Two consumers render this nav — the top bar and the mobile drawer — so ordering and active state
- * are asserted here rather than trusted to match across two JSX trees.
+ * Three consumers render this nav — the top bar, the wallet chip's menu and the mobile drawer — so
+ * the split between them, the ordering and the active state are asserted here rather than trusted
+ * to match across three JSX trees.
  */
 
-const labelsFor = (isConnected: boolean, isPromoter: boolean) =>
-  navItems({isConnected, isPromoter}).map((item) => item.label);
+const GATING = [
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+] as const;
+
+const barLabels = () => navItems().map((item) => item.label);
+const menuLabels = (isConnected: boolean, isPromoter: boolean) =>
+  walletNavItems({isConnected, isPromoter}).map((item) => item.label);
+const drawerLabels = (isConnected: boolean, isPromoter: boolean) =>
+  drawerNavItems({isConnected, isPromoter}).map((item) => item.label);
+
+const PERSONAL = ["My Campaigns", "BoneyCard", "Promoters"];
 
 describe("navItems", () => {
-  it("shows only the public entries to a visitor with no wallet", () => {
-    expect(labelsFor(false, false)).toEqual(["Campaigns", "Discover", "Boneyboard", "Docs"]);
+  it("is the four public destinations in display order", () => {
+    expect(barLabels()).toEqual(["Campaigns", "Discover", "Boneyboard", "Docs"]);
   });
 
-  /** My Campaigns sits beside the marketplace it filters, not appended at the end. */
-  it("splices My Campaigns in after Campaigns once a wallet is connected", () => {
-    expect(labelsFor(true, false)).toEqual([
-      "Campaigns",
-      "My Campaigns",
-      "Discover",
+  /**
+   * The whole point of the split: the bar's length stops being a function of the wallet, which is
+   * what stood the header up to 201px at 640px when a promoter connected.
+   */
+  it("never carries a personal destination, whatever the wallet is", () => {
+    for (const label of PERSONAL) {
+      expect(barLabels()).not.toContain(label);
+    }
+  });
+
+  it("keeps Docs last", () => {
+    expect(barLabels().at(-1)).toBe("Docs");
+  });
+
+  /** The board is public, so it sits in the bar next to the page it pairs with. */
+  it("keeps Boneyboard directly after Discover", () => {
+    const labels = barLabels();
+    expect(labels.indexOf("Boneyboard")).toBe(labels.indexOf("Discover") + 1);
+  });
+
+  /** One destination carries the mark at a time — a second would read as noise rather than news. */
+  it("marks Boneyboard as the new destination and nothing else", () => {
+    expect(navItems().filter((item) => item.isNew).map((item) => item.label)).toEqual([
       "Boneyboard",
-      "BoneyCard",
-      "Docs",
     ]);
   });
 
-  it("splices Promoters in after Discover for a wallet that holds a membership", () => {
-    expect(labelsFor(true, true)).toEqual([
-      "Campaigns",
-      "My Campaigns",
-      "Discover",
-      "Boneyboard",
-      "BoneyCard",
-      "Promoters",
-      "Docs",
-    ]);
+  it("never lists Create, which is the bar's button rather than a peer link", () => {
+    expect(barLabels().map((label) => label.toLowerCase())).not.toContain("create");
+  });
+
+  /** The array is handed to a component that maps over it; a shared frozen literal would be a trap. */
+  it("returns a fresh array each call", () => {
+    expect(navItems()).not.toBe(navItems());
+  });
+});
+
+describe("walletNavItems", () => {
+  it("offers nothing to a visitor with no wallet", () => {
+    expect(menuLabels(false, false)).toEqual([]);
+  });
+
+  it("offers the two connection-gated entries once a wallet connects", () => {
+    expect(menuLabels(true, false)).toEqual(["My Campaigns", "BoneyCard"]);
+  });
+
+  it("adds Promoters for a wallet that holds a membership", () => {
+    expect(menuLabels(true, true)).toEqual(["My Campaigns", "BoneyCard", "Promoters"]);
   });
 
   /**
@@ -43,13 +82,7 @@ describe("navItems", () => {
    * combination is reachable rather than hypothetical. Promoters should still appear.
    */
   it("handles promoter-without-connected, which the two async reads can produce", () => {
-    expect(labelsFor(false, true)).toEqual([
-      "Campaigns",
-      "Discover",
-      "Boneyboard",
-      "Promoters",
-      "Docs",
-    ]);
+    expect(menuLabels(false, true)).toEqual(["Promoters"]);
   });
 
   /**
@@ -58,55 +91,51 @@ describe("navItems", () => {
    * it follows the connection rather than `useIsPromoter`, and appears before Promoters does.
    */
   it("shows BoneyCard on the connection alone, ahead of Promoters", () => {
-    expect(labelsFor(true, false)).toContain("BoneyCard");
-    expect(labelsFor(false, false)).not.toContain("BoneyCard");
-
-    const withBoth = labelsFor(true, true);
+    const withBoth = menuLabels(true, true);
     expect(withBoth.indexOf("BoneyCard")).toBeLessThan(withBoth.indexOf("Promoters"));
   });
 
-  /** The board is public, so it appears with no wallet and does not move when one connects. */
-  it("shows Boneyboard in every combination, always after Discover", () => {
-    for (const [connected, promoter] of [
-      [false, false],
-      [true, false],
-      [false, true],
-      [true, true],
-    ] as const) {
-      const labels = labelsFor(connected, promoter);
-      expect(labels).toContain("Boneyboard");
-      expect(labels.indexOf("Boneyboard")).toBe(labels.indexOf("Discover") + 1);
+  it("offers only personal destinations, never a public one", () => {
+    for (const [connected, promoter] of GATING) {
+      for (const label of menuLabels(connected, promoter)) {
+        expect(PERSONAL).toContain(label);
+      }
+    }
+  });
+});
+
+describe("drawerNavItems", () => {
+  /** Below `md` the drawer is the only nav, so everything both other surfaces reach lives in it. */
+  it("is the bar's list followed by the wallet menu's, for every wallet", () => {
+    for (const [connected, promoter] of GATING) {
+      expect(drawerLabels(connected, promoter)).toEqual([
+        ...barLabels(),
+        ...menuLabels(connected, promoter),
+      ]);
     }
   });
 
-  /** One destination carries the mark at a time — a second would read as noise rather than news. */
-  it("marks Boneyboard as the new destination and nothing else", () => {
-    for (const [connected, promoter] of [
-      [false, false],
-      [true, false],
-      [false, true],
-      [true, true],
-    ] as const) {
-      const marked = navItems({isConnected: connected, isPromoter: promoter})
-        .filter((item) => item.isNew)
-        .map((item) => item.label);
-      expect(marked).toEqual(["Boneyboard"]);
-    }
+  it("reaches every personal destination a connected promoter has", () => {
+    expect(drawerLabels(true, true)).toEqual([
+      "Campaigns",
+      "Discover",
+      "Boneyboard",
+      "Docs",
+      "My Campaigns",
+      "BoneyCard",
+      "Promoters",
+    ]);
   });
 
-  it("keeps Docs last in every combination", () => {
-    for (const [connected, promoter] of [
-      [false, false],
-      [true, false],
-      [false, true],
-      [true, true],
-    ] as const) {
-      expect(labelsFor(connected, promoter).at(-1)).toBe("Docs");
-    }
+  it("is the four public entries and nothing else with no wallet", () => {
+    expect(drawerLabels(false, false)).toEqual(["Campaigns", "Discover", "Boneyboard", "Docs"]);
   });
 
-  it("never lists Create, which is the bar's button rather than a peer link", () => {
-    expect(labelsFor(true, true).map((l) => l.toLowerCase())).not.toContain("create");
+  it("never repeats a destination", () => {
+    for (const [connected, promoter] of GATING) {
+      const hrefs = drawerNavItems({isConnected: connected, isPromoter: promoter}).map((i) => i.href);
+      expect(new Set(hrefs).size).toBe(hrefs.length);
+    }
   });
 });
 
@@ -137,5 +166,12 @@ describe("isActiveNav", () => {
 
   it("is unaffected by a trailing segment boundary being the only difference", () => {
     expect(isActiveNav("/my/", "/my")).toBe(true);
+  });
+
+  /** The menu marks its current item too, so the same test has to hold for a personal href. */
+  it("lights a wallet-menu destination when it is the page being viewed", () => {
+    expect(isActiveNav("/card", "/card")).toBe(true);
+    expect(isActiveNav("/my", "/my")).toBe(true);
+    expect(isActiveNav("/", "/card")).toBe(false);
   });
 });

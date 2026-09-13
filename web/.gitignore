@@ -46,3 +46,7 @@ next-env.d.ts
 # One-off probe/send scripts. Underscore-prefixed throwaways that read PRIVATE_KEY from ../.env and
 # poke Base Sepolia by hand; they are scratch, not tooling, and `git add -A` sweeps them up.
 _*.mjs
+
+# The verification dashboard's collected snapshot — a few hundred KB of chain and subgraph reads,
+# rebuilt by `scripts/__dash-collect.mts`. The page it produces is committed; its input is not.
+scripts/__dash-data.json

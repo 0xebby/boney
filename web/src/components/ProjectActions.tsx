@@ -5,7 +5,12 @@ import {useAccount} from "wagmi";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {TxErrorMessage} from "@/components/ui/TxErrorMessage";
 import {Notice} from "@/components/ui/Notice";
-import {useFundCampaign, useCampaignLifecycle} from "@/hooks/useWriteCampaign";
+import {
+  useExtendCampaign,
+  useFundCampaign,
+  useTopUpCampaign,
+  useCampaignLifecycle,
+} from "@/hooks/useWriteCampaign";
 import {isPending, type TxState} from "@/hooks/useWriteCampaign";
 import {
   lifecycleAvailability,
@@ -14,7 +19,7 @@ import {
   type LifecycleAction,
   type ActionAvailability,
 } from "@/lib/lifecycle";
-import {formatTokenAmount, toAmountInput} from "@/lib/format";
+import {formatDateTime, formatTokenAmount, fromDateTimeLocal, toAmountInput, toDateTimeLocal} from "@/lib/format";
 import {parseAmount} from "@/lib/validation";
 import {isProjectWallet} from "@/lib/viewerRole";
 import type {CampaignDetail} from "@/lib/campaignDetail";
@@ -52,9 +57,13 @@ export function ProjectActions({
   const isProject = isProjectWallet(address, detail.project);
 
   const fund = useFundCampaign();
+  const extend = useExtendCampaign();
+  const topUp = useTopUpCampaign();
   const lifecycle = useCampaignLifecycle();
 
   const [fundAmount, setFundAmount] = useState("");
+  const [extensionEnd, setExtensionEnd] = useState("");
+  const [topUpAmount, setTopUpAmount] = useState("");
 
   const shortfall = fundingShortfall(detail.escrowBalance, detail.rewardPool);
 
@@ -104,6 +113,39 @@ export function ProjectActions({
 
   const fundInvalid =
     fundAmount.trim() !== "" && parseAmount(fundAmount, token.decimals) === null;
+
+  const extensionSeconds = fromDateTimeLocal(extensionEnd);
+  const extensionValid =
+    extensionSeconds > Number(detail.endTime) && extensionSeconds <= Number(detail.maximumEndTime);
+  const extensionOpen = detail.status === "Active" || detail.status === "Paused";
+  const topUpMinimum = (detail.initialRewardPool * BigInt(20)) / BigInt(100);
+  const topUpThreshold = (detail.rewardPool * BigInt(90)) / BigInt(100);
+  const topUpReady = detail.paidOut >= topUpThreshold;
+  const topUpParsed = parseAmount(topUpAmount, token.decimals);
+  const topUpInvalid = topUpAmount.trim() !== "" && topUpParsed === null;
+  const topUpValid = topUpParsed !== null && topUpParsed >= topUpMinimum;
+
+  const submitExtend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!extensionValid) return;
+    await extend.extend(detail.address, BigInt(extensionSeconds), {
+      campaignName: detail.name,
+      symbol: token.symbol,
+      decimals: token.decimals,
+    });
+    onDone();
+  };
+
+  const submitTopUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!topUpValid || topUpParsed === null) return;
+    await topUp.topUp(detail.address, topUpParsed, detail.token, {
+      campaignName: detail.name,
+      symbol: token.symbol,
+      decimals: token.decimals,
+    });
+    onDone();
+  };
 
   return (
     <Card>
@@ -168,6 +210,94 @@ export function ProjectActions({
 
           <TxFeedback state={fund.state} onReset={fund.reset} />
         </form>
+      ) : null}
+
+      {isProject && detail.feature1Supported ? (
+        <div className="mb-4 grid gap-4 border-b border-hairline pb-4 lg:grid-cols-2">
+          <form onSubmit={submitExtend} className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="extend-end" className="text-xs text-ink-muted">
+                Extend reporting window
+              </label>
+              <span className="text-[11px] text-ink-muted">
+                max {formatDateTime(Number(detail.maximumEndTime))}
+              </span>
+            </div>
+            <input
+              id="extend-end"
+              type="datetime-local"
+              value={extensionEnd}
+              min={toDateTimeLocal(Number(detail.endTime) + 1)}
+              max={toDateTimeLocal(Number(detail.maximumEndTime))}
+              onChange={(e) => setExtensionEnd(e.target.value)}
+              disabled={!extensionOpen || isPending(extend.state)}
+              aria-invalid={extensionEnd !== "" && !extensionValid || undefined}
+              className="w-full rounded border border-hairline bg-surface-2 px-2 py-1.5 text-xs text-ink disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!extensionOpen || !extensionValid || isPending(extend.state)}
+              className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isPending(extend.state) ? "Extending…" : "Extend campaign"}
+            </button>
+            {extensionEnd !== "" && !extensionValid ? (
+              <p className="text-xs text-critical">
+                Choose a deadline after {formatDateTime(Number(detail.endTime))} and no later than the maximum.
+              </p>
+            ) : (
+              <p className="text-xs text-ink-muted">
+                Only the reporting deadline changes. KPI definitions and tiers remain fixed.
+              </p>
+            )}
+            <TxFeedback state={extend.state} onReset={extend.reset} />
+          </form>
+
+          <form onSubmit={submitTopUp} className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <label htmlFor="top-up-amount" className="text-xs text-ink-muted">
+                Top up reward pool
+              </label>
+              <button
+                type="button"
+                onClick={() => setTopUpAmount(toAmountInput(topUpMinimum, token.decimals))}
+                className="text-xs text-brand hover:underline"
+              >
+                Use minimum ({formatTokenAmount(topUpMinimum, token.decimals, {compact: true})} {token.symbol})
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <input
+                id="top-up-amount"
+                value={topUpAmount}
+                onChange={(e) => setTopUpAmount(e.target.value)}
+                placeholder="0.0"
+                inputMode="decimal"
+                aria-invalid={topUpInvalid || undefined}
+                className={`min-w-0 flex-1 rounded border bg-surface-2 px-2 py-1.5 text-xs text-ink ${
+                  topUpInvalid ? "border-critical" : "border-hairline"
+                }`}
+              />
+              <button
+                type="submit"
+                disabled={!topUpReady || !topUpValid || isPending(topUp.state)}
+                className="shrink-0 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-plane hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {topUp.needsApproval ? "Approving…" : isPending(topUp.state) ? "Topping up…" : "Top up"}
+              </button>
+            </div>
+            {topUpInvalid ? (
+              <p className="text-xs text-critical">
+                Enter an amount with at most {token.decimals} decimal places.
+              </p>
+            ) : (
+              <p className="text-xs text-ink-muted">
+                Available after {formatTokenAmount(topUpThreshold, token.decimals, {compact: true})} {token.symbol} is paid out; minimum {formatTokenAmount(topUpMinimum, token.decimals, {compact: true})} {token.symbol}.
+              </p>
+            )}
+            <TxFeedback state={topUp.state} onReset={topUp.reset} />
+          </form>
+        </div>
       ) : null}
 
       <div className="flex flex-wrap gap-2">

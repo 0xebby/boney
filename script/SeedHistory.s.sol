@@ -22,7 +22,7 @@ import {Types} from "../src/libraries/Types.sol";
 ///
 ///      ## Why this exists
 ///
-///      `boneyCardPlan.md` calls it the stage-2 blocker. The card's history half counts campaigns,
+///      `boneyMd/boneyCardPlan.md` calls it the stage-2 blocker. The card's history half counts campaigns,
 ///      projects, referrals, tiers and protocol types, and the live deployment could not exercise it:
 ///      one project address is behind all nine campaigns, so "projects worked with" is 1 for every
 ///      wallet and "first repeat project" is unreachable. That is why distinct projects is a milestone
@@ -288,7 +288,7 @@ contract SeedHistory is Script {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](2);
         kpis[0] = _kpi(Types.KpiKind.Bridge);
         kpis[1] = Types.KpiSpec({
-            kind: Types.KpiKind.Volume,
+            kind: Types.KpiKind.GenerateVolume,
             verifier: address(0),
             target: 1_000_000,
             aggregate: true,
@@ -315,7 +315,7 @@ contract SeedHistory is Script {
     function _telemetry() internal returns (address campaign) {
         uint256 pool = 15_000 * unit;
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](1);
-        kpis[0] = _kpi(Types.KpiKind.withdraw);
+        kpis[0] = _kpi(Types.KpiKind.Withdraw);
 
         Types.RewardTier[][] memory tiers = new Types.RewardTier[][](1);
         tiers[0] = _tiers(pool, 4, 8, 16);

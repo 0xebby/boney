@@ -152,6 +152,45 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_EXTENSION_DENOMINATOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_EXTENSION_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_EXTENSION_NUMERATOR",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_KPIS",
     "inputs": [],
     "outputs": [
@@ -229,8 +268,40 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "authorizedReporters",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "cancel",
     "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "claimShortfall",
+    "inputs": [
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -366,6 +437,19 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "extend",
+    "inputs": [
+      {
+        "name": "newEndTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "getOracle",
     "inputs": [],
     "outputs": [
@@ -386,6 +470,32 @@ export const CampaignAbi = [
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialDuration",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "initialRewardPool",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -477,6 +587,19 @@ export const CampaignAbi = [
         "internalType": "uint256"
       }
     ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "maximumEndTime",
+    "inputs": [],
     "outputs": [
       {
         "name": "",
@@ -696,6 +819,24 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "setAuthorizedReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "settle",
     "inputs": [
       {
@@ -715,6 +856,30 @@ export const CampaignAbi = [
   {
     "type": "function",
     "name": "settledTiersOf",
+    "inputs": [
+      {
+        "name": "promoter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "shortfallOf",
     "inputs": [
       {
         "name": "promoter",
@@ -808,6 +973,19 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "topUp",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "totalProgress",
     "inputs": [
       {
@@ -896,10 +1074,67 @@ export const CampaignAbi = [
   },
   {
     "type": "event",
+    "name": "AuthorizedReporterUpdated",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Extended",
+    "inputs": [
+      {
+        "name": "oldEndTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "newEndTime",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "PoolExhausted",
     "inputs": [
       {
         "name": "shortfall",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PoolIncreased",
+    "inputs": [
+      {
+        "name": "oldRewardPool",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "newRewardPool",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -972,6 +1207,37 @@ export const CampaignAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ShortfallPaid",
+    "inputs": [
+      {
+        "name": "promoterId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "promoter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
       },
       {
         "name": "amount",
@@ -1110,6 +1376,38 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "ExtensionNotForward",
+    "inputs": [
+      {
+        "name": "current",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "provided",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ExtensionTooLarge",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "provided",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InsufficientReputation",
     "inputs": [
       {
@@ -1139,6 +1437,11 @@ export const CampaignAbi = [
         "internalType": "bytes1"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReporter",
+    "inputs": []
   },
   {
     "type": "error",
@@ -1176,6 +1479,17 @@ export const CampaignAbi = [
     "type": "error",
     "name": "NoKpis",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoShortFallOwed",
+    "inputs": [
+      {
+        "name": "promoter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1263,8 +1577,46 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "OutstandingShortfall",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeERC20FailedOperation",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ShortfallUnfunded",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1335,6 +1687,38 @@ export const CampaignAbi = [
       },
       {
         "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TopUpTooEarly",
+    "inputs": [
+      {
+        "name": "paidOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "required",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TopUpTooSmall",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "required",
         "type": "uint256",
         "internalType": "uint256"
       }

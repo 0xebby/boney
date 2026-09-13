@@ -9,7 +9,7 @@
     "auth": "graph auth",
     "deploy": "graph deploy boney-indexer",
     "create:local": "graph create --node http://localhost:8020/ boney-local",
-    "deploy:local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 boney-local",
+    "deploy:local": "graph deploy boney-local subgraph.local.yaml --node http://localhost:8020/ --ipfs http://localhost:5001 --output-dir build-local",
     "test": "graph test"
   },
   "devDependencies": {

@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "npm",
+			"script": "auth",
+			"path": "subgraph",
+			"problemMatcher": [],
+			"label": "npm: auth - subgraph",
+			"detail": "graph auth"
+		}
+	]
+}

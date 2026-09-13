@@ -23,9 +23,7 @@ import {Types} from "../src/libraries/Types.sol";
 ///      against.** No KPI watches GYND's own `Transfer`, so tier payouts leaving the `EscrowVault`
 ///      emit nothing any KPI counts. That is what keeps the payout out of the metric it funds.
 ///
-///      All three KPIs are `aggregate: false` and carry reward tiers. An aggregate KPI never moves
-///      `_progress[promoter]`, so a ladder on one can never pay — the state a previous Gyndore
-///      campaign shipped in.
+///      All three KPIs are `aggregate: false` and carry reward tiers.
 ///
 ///      Every KPI is gated through `GuardedKpiVerifier`, so `pnpm relay` must run before `pnpm index`
 ///      credits anything. `GYNDORE_TESTNET_DEPLOYER` becomes the campaign's project, so it must equal

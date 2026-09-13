@@ -1,6 +1,6 @@
 import {http, createConfig} from "wagmi";
 import {injected} from "wagmi/connectors";
-import {anvil, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
+import {anvil, localPlayground, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
 
 /**
  * wagmi configuration.
@@ -14,10 +14,11 @@ import {anvil, sepolia, baseSepolia, mainnet, rpcUrlFor} from "./chains";
  * Base Sepolia default is publicnode and why the anvil one has to be configurable.
  */
 export const wagmiConfig = createConfig({
-  chains: [anvil, baseSepolia, sepolia, mainnet],
+  chains: [anvil, localPlayground, baseSepolia, sepolia, mainnet],
   connectors: [injected()],
   transports: {
     [anvil.id]: http(rpcUrlFor(anvil.id)),
+    [localPlayground.id]: http(rpcUrlFor(localPlayground.id)),
     [baseSepolia.id]: http(rpcUrlFor(baseSepolia.id)),
     [sepolia.id]: http(rpcUrlFor(sepolia.id)),
     [mainnet.id]: http(rpcUrlFor(mainnet.id)),

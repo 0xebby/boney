@@ -1,7 +1,5 @@
-/**
- * Throwaway: dumps every verification layer's live state for one campaign as JSON.
- *
- * Run: pnpm tsx scripts/__gyn-verify-state.mts <campaign> > /tmp/state.json
+/** Dumps live verification state for one campaign as JSON.
+ * @param argv[2] Campaign address.
  */
 import {createPublicClient, http, getAddress, type Hex, type PublicClient} from "viem";
 import {

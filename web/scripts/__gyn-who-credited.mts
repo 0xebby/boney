@@ -1,4 +1,4 @@
-/** Throwaway: which transactions moved this campaign's progress, and who sent them. */
+/** Lists campaign progress transactions and their senders. */
 import {createPublicClient, http, getAddress, type PublicClient} from "viem";
 import {baseSepolia} from "viem/chains";
 import {CampaignAbi} from "../src/lib/abis";
