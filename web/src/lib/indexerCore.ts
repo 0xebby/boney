@@ -9,52 +9,26 @@ import {
 import type {AttributionLookup} from "./attributionWindows";
 
 /**
- * Turning raw event logs into the `reportUserAction` calls a campaign will accept.
- *
- * Pure and React-free (decision F6), and deliberately separate from `scripts/indexer.ts`: the
- * script is I/O — RPC pagination, key handling, transaction sending — while everything that can be
- * *wrong* lives here, where a fixture log can prove it. The failure this guards against is not a
- * crash; it is crediting the right number to the wrong wallet, or a cumulative total that drifts
- * from what the chain already recorded. Neither shows up in a smoke test.
- *
- * Every rule here mirrors a guard in `Campaign.reportUserAction` and names it, the same way
- * `promoter.ts` mirrors `Campaign.join`. The contract is the boundary; this decides what is worth
- * sending.
- *
- * Naming note: the contract calls the acting wallet `user` (`reportUserAction`, `userCreditedOf`),
- * and those ABI strings are load-bearing, so they stay. Everywhere else this codebase calls that
- * wallet a *referral* — someone who arrived through a promoter's link and signed a Touch.
+ * Turns raw event logs into the `reportUserAction` calls a campaign will accept.
  */
-
-/** A log reduced to the three fields crediting depends on. */
 export type IndexedLog = {
   topics: readonly Hex[];
   data: Hex;
   blockNumber: bigint;
-  /** Block timestamp, needed to place the action inside an attribution window. */
   timestamp: bigint;
 };
 
-/** One credit-bearing action as `Campaign` reads it out of `evidence`. */
 export type EvidenceAction = {blockNumber: bigint; timestamp: bigint; amount: bigint};
 
-/** One referral's accumulated activity for a single KPI. */
 export type ActorTotal = {
   referral: `0x${string}`;
-  /** Post-scaling progress across every matched log. */
   amount: bigint;
-  /** Per-log contributions, for evidence. Ordered by block. */
   actions: EvidenceAction[];
-  /** Highest block that contributed, so a cursor can advance past it. */
   lastBlock: bigint;
 };
 
 /**
  * Reads the actor address out of an indexed topic.
- *
- * A topic is a 32-byte word; an address occupies the low 20 bytes. Returns null when the topic is
- * absent (the log is a different event with fewer topics) or malformed, so one odd log is skipped
- * rather than aborting a run.
  */
 export function actorFromTopic(log: IndexedLog, actorTopic: 1 | 2 | 3): `0x${string}` | null {
   const topic = log.topics[actorTopic];
@@ -69,10 +43,6 @@ export function actorFromTopic(log: IndexedLog, actorTopic: 1 | 2 | 3): `0x${str
 
 /**
  * The raw (pre-scaling) amount one log contributes.
- *
- * `count` mode ignores the payload entirely — for "how many mints", where the event's data is a
- * token id that would be nonsense to sum. `dataWord0` reads the first 32-byte word, which is where
- * a single-value event like `Deposit(address indexed dst, uint256 wad)` puts its number.
  */
 export function rawAmount(log: IndexedLog, mode: EventSource["amountMode"]): bigint | null {
   if (mode === AMOUNT_MODE.count) return BigInt(1);
@@ -88,11 +58,6 @@ export function rawAmount(log: IndexedLog, mode: EventSource["amountMode"]): big
 
 /**
  * One credit-bearing action, decoded down to the fields crediting needs.
- *
- * The shape both sources reduce to before folding: `aggregateByActor` gets here by decoding raw logs,
- * `aggregateActions` by reading an indexer that already decoded them. `raw` is pre-scaling and already
- * mode-resolved — 1 under `count`, the payload value under `dataWord0` — which is what lets the fold
- * below stay unaware of amount modes entirely.
  */
 export type DecodedAction = {blockNumber: bigint; timestamp: bigint; raw: bigint};
 
@@ -105,31 +70,9 @@ type RawTotals = Map<
 /**
  * Folds logs into per-referral totals.
  *
- * Scaling is applied to the *running total*, not to each log, so a hundred sub-scale deposits still
- * add up to credit. Scaling each log first would floor every one of them to zero and silently
- * credit nothing — a promoter's referrals could act all day and their progress would never move.
- *
- * Logs are sorted by block before folding so `actions` is chronological regardless of the order the
- * RPC returned pages in. `Campaign.reportUserAction` rejects evidence whose block numbers go
- * backwards (`UnorderedEvidence`), because it walks the actions oldest first.
- *
- * ## `attribution` is not optional, deliberately
- *
- * Per-action attribution is the trickiest correctness rule in this repo
- * (`boneyMd/KPI_VERIFICATION.md` §8). `Campaign` credits each action to whoever held the referral at
- * that action's block, and skips the ones nobody held — so an action this fold keeps but the chain
- * would skip inflates `newTotal` above what can ever be credited, and every later run re-sends the
- * same unreachable figure. Applying the same rule here keeps the claim and the chain in agreement.
- *
- * Passing `null` opts out explicitly and is for diagnostics only — a scratch script asking "what is
- * on chain at all", where attribution is not the question. It is a required argument rather than an
- * optional one so that opting out is a visible decision at the call site instead of an omission.
- *
- * ## The event is checked here, not assumed
- *
- * `topics[0]` is compared against the source's own signature, so a log of some other event the
- * contract emits is skipped rather than read for an actor. Requesting one signature is not enough:
- * viem's `getLogs` has no raw `topics` parameter, so an object passing one narrows nothing.
+ * Scaling applies to the running total rather than to each log, so sub-scale actions still add up
+ * to credit. `attribution` is required rather than optional so that opting out is visible at the
+ * call site; passing null keeps every log and is for diagnostics only.
  *
  * @param logs Logs from the KPI's source contract, in any order.
  * @param source Event source describing which event to keep, and how to read an actor and an amount
@@ -170,26 +113,6 @@ export function aggregateByActor(
 
 /**
  * Folds already-decoded actions into per-referral totals.
- *
- * The indexed counterpart of `aggregateByActor`: a subgraph hands back `(user, value, timestamp)`
- * rather than topics and data, so there is nothing to decode — but everything after decoding must
- * behave identically, or the same referral gets a different figure depending on which path the app
- * happened to take. Both funnel into `foldActions` for exactly that reason.
- *
- * `value` is raw and unscaled, as the subgraph stores it. The amount mode is applied here rather than
- * upstream because `count` is a property of the KPI, not of the log: the same `Transfer` counts as 1
- * for one campaign and contributes its `value` for another.
- *
- * `attribution` carries the same meaning and the same non-optionality as in `aggregateByActor`, and
- * matters here for a specific reason: the subgraph stores actions *deliberately unfiltered* — see the
- * "No attribution check" note in `subgraph/src/transfer.ts`, which defers the decision because a
- * promoter switch moves `signedAt` afterwards. That deferral is only sound if the consumer actually
- * applies the rule, and this is the consumer.
- *
- * A KPI carrying `filterTopic` must not be read through this path. The subgraph stores actions
- * without their topics, so the filter cannot be applied here and the total would count logs the
- * chain will not credit; `aggregateByActor` is the path that enforces it.
- *
  * @param actions Decoded actions for one KPI, in any order.
  * @param source Event source describing how an amount folds.
  * @param attribution Per-action attribution, or null to keep every action.
@@ -246,8 +169,6 @@ function foldActions(raw: RawTotals, scale: bigint): Map<string, ActorTotal> {
     for (const action of entry.actions) total += action.raw;
 
     const scaled = total / scale;
-    // Everything this referral did still rounds to nothing. Reporting 0 would be a no-op the
-    // campaign ignores anyway (`delta == 0` returns early), so it is not worth a transaction.
     if (scaled === BigInt(0)) continue;
 
     out.set(key, {
@@ -263,18 +184,6 @@ function foldActions(raw: RawTotals, scale: bigint): Map<string, ActorTotal> {
 
 /**
  * Splits a scaled total back across the actions that produced it, preserving the sum exactly.
- *
- * Per-action amounts must sum to the scaled total, or the two disagree about what happened: the
- * chain's oldest-first walk would leave part of `newTotal` unattributed, and a verifier reading the
- * same evidence reverts `EvidenceExceedsClaim` when it sums higher. Scaling each action independently
- * would not sum, so the total is apportioned and the remainder lands on the final entry — which is
- * also the newest, and therefore the one held by the promoter attributed most recently.
- *
- * Shares come from each action's own `raw`, which is already mode-resolved. That matters: an earlier
- * version re-read the log's data word here regardless of mode, so a `count` KPI split a total of *n
- * events* across shares derived from token amounts — producing a first share in the millions and a
- * negative remainder on the last. It summed correctly, which is why it went unnoticed, but a negative
- * `uint256` cannot be encoded and the evidence was unusable.
  */
 function apportion(
   actions: readonly DecodedAction[],
@@ -299,11 +208,6 @@ function apportion(
 
 /**
  * Merges adjacent actions until the list fits `Campaign.MAX_EVIDENCE_ACTIONS`.
- *
- * A merged entry carries the block and timestamp of the *newest* action folded into it, so it
- * resolves to the promoter who held the referral at that point. Same-block actions merge first,
- * which is lossless; beyond that the fold is coarse and can move an older action's amount onto a
- * later promoter, so it only runs when the list would otherwise be rejected outright.
  *
  * @param actions Evidence actions, oldest first.
  * @param limit Maximum entries the campaign will accept.
@@ -345,19 +249,6 @@ export function foldToLimit(
 
 /**
  * Splits a referral's evidence across the promoters who held it, as `Campaign._tally` does.
- *
- * The report is one cumulative figure per referral, but the credit is not: the chain walks the
- * evidence and adds each action's amount to whoever held the referral at that action's block. So a
- * referral whose attribution moved carries work belonging to two promoters at once, and the figure a
- * panel shows for *one* of them is this split, never the referral's own total.
- *
- * Runs over the apportioned evidence rather than the raw logs deliberately — the chain sees only what
- * `encodeActions` sends, including the remainder `apportion` lands on the final action, so tallying
- * anything else could disagree with what gets credited.
- *
- * No ceiling is applied. `_tally` stops at the verified total, which for an ungated KPI is the claim
- * itself; a gated KPI's trimming is Boney's ceiling and is reported separately (`describeCeiling`).
- *
  * @param referral The wallet the actions belong to.
  * @param actions Evidence actions for that referral, oldest first.
  * @param attribution Per-action attribution, as the chain would resolve it.
@@ -390,15 +281,9 @@ export type ReportDecision =
 /**
  * Whether a referral's totals are worth a `reportUserAction` call.
  *
- * The one refusal mirrors named contract behavior: a total no greater than what is already credited
- * makes `Campaign` return early on `delta == 0`, and a *lower* total reverts `NonMonotonic`.
- * `newTotal` is cumulative, not a delta, so re-indexing the same range must be a no-op rather than
- * double-crediting.
- *
- * Whether the referral is attributed *now* is deliberately not a condition. `Campaign` credits each
- * evidence action to whoever held the referral at that action's block, so a report can pay a promoter
- * whose touch has since been superseded — and gating on the live touch is exactly what would drop
- * that credit. Actions nobody held were already dropped upstream by `AttributionLookup`.
+ * @param total The referral's accumulated activity for one KPI.
+ * @param alreadyCredited Progress the campaign has already credited this referral.
+ * @returns A decision carrying the cumulative total and evidence, or the reason for skipping.
  */
 export function decideReport(total: ActorTotal, alreadyCredited: bigint): ReportDecision {
   if (total.amount <= alreadyCredited) {
@@ -413,11 +298,6 @@ export function decideReport(total: ActorTotal, alreadyCredited: bigint): Report
 
 /**
  * Encodes `Types.Action[]` for the `evidence` argument.
- *
- * Sent for every KPI, not only the ones naming a verifier: `Campaign` decodes it itself to credit
- * each action to whoever held the referral at that action's block. A report with empty evidence falls
- * back to crediting whoever holds the touch now.
- *
  * @param actions Evidence actions, oldest first and non-decreasing by block.
  * @returns ABI-encoded `Types.Action[]`.
  */
@@ -447,12 +327,6 @@ export function encodeActions(actions: readonly EvidenceAction[]): Hex {
 
 /**
  * Identity of the `eth_getLogs` request a KPI's source implies over one block range.
- *
- * Two KPIs of the same campaign often name the same event on the same contract and differ only in how
- * they read it, which `aggregateByActor` applies to the logs afterwards. Keyed on exactly the fields
- * the request carries — address, signature, indexed-topic filter and range — so a scan is reused only
- * where the node would have returned the same logs.
- *
  * @param source Event source the KPI names.
  * @param fromBlock First block of the range.
  * @param toBlock Last block of the range.
@@ -469,7 +343,6 @@ export function logScanKey(source: EventSource, fromBlock: bigint, toBlock: bigi
   ].join("|");
 }
 
-/** A log as `eth_getLogs` returns it, before its quantities are read. */
 export type RawLog = {
   topics: readonly Hex[];
   data: Hex;
@@ -477,7 +350,6 @@ export type RawLog = {
   blockTimestamp?: Hex;
 };
 
-/** An `eth_getLogs` request parameter object, in the shapes the JSON-RPC method itself takes. */
 export type LogRequest = {
   address: `0x${string}`;
   fromBlock: Hex;
@@ -487,11 +359,6 @@ export type LogRequest = {
 
 /**
  * Builds the `eth_getLogs` request for one event over one block range.
- *
- * Sent through `client.request` rather than viem's `getLogs`, whose parameters have no `topics`
- * field — an object passing one is filtered by neither the node nor viem, and the watched contracts
- * are busy enough that the difference is most of the payload.
- *
  * @param address Contract whose logs are wanted.
  * @param topic0 Event signature hash to match.
  * @param source Event source carrying the indexed-topic filter, or null when there is none.
@@ -516,10 +383,6 @@ export function logRequest(
 
 /**
  * Splits a block range into chunks an RPC will accept.
- *
- * Base's public endpoint rejects `eth_getLogs` spanning more than 2000 blocks with
- * `-32602: query exceeds max block range 2000` — observed, not assumed. Ranges are inclusive at
- * both ends, so a chunk of `size` blocks spans `from` to `from + size - 1`.
  */
 export function blockChunks(
   fromBlock: bigint,

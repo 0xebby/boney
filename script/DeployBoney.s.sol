@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Script, console} from "forge-std/Script.sol";
 import {Boney} from "../src/Boney.sol";
+import {BoneyCreRouter} from "../src/automation/BoneyCreRouter.sol";
 import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
 import {EscrowVault} from "../src/escrow/EscrowVault.sol";
 import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
@@ -14,68 +15,103 @@ import {GuardedKpiVerifier} from "../src/verifiers/GuardedKpiVerifier.sol";
 import {TouchWindowVerifier} from "../src/verifiers/TouchWindowVerifier.sol";
 
 /// @title DeployBoney
-/// @notice Boney deployment script.
+/// @notice Deploys the Boney protocol with one shared CRE router.
 contract DeployBoney is Script {
+    /// @notice Addresses deployed by one script run.
+    struct Deployment {
+        Boney boney;
+        BoneyCreRouter router;
+        CampaignRegistry registry;
+        EscrowVault vault;
+        AttributionRegistry attribution;
+        AttestationVerifier attestations;
+        ReputationRegistry reputation;
+        OracleCoordinator coordinator;
+        EventMetricKpiVerifier kpiVerifier;
+        GuardedKpiVerifier guardedVerifier;
+        TouchWindowVerifier touchVerifier;
+    }
+
     /// @dev [bscoretest] Protocol dispute window is 1 day.
     uint256 public constant DISPUTE_WINDOW = 4 minutes;
+    /// @notice Maximum attribution touch duration.
     uint64 public constant MAX_TOUCH_DURATION = 360 days;
-
+    /// @notice Official production Keystone forwarder.
+    address public constant CRE_FORWARDER = 0xF8344CFd5c43616a4366C34E3EEE75af79a74482;
+    /// @notice Default development attestor.
     address public constant DEV_ATTESTOR = 0x98405c5776a63547E7Cb16000bA04cA53D9Fb2f8;
 
+    /// @notice Deploy the protocol and bind its shared automation topology.
+    /// @return boney Protocol facade.
+    /// @return registry Campaign registry.
     function run() external returns (Boney boney, CampaignRegistry registry) {
         uint64 maxTouch = uint64(vm.envOr("BONEY_MAX_TOUCH", uint256(MAX_TOUCH_DURATION)));
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(privateKey);
+        bytes32 workflowId = vm.envBytes32("CRE_WORKFLOW_ID");
+        address workflowOwner = vm.envAddress("CRE_WORKFLOW_OWNER");
 
-        address deployer = vm.addr(vm.envUint("PRIVATE_KEY"));
+        vm.startBroadcast(privateKey);
 
-        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
-
-        // @dev Standalone modules.
-        AttributionRegistry attribution = new AttributionRegistry(maxTouch);
-        AttestationVerifier attestations =
-            new AttestationVerifier(deployer, vm.envOr("BONEY_INITIAL_ATTESTOR", DEV_ATTESTOR));
-        ReputationRegistry reputation = new ReputationRegistry(deployer, address(attestations));
-
-        // @dev Oracle coordinator.
-        OracleCoordinator coordinator = new OracleCoordinator(deployer, DISPUTE_WINDOW);
-
-        // @dev Vault, then registry.
-        EscrowVault vault = new EscrowVault(deployer);
-        registry = new CampaignRegistry(
-            address(vault), address(reputation), address(attribution), address(coordinator)
-        );
-        vault.setRegistrar(address(registry));
-
-        // @dev Wire the coordinator to the registry, then the facade.
-        coordinator.setCampaignRegistry(address(registry));
-        boney = new Boney(address(registry));
-
-        // @dev KPI verification layer. one deployment of each serves every campaign.
-        //
-        //    @dev `GuardedKpiVerifier` is what a campaign's `KpiSpec.verifier` should point at: it always
-        //    consults Boney's `EventMetricKpiVerifier`, and optionally cross-checks a second
-        //    verifier per KPI.
-        //    `TouchWindowVerifier` is deployed for off-chain window reads only. `Campaign` credits
-        //    each evidence action to whoever held attribution at that action's block, so the adapter
-        //    must not be wired as a `KpiSpec.verifier` or as a `Mode.CAP` second verifier.
-        EventMetricKpiVerifier kpiVerifier =
+        Deployment memory deployment;
+        deployment.kpiVerifier =
             new EventMetricKpiVerifier(deployer, vm.envOr("BONEY_KPI_REPORTER", deployer));
-        GuardedKpiVerifier guardedVerifier = new GuardedKpiVerifier(deployer, address(kpiVerifier));
-        TouchWindowVerifier touchVerifier = new TouchWindowVerifier();
+        deployment.guardedVerifier = new GuardedKpiVerifier(deployer, address(deployment.kpiVerifier));
+        deployment.coordinator = new OracleCoordinator(deployer, DISPUTE_WINDOW);
+        deployment.router = new BoneyCreRouter(
+            CRE_FORWARDER, address(deployment.kpiVerifier), deployment.coordinator, workflowId, workflowOwner
+        );
+
+        deployment.touchVerifier = new TouchWindowVerifier();
+        deployment.attribution = new AttributionRegistry(maxTouch);
+        deployment.attestations =
+            new AttestationVerifier(deployer, vm.envOr("BONEY_INITIAL_ATTESTOR", DEV_ATTESTOR));
+        deployment.reputation = new ReputationRegistry(deployer, address(deployment.attestations));
+        deployment.vault = new EscrowVault(deployer);
+        deployment.registry = new CampaignRegistry(
+            address(deployment.vault),
+            address(deployment.reputation),
+            address(deployment.attribution),
+            address(deployment.coordinator),
+            address(deployment.router)
+        );
+
+        deployment.vault.setRegistrar(address(deployment.registry));
+        deployment.coordinator.setCampaignRegistry(address(deployment.registry));
+        deployment.coordinator.addReporter(address(deployment.router));
+        deployment.router.setCampaignRegistry(deployment.registry);
+        deployment.boney = new Boney(address(deployment.registry));
 
         vm.stopBroadcast();
 
+        _printDeployment(deployment);
+        return (deployment.boney, deployment.registry);
+    }
+
+    /// @dev Print deployed addresses and automation identity.
+    /// @param deployment Deployed protocol contracts.
+    function _printDeployment(Deployment memory deployment) private view {
         console.log("Boney deployed");
-        console.log("  Boney (facade):         ", address(boney));
-        console.log("  CampaignRegistry:       ", address(registry));
-        console.log("  CampaignDeployer:       ", registry.campaignDeployer());
-        console.log("  EscrowVault:            ", address(vault));
-        console.log("  AttributionRegistry:    ", address(attribution));
-        console.log("  AttestationVerifier:    ", address(attestations));
-        console.log("  ReputationRegistry:     ", address(reputation));
-        console.log("  OracleCoordinator:      ", address(coordinator));
-        console.log("  EventMetricKpiVerifier: ", address(kpiVerifier));
-        console.log("  GuardedKpiVerifier:     ", address(guardedVerifier));
-        console.log("  TouchWindowVerifier:    ", address(touchVerifier));
-        console.log("  KPI reporter:           ", kpiVerifier.reporter());
+        console.log("  Boney (facade):         ", address(deployment.boney));
+        console.log("  CampaignRegistry:       ", address(deployment.registry));
+        console.log("  CampaignDeployer:       ", deployment.registry.campaignDeployer());
+        console.log("  EscrowVault:            ", address(deployment.vault));
+        console.log("  AttributionRegistry:    ", address(deployment.attribution));
+        console.log("  AttestationVerifier:    ", address(deployment.attestations));
+        console.log("  ReputationRegistry:     ", address(deployment.reputation));
+        console.log("  OracleCoordinator:      ", address(deployment.coordinator));
+        console.log("  BoneyCreRouter:         ", address(deployment.router));
+        console.log("  Automated reporter:     ", deployment.registry.automatedReporter());
+        console.log(
+            "  Router allowlisted:     ", deployment.coordinator.isReporter(address(deployment.router))
+        );
+        console.log("  EventMetricKpiVerifier: ", address(deployment.kpiVerifier));
+        console.log("  GuardedKpiVerifier:     ", address(deployment.guardedVerifier));
+        console.log("  TouchWindowVerifier:    ", address(deployment.touchVerifier));
+        console.log("  KPI reporter:           ", deployment.kpiVerifier.reporter());
+        console.log("  CRE forwarder:          ", deployment.router.OFFICIAL_FORWARDER());
+        console.log("  CRE workflow owner:     ", deployment.router.expectedWorkflowOwner());
+        console.log("  CRE workflow ID:");
+        console.logBytes32(deployment.router.expectedWorkflowId());
     }
 }

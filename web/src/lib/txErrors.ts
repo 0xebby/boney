@@ -186,6 +186,9 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `That report carries ${count(provided)} actions as evidence, and the limit is ${count(max)}. Report a narrower range, or merge the actions.`,
   UnorderedEvidence: ([index]) =>
     `The evidence goes backwards at action ${Number(index) + 1}. Actions have to be ordered oldest first.`,
+  EmptyReportBatch: () => "That batch carries no reports. Add at least one.",
+  TooManyReports: ([provided, max]) =>
+    `That batch carries ${count(provided)} reports, and the limit is ${count(max)}. Split it into smaller batches.`,
 
   // ── Campaign: creation ──
   NoKpis: () => "Add at least one KPI before creating the campaign.",
@@ -291,6 +294,10 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   ReportAlreadyApplied: () => "This report has already been applied.",
   NotUserReport: () => "That report is campaign-wide, not per-user.",
   NotAggregateReport: () => "That report is per-user, not campaign-wide.",
+  WrongCampaignStatus: ([actual]) =>
+    `That campaign is ${statusName(actual).toLowerCase()}, so a campaign-wide report can't be filed against it.`,
+  CampaignOutsideWindow: ([start, end]) =>
+    `That campaign's reporting window runs ${at(start)} → ${at(end)}, and now is outside it.`,
   RegistryAlreadySet: () => "The campaign registry is already set and can't be changed.",
   RegistryNotSet: () => "The oracle isn't wired to a campaign registry yet.",
 

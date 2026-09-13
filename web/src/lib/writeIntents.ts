@@ -2,6 +2,7 @@ import {formatDateTime, formatDuration, shortAddress} from "./format";
 import {actionLabel, type LifecycleAction} from "./lifecycle";
 import {addressRow, amountRow, type SignIntent, type SignKind} from "./signIntent";
 import type {CampaignDraft} from "./validation";
+import {CAMPAIGN_REPORT_BATCH_SIZE} from "./reporting";
 
 /**
  * The confirmation copy for every wallet prompt the app opens.
@@ -342,11 +343,7 @@ export type ReportedCall = {
 const REPORT_ROW_LIMIT = 5;
 
 /**
- * `Campaign.reportUserAction` — crediting observed activity, one referral per transaction.
- *
- * States the promoter and the figures rather than the referral count alone: the credit lands on a
- * promoter's ladder, the referrals are only where the activity was measured, and a cumulative total
- * can carry units belonging to whoever held the referral before.
+ * `Campaign.reportUserActionsBatch` — crediting observed activity in bounded batches.
  *
  * @param campaign The campaign's own address.
  * @param kpiIndex Which KPI is being credited.
@@ -412,16 +409,20 @@ export function reportIntent(
             {
               label: "And",
               value: `${calls.length - listed.length} more referrals`,
-              hint: "One transaction each, in the same run.",
+              hint: `Sent in stable order across batches of at most ${CAMPAIGN_REPORT_BATCH_SIZE}.`,
             },
           ]
         : []),
     ],
     important:
-      "Each report settles inline: a tier crossed by a report pays out in the same transaction. They are sent one at a time and the run stops at the first failure, so a partial sequence has already moved money.",
+      `Each batch settles inline and contains at most ${CAMPAIGN_REPORT_BATCH_SIZE} reports. ` +
+      "A batch is atomic; confirmed earlier batches have already moved money if a later batch fails.",
     tone: "warning",
     confirmLabel: calls.length === 1 ? "Send report" : `Send ${calls.length} reports`,
-    prompts: Array.from({length: Math.max(1, calls.length)}, (): SignKind => "transaction"),
+    prompts: Array.from(
+      {length: Math.max(1, Math.ceil(calls.length / CAMPAIGN_REPORT_BATCH_SIZE))},
+      (): SignKind => "transaction",
+    ),
   };
 }
 

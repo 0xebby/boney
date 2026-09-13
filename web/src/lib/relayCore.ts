@@ -486,6 +486,7 @@ export function describeConfigDrift(input: {
   verifierScale: bigint;
   verifierAggregation: Aggregation;
   verifierUserParamIndex: number;
+  verifierValueParamIndex: number;
   indexerTopic0: Hex | undefined;
   indexerSource: `0x${string}` | undefined;
   indexerScale: bigint | undefined;
@@ -493,7 +494,7 @@ export function describeConfigDrift(input: {
   indexerActorTopic: number | undefined;
 }): string | null {
   const {event, verifierTopic0, verifierTarget, verifierScale, verifierAggregation} = input;
-  const {verifierUserParamIndex, indexerTopic0, indexerSource} = input;
+  const {verifierUserParamIndex, verifierValueParamIndex, indexerTopic0, indexerSource} = input;
   const {indexerScale, indexerAmountMode, indexerActorTopic} = input;
 
   // A KPI with no event-source blob is not indexer-driven, so there is nothing to disagree with.
@@ -567,6 +568,17 @@ export function describeConfigDrift(input: {
         `but the KPI's params fold by ${indexerFold} — these are different quantities, not a ` +
         `different magnitude of the same one`
       );
+    }
+    if (verifierAggregation === AGGREGATION.sum) {
+      const firstUnindexed = event.inputs.findIndex((param) => !param.indexed);
+      if (firstUnindexed < 0 || verifierValueParamIndex !== firstUnindexed) {
+        const verifierName = event.inputs[verifierValueParamIndex]?.name ?? "?";
+        const indexerName = event.inputs[firstUnindexed]?.name ?? "?";
+        return (
+          `value mismatch: the verifier sums param ${verifierValueParamIndex} ("${verifierName}"), ` +
+          `but the KPI's params sum data word 0 which is param ${firstUnindexed} ("${indexerName}")`
+        );
+      }
     }
   }
 

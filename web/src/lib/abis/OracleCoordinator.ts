@@ -20,6 +20,19 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_REPORTS_PER_BATCH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "addReporter",
     "inputs": [
       {
@@ -39,6 +52,19 @@ export const OracleCoordinatorAbi = [
         "name": "reportId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "applyReports",
+    "inputs": [
+      {
+        "name": "reportIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "outputs": [],
@@ -286,6 +312,30 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
+    "name": "reportTarget",
+    "inputs": [
+      {
+        "name": "reportId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "campaign",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "reporterAllowed",
     "inputs": [
       {
@@ -410,6 +460,47 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
+    "name": "submitReports",
+    "inputs": [
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct IOracleCoordinator.Report[]",
+        "components": [
+          {
+            "name": "campaign",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reportIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "submitUserReport",
     "inputs": [
       {
@@ -450,6 +541,52 @@ export const OracleCoordinatorAbi = [
         "name": "reportId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "submitUserReports",
+    "inputs": [
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct IOracleCoordinator.UserReport[]",
+        "components": [
+          {
+            "name": "campaign",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "newTotal",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reportIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "stateMutability": "nonpayable"
@@ -595,6 +732,22 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "error",
+    "name": "CampaignOutsideWindow",
+    "inputs": [
+      {
+        "name": "startTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "endTime",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "DisputeWindowClosed",
     "inputs": [
       {
@@ -614,6 +767,11 @@ export const OracleCoordinatorAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "EmptyReportBatch",
+    "inputs": []
   },
   {
     "type": "error",
@@ -737,6 +895,22 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "error",
+    "name": "TooManyReports",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "UnknownCampaign",
     "inputs": [
       {
@@ -754,6 +928,17 @@ export const OracleCoordinatorAbi = [
         "name": "reportId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongCampaignStatus",
+    "inputs": [
+      {
+        "name": "actual",
+        "type": "uint8",
+        "internalType": "enum Types.CampaignStatus"
       }
     ]
   },

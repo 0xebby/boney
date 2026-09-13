@@ -29,6 +29,7 @@ import {
   type ReportedCall,
 } from "@/lib/writeIntents";
 import {encodeActions} from "@/lib/indexerCore";
+import {campaignReportBatches} from "@/lib/reporting";
 import {
   buildTouch,
   fetchEffectiveMaxDuration,
@@ -664,23 +665,10 @@ export function useStoreTouch() {
 // ── reporting (dev tool) ─────────────────────────────────────────
 
 /**
- * `Campaign.reportUserAction` — the project crediting a referral's activity.
+ * `Campaign.reportUserActionsBatch` — project-side reporting of referral activity.
  *
- * Normally the indexer's job (`scripts/indexer.ts` watches KPI event sources and reports what it
- * finds). This hook exists so a project wallet can push the same reports by hand while testing —
- * which is why it lives behind `isProject` in `ReportPanel` rather than being part of the
- * promoter-facing flow. What it reports is decided by `planObservedReport`, from the same logs the
- * indexer reads; this hook only sends what it is handed.
- *
- * **Sequential, not batched.** One KOL can have several attributed referrals, and the contract
- * takes one referral per call, so crediting a KOL is N transactions. They run in series and the
- * loop stops at the first failure: `_settle` runs inline at the end of each call, so a partial
- * sequence has already moved real money, and firing the rest after a revert would pile more state
- * changes on top of a condition the caller has not seen yet. `sent` reports how many landed, so
- * the panel can say "2 of 3 confirmed" rather than implying all-or-nothing.
- *
- * Each call is simulated first, for the same reason as every other write here: `NoAttribution`,
- * `NonMonotonic` and `AggregateKpi` are named errors before signing and opaque failures after.
+ * Plans are encoded in stable batches of at most 32 reports. Each batch is simulated, sent, and
+ * confirmed before the next starts. A failed batch is reported and no later batch is attempted.
  */
 export function useReportUserAction() {
   const {publicClient, walletClient} = useWriteContext();
@@ -719,22 +707,25 @@ export function useReportUserAction() {
       setSent(0);
       setTotal(calls.length);
 
-      for (const call of calls) {
+      const batches = campaignReportBatches(
+        calls.map((call) => ({
+          kpiIndex: BigInt(kpiIndex),
+          user: call.referral,
+          newTotal: call.newTotal,
+          evidence: call.actions?.length ? encodeActions(call.actions) : "0x",
+        })),
+      );
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex]!;
         try {
           setState({status: "preparing"});
-
-          // Evidence is the observed actions when the plan carries them, `"0x"` otherwise. Sent for
-          // every KPI, verifier or not: `Campaign` decodes it as `Types.Action[]` to credit each
-          // action to whoever held the referral at that action's block. The `"0x"` fallback is the
-          // simulated path, which has no per-action timing and so resolves attribution at report time.
-          const evidence = call.actions?.length ? encodeActions(call.actions) : "0x";
-
           const {request} = await publicClient.simulateContract({
             account,
             address: campaign,
             abi: CampaignAbi,
-            functionName: "reportUserAction",
-            args: [BigInt(kpiIndex), call.referral, call.newTotal, evidence],
+            functionName: "reportUserActionsBatch",
+            args: [batch],
           });
 
           const hash = await walletClient.writeContract(request);
@@ -745,20 +736,20 @@ export function useReportUserAction() {
             setState({
               status: "error",
               message:
-                "The report reverted on chain — the campaign's state changed after this page loaded. Reload and try again.",
-              detail: `receipt status: ${receipt.status} · referral ${call.referral}`,
+                "The report batch reverted on chain — the campaign's state changed after this page loaded. Reload and try again.",
+              detail: `receipt status: ${receipt.status} · batch ${batchIndex + 1} of ${batches.length}`,
             });
             return;
           }
 
-          setSent((n) => n + 1);
+          setSent((confirmed) => confirmed + batch.length);
           setState({status: "confirmed", hash});
         } catch (err) {
           const {message, detail} = describeTxError(err);
           setState({
             status: "error",
             message,
-            detail: [detail, `referral ${call.referral}`].filter(Boolean).join(" · "),
+            detail: [detail, `batch ${batchIndex + 1} of ${batches.length}`].filter(Boolean).join(" · "),
           });
           return;
         }

@@ -120,6 +120,11 @@ export const CampaignAbi = [
         "name": "oracleCoordinator_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "automatedReporter_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -204,6 +209,19 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_REPORTS_PER_BATCH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_TIERS_PER_KPI",
     "inputs": [],
     "outputs": [
@@ -221,6 +239,19 @@ export const CampaignAbi = [
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "aggregateUpdateDeadline",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -786,6 +817,41 @@ export const CampaignAbi = [
         "name": "evidence",
         "type": "bytes",
         "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "reportUserActionsBatch",
+    "inputs": [
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct ICampaign.UserActionReport[]",
+        "components": [
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "newTotal",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
       }
     ],
     "outputs": [],
@@ -1365,6 +1431,11 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "EmptyReportBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EmptyTiers",
     "inputs": [
       {
@@ -1658,6 +1729,22 @@ export const CampaignAbi = [
   {
     "type": "error",
     "name": "TooManyKpis",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyReports",
     "inputs": [
       {
         "name": "provided",

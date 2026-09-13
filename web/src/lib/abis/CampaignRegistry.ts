@@ -24,6 +24,11 @@ export const CampaignRegistryAbi = [
         "name": "oracleCoordinator_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "automatedReporter_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -31,6 +36,19 @@ export const CampaignRegistryAbi = [
   {
     "type": "function",
     "name": "attributionRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "automatedReporter",
     "inputs": [],
     "outputs": [
       {

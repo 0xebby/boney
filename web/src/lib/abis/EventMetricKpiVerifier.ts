@@ -43,6 +43,35 @@ export const EventMetricKpiVerifierAbi = [
   },
   {
     "type": "function",
+    "name": "automationCapability",
+    "inputs": [
+      {
+        "name": "campaign",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "mode",
+        "type": "uint8",
+        "internalType": "enum IKpiAutomation.AutomationMode"
+      },
+      {
+        "name": "observationAdapter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "checkpointOf",
     "inputs": [
       {

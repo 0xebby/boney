@@ -7,6 +7,8 @@ import {
   nextTierSeed,
   planKolReport,
   planObservedReport,
+  campaignReportBatches,
+  type CampaignReportPayload,
   type TouchEntry,
   type KolTarget,
   type ObservedReferral,
@@ -23,6 +25,15 @@ const REF_3 = "0x3333333333333333333333333333333333333333" as const;
 
 const NOW = 1_000;
 
+function batchReports(count: number): CampaignReportPayload[] {
+  return Array.from({length: count}, (_, index) => ({
+    kpiIndex: BigInt(index % 3),
+    user: `0x${index.toString(16).padStart(40, "0")}` as `0x${string}`,
+    newTotal: BigInt(index + 1),
+    evidence: `0x${index.toString(16).padStart(2, "0")}` as `0x${string}`,
+  }));
+}
+
 function touch(over: Partial<TouchEntry> = {}): TouchEntry {
   return {
     referral: REF_1,
@@ -37,6 +48,27 @@ function touch(over: Partial<TouchEntry> = {}): TouchEntry {
 function tiers(...pairs: [bigint, bigint][]): RewardTier[] {
   return pairs.map(([threshold, reward]) => ({threshold, reward}) as RewardTier);
 }
+
+describe("campaignReportBatches", () => {
+  it("returns no batches for no reports", () => {
+    expect(campaignReportBatches([])).toEqual([]);
+  });
+
+  it("keeps an exact batch together", () => {
+    const reports = batchReports(32);
+    expect(campaignReportBatches(reports)).toEqual([reports]);
+  });
+
+  it("splits 33 reports into 32 and 1", () => {
+    const batches = campaignReportBatches(batchReports(33));
+    expect(batches.map((batch) => batch.length)).toEqual([32, 1]);
+  });
+
+  it("preserves report order and evidence", () => {
+    const reports = batchReports(65);
+    expect(campaignReportBatches(reports).flat()).toEqual(reports);
+  });
+});
 
 describe("latestTouches", () => {
   it("keeps one row per referral", () => {
