@@ -39,6 +39,9 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     bytes32 public constant TOUCH_TYPEHASH =
         keccak256("Touch(address campaign,bytes32 promoterId,uint64 signedAt,uint64 expiresAt)");
 
+    /// @notice Maximum lifetime of a single attribution touch.
+    uint64 public constant MAX_TOUCH_DURATION = 360 days;
+
     /// @notice Longest attribution horizon a single touch may claim. Prevents a user signing an
     ///         effectively permanent attribution, and bounds how stale a relayed touch can be.
     uint64 public immutable maxTouchDuration;
@@ -57,6 +60,9 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @param maxTouchDuration_ Longest attribution horizon a single touch may claim.
     constructor(uint64 maxTouchDuration_) EIP712("Boney Attribution", "1") {
         if (maxTouchDuration_ == 0) revert ZeroWindow();
+        if (maxTouchDuration_ > MAX_TOUCH_DURATION) {
+            revert TouchDurationTooLong(MAX_TOUCH_DURATION, maxTouchDuration_);
+        }
         maxTouchDuration = maxTouchDuration_;
     }
 
@@ -106,7 +112,8 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         Touch storage prev = _touches[user][touch.campaign];
         if (touch.signedAt <= prev.signedAt) revert TouchNotNewer(touch.signedAt, prev.signedAt);
 
-        // The promoter already holding a live touch cannot be re-attributed; only a switch or a lapsed window admits a new one.
+        // The promoter already holding a live touch cannot be re-attributed;
+        // only a switch or a lapsed window admits a new one.
         if (prev.expiresAt > nowTs && touch.promoterId == prev.promoterId) {
             revert TouchAlreadyActive(prev.promoterId, prev.expiresAt);
         }
@@ -152,7 +159,8 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @param campaign The campaign named in the touch.
     /// @param nowTs The current block timestamp, narrowed once by the caller.
     function _requireCampaignOpen(address campaign, uint64 nowTs) private view {
-        (bool hasEnded, bytes memory endData) = campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
+        (bool hasEnded, bytes memory endData) =
+            campaign.staticcall(abi.encodeCall(ICampaignWindow.endTime, ()));
         if (hasEnded && endData.length == 32) {
             // Decoded as uint256, not uint64, so a dirty upper word reads as far-future not a revert.
             uint256 end = abi.decode(endData, (uint256));
@@ -219,13 +227,10 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         uint256 len = history.length;
         if (len == 0) return bytes32(0);
 
-        bytes32 id = history[len - 1].promoterId;
-        for (uint256 i = len - 1; i > 0; --i) {
-            // An entry stored at or before the span's first block covers the rest of it.
-            if (history[i].storedAtBlock <= sinceBlock) break;
-            if (history[i - 1].promoterId != id) return bytes32(0);
-        }
-        return id;
+        // Any later stored touch is a boundary: a switch changes the payee, while a same-promoter
+        // re-touch can only follow an expired attribution.
+        if (len > 1 && history[len - 1].storedAtBlock > sinceBlock) return bytes32(0);
+        return history[len - 1].promoterId;
     }
 
     /// @inheritdoc IAttributionRegistry
@@ -243,8 +248,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     }
 
     /// @dev Newest-first walk taking the first record already on chain before `atBlock`, which makes
-    ///      a touch landing in the action's own block belong to the previous promoter. The winning
-    ///      record still has to be unexpired at `atTimestamp`, so a gap credits nobody.
+    ///      a touch landing in the action's own block belong to the previous promoter.
     /// @param history The user's touch history for one campaign, oldest first.
     /// @param atBlock Block the action being attributed was observed in.
     /// @param atTimestamp Timestamp of that block.

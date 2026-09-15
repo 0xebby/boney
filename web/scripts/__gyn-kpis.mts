@@ -100,7 +100,7 @@ const PROPOSALS: Proposal[] = [
     src: {source: A.faucet, topic0: eventTopic("AssetsMinted(address,address,uint256)"), actorTopic: 1,
           amountMode: AMOUNT_MODE.count, scale: BigInt(1)},
   },
-  // Rejected shapes, probed to show why.
+  // Additional candidate event shapes.
   {
     name: "REJECTED: NFPM IncreaseLiquidity",
     signature: "IncreaseLiquidity(uint256,uint128,uint256,uint256)",

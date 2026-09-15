@@ -1,6 +1,6 @@
 # Boneyard
 
-**Onchain growth marketplace that pays promoters for verified project-set KPIs.** 
+**Onchain growth marketplace that pays promoters for verified project-set KPIs.**
 
 **Powered by boney protocol smart contracts .**
 
@@ -14,19 +14,19 @@ Nobody needs to approves a payout. Nobody can move the goalposts after the work 
 Web3 growth deals settle on trust and screenshots. Each failure is replaced with a mechanism rather
 than a policy:
 
-| Instead of                                         | Boneyard uses                                                                   |
-| -------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Paying upfront for promises                        | Escrow that releases only against verified progress                             |
-| Metrics reported by the party being judged on them | Cumulative on-chain reports, capped at an independent observer's reading        |
-| Claimed attribution                                | Attribution the end user signs, which expires                                   |
-| Handing over social accounts to qualify            | Attested numeric reputation — the chain stores`(wallet, schemaId) => number` |
-| Waiting on manual approval                         | Auto-settlement, in the same transaction as the report                          |
+| Instead of                                         | Boneyard uses                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------ |
+| Paying upfront for promises                        | Escrow that releases only against verified progress                      |
+| Metrics reported by the party being judged on them | Cumulative on-chain reports, capped at an independent observer's reading |
+| Claimed attribution                                | Attribution the end user signs, which expires                            |
+| Waiting on manual approval                         | Auto-settlement, in the same transaction as the report                   |
 
 ## The core loop
 
 ```
 1. CREATE     project → CampaignRegistry.createCampaign(cfg, kpis, tiers)
-                        deploys an immutable Campaign, claims the name, binds the escrow token
+                        → CampaignDeployer deploys an immutable Campaign
+                        → registry claims the name and binds the escrow token
 
 2. FUND       project → EscrowVault.deposit(campaign, rewardPool)
               project → Campaign.activate()          blocked while underfunded
@@ -40,8 +40,9 @@ than a policy:
 
 5. ACT        end user transacts on the project's own contracts. Ordinary on-chain activity.
 
-6. REPORT     project (or oracle) → Campaign.reportUserAction(kpi, user, newTotal, evidence)
-                 resolve attribution → verifier caps the claim → credit the delta
+6. REPORT     project, oracle, or authorized CRE receiver
+                 → Campaign.reportUserAction(kpi, user, newTotal, evidence)
+                 → resolve attribution → verifier caps the claim → credit the delta
                  → walk the tier ladder → EscrowVault.release(promoter, tierPay)
 
 7. WIND DOWN  end() — project any time, or anyone once endTime passes
@@ -54,8 +55,8 @@ crediting report, so by the time anyone calls the public `settle`, the ladder is
 
 ## Architecture
 
-Ten deployed contracts in three tiers: a facade nobody has to use, six protocol modules, and three KPI
-verification adapters. `Campaign` is the eleventh, deployed per campaign.
+Ten shared contracts form three tiers: a facade, six protocol modules, and three KPI
+verification adapters. `Campaign` is deployed per campaign; `BoneyCreRouter` is one shared automation entrypoint per deployment.
 
 ```
                       ┌───────────────────────────────┐
@@ -83,8 +84,8 @@ verification adapters. `Campaign` is the eleventh, deployed per campaign.
    │          │                                 │
 ┌──▼────────┐ │  ┌──────────────────┐   ┌───────▼──────────────┐
 │EscrowVault│ └─►│ OracleCoordinator│   │  GuardedKpiVerifier  │
-│ custody   │    │ stake · dispute  │   │   AGREE  or  CAP     │
-│ only      │    │ slash · apply    │   └───┬──────────────┬───┘
+│ custody   │    │ list · dispute   │   │   AGREE  or  CAP     │
+│ only      │    │ apply            │   └───┬──────────────┬───┘
 └───────────┘    └──────────────────┘       │ always       │ optional
                                     ┌───────▼──────────┐ ┌─▼────────────────┐
                                     │EventMetricKpi    │ │TouchWindow       │
@@ -101,7 +102,8 @@ verification adapters. `Campaign` is the eleventh, deployed per campaign.
 | `AttributionRegistry`    | One live touch per`(campaign, user)` plus the full history, so a report resolves who held a wallet at each action's block             |
 | `ReputationRegistry`     | `(wallet, schemaId) => (value, updatedAt)`, and a weighted score over the fresh ones                                                  |
 | `AttestationVerifier`    | k-of-n threshold EIP-712 attestations with per-attestor nonces. Handles never touch the chain                                           |
-| `OracleCoordinator`      | Staked optimistic reporting. Carries both the aggregate path and the per-user path that credits promoters                               |
+| `OracleCoordinator`      | Allowlisted optimistic reporting with a dispute window; carries aggregate and per-user reports                                          |
+| `BoneyCreRouter`         | One shared router per deployment; authenticates CRE reports and fans them out to campaigns              |
 | `GuardedKpiVerifier`     | What a campaign's`KpiSpec.verifier` should point at. Composes Boney's reading with an optional second verifier                        |
 | `EventMetricKpiVerifier` | Boney's canonical reading, fed by an independent relayer scanning real event logs                                                       |
 | `TouchWindowVerifier`    | Stateless attribution-timing lens, for off-chain window reads.**Not** to be wired as a KPI's verifier                             |
@@ -136,8 +138,8 @@ A `Custom` KPI must name one (`CustomKpiNeedsVerifier`).
 Tiers are per-promoter, per-KPI, with strictly ascending thresholds, at most `MAX_TIERS_PER_KPI = 32` each.
 
 **Reports are cumulative.** `reportUserAction(kpiIndex, user, newTotal, evidence)` states a user's
-running total, not a delta, so a replayed or duplicated report is a no-op: the campaign credits
-`newTotal - alreadyCredited` and returns early when that is zero.
+running total, not a delta: the campaign credits `newTotal - alreadyCredited` and returns early when
+that is zero. `reportUserActionsBatch` applies up to 32 of them atomically.
 
 Evidence is `Types.Action[]`
 (`{blockNumber, timestamp, amount}`) in ascending block order, bounded by `MAX_EVIDENCE_ACTIONS = 256`,
@@ -148,8 +150,7 @@ promoter.
 
 Rewards draw from one shared pool, first-come. If the pool cannot cover a crossed tier the
 campaign pays what remains and emits `PoolExhausted(shortfall)`, it never reverts, because reverting
-would let one exhausted tier block reporting for everybody. `paidOut <= rewardPool` holds by
-construction.
+would let one exhausted tier block reporting for everybody.
 
 ## Verification
 
@@ -190,9 +191,38 @@ closed: an unconfigured KPI reverts `NotConfigured(campaign, kpiIndex)` rather t
 On a gated KPI a claim is credited at the smaller of the two, so one process doing both with one key
 would make the cap a formality.
 
-> **Both must run.** The indexer alone leaves every progress bar at zero: a claim capped against an
-> unreported observed total credits nothing, and it does not revert it *succeeds* and credits nothing.
-> The relayer alone credits nothing either, because nobody is claiming.
+> **Both sides must run.** A claim against an unreported observed total succeeds but credits zero.
+> The relayer alone credits nothing because no claim has reached the campaign. The project indexer or
+> CRE supplies that claim after the relayer records the ceiling.
+
+### Automated reporting with Chainlink CRE
+
+A six-field CRE cron automates the claim side for guarded, non-aggregate KPIs. It reads finalized
+campaign and verifier state, then scans a bounded circular slice of users enumerated by
+`EventMetricKpiVerifier`. A user qualifies only when observed progress exceeds credited progress and
+one active promoter held attribution across the full unreported span.
+
+Each compatible campaign/KPI pair has an immutable `BoneyCreReceiver`, which the shipped workflow
+still targets; `BoneyCreRouter` is the shared replacement, not yet wired to a workflow. The Keystone
+forwarder delivers a versioned report with a nonce, expiry, next cursor, and optionally one
+cumulative user total. The receiver validates the forwarder, production workflow identity, target
+contracts, nonce, and expiry before calling `Campaign.reportUserAction`. A campaign revert rolls back
+the cursor and nonce; cursor-only reports advance quiet scans so later users cannot be starved by a
+fixed prefix.
+
+```text
+EventMetric relayer → EventMetricKpiVerifier
+CRE cron → signed report → Keystone forwarder → BoneyCreReceiver
+         → Campaign.reportUserAction → inline settlement
+```
+
+CRE does not replace `eth_getLogs` and cannot construct per-action evidence. The relayer must run
+first; ambiguous attribution stays with the evidence-bearing indexer. Workflow preflight rejects
+aggregate, ungated, unconfigured, and second-verifier KPIs.
+
+The Base Sepolia package is `boneyard/boneyard-cre-workflow`. Its simulation and production configs
+keep contract addresses zero until an operator supplies reviewed values. Deploying a receiver also
+authorizes it on its campaign; `setAuthorizedReporter(receiver, false)` is the rollback.
 
 ## Attribution
 
@@ -214,22 +244,13 @@ never pays gas and never transacts with Boney directly.
 
 - **`promoterId = keccak256(abi.encode(campaign, promoter))`**, namespaced by registrant, so an id from
   one campaign cannot farm attribution in another and no squatter can deny a campaign an id.
-- **LAST_TOUCH is ordered by the signed `signedAt`, not by relay order**, because relayers are
-  adversarial. A touch signed no later than the stored one reverts `TouchNotNewer`, so holding a
-  signature back and relaying it late wins nothing.
-- **The registry enforces the campaign's own bounds on chain**, not in the client: it reads the
-  campaign's `attributionWindow`, `endTime` and `status`, caps the touch at
-  `min(campaign.attributionWindow, maxTouchDuration)`, and refuses a touch for a closed campaign.
-- **Credit is resolved per action, at that action's own block.** A report carrying evidence asks who
-  held the user at each action's block and tallies oldest-first, so activity predating a touch goes to
-  whoever held the wallet at the time or to nobody, rather than to whoever holds the touch when the
-  report happens to land. A promoter who knows the reporting cadence has nothing to farm.
-- **Without evidence, an ambiguous report is refused rather than guessed.** If more than one promoter
-  held the user since the last report closed, `reportUserAction` reverts `AmbiguousAttribution`. The fix
-  is to resend it with evidence.
+- **LAST_TOUCH is ordered by the signed `signedAt`**.
+- **The registry enforces the campaign's own bounds on chain**.
+- **Credit is resolved per action, at that action's own block.**
+- **Without evidence, an ambiguous report is refused.** If more than one promoter
+  held the user since the last report closed, `reportUserAction` reverts `AmbiguousAttribution`. The fix is to resend it with evidence.
 
-A new touch redirects only *future* credit. Per-promoter credited totals are high-water marks, so
-nothing already earned can be clawed back.
+A new touch redirects only *future* credit.
 
 ## Reputation
 
@@ -239,9 +260,7 @@ signs a figure, and `AttestationVerifier` authenticates k-of-n EIP-712 bundles w
 The app calls the resulting number **BoneyScore**.
 
 `Campaign.join()` reads the score **once**, at join. A promoter whose score later decays keeps their
-membership; a gate of `0` skips the read entirely. Construction rejects a `minReputation` above
-`ReputationRegistry.maxScore()` (`UnreachableReputation`), so a campaign can never be created with a gate
-nobody could clear.
+membership; a gate of `0` skips the read entirely.
 
 Governance can add schemas and change weights, freshness windows and ceilings; attested data is never
 erased. `AttestationVerifier`'s attestor set and threshold rotate, k-of-n from day one and configured
@@ -281,20 +300,19 @@ Those are exact complements, so escrow is never reclaimable while credit is stil
 against a pool the project already emptied.
 
 The grace window exists mainly so **withheld reports can still land**: a project that stops reporting
-near the end would otherwise keep the escrow, and during the grace window anyone can push a report
-through the `OracleCoordinator`, which credits the promoter and pays out. That is also why the oracle's
-dispute window must stay well inside `CLAIM_GRACE` — a report submitted after `end()` has to clear its
-dispute window while the campaign is still reportable.
+near the end would otherwise keep the escrow. During grace, an allowlisted oracle reporter can submit
+the missing progress and anyone can apply it after the dispute window. The dispute window must stay
+well inside `CLAIM_GRACE` so a report submitted after `end()` can clear while the campaign is still
+reportable.
 
 `cancel()` is reachable only from `Pending`, since once promoters may have earned, cancellation would be
 a rug. There is no cancel-with-payouts path, no way to retire an activated campaign, and no way to
-release a claimed name — recycling one would silently repoint every link, screenshot and indexer row
+release a claimed name: recycling one would silently repoint every link, screenshot and indexer row
 that referenced the campaign it used to mean.
 
 Names are validated and normalized by `libraries/Names.sol`: printable ASCII, at most 32 bytes, then
 trimmed, inner-space-collapsed and lowercased before hashing, because uniqueness on raw bytes is defeated
-by accident — `"Aave"`, `"aave"` and `"Aave "` read as one name to a person. The claim is recorded
-*after* the campaign deploys, so a constructor revert leaves the name free rather than burning it.
+by accident — `"Aave"`, `"aave"` and `"Aave "` read as one name to a person.
 
 ## Trust and limits
 
@@ -312,16 +330,14 @@ There are no proxies and no upgrade path. `Campaign` is fully immutable after co
 
 ```bash
 forge build
-forge test                    # 447 tests across 19 suites
+forge test                    # 490 tests across 20 suites
 forge test --mc CampaignTest  # a single suite
 
 PRIVATE_KEY=0x... forge script script/DeployBoney.s.sol:DeployBoney
 ```
 
 Deploy order, encoded in `script/DeployBoney.s.sol`. Two cyclic dependencies force it, and both are
-broken with one-time setters rather than address prediction — `computeCreateAddress` fails *silently*
-whenever the deployer's nonce differs between simulation and broadcast, producing a vault whose
-registrar can never register anything.
+broken with one-time setters.
 
 ```
 1.  AttributionRegistry, AttestationVerifier, ReputationRegistry   no dependencies
@@ -333,14 +349,16 @@ registrar can never register anything.
 5.  EventMetricKpiVerifier, GuardedKpiVerifier, TouchWindowVerifier
 ```
 
-The verification layer sits outside the graph on purpose: all three are configured **per KPI after a
-campaign exists**, so one deployment of each serves every campaign.
+The verification layer sits outside the graph on purpose: all three are configured **per KPI after a campaign exists**, so one deployment of each serves every campaign.
 
 `DeployBoney` points every `owner`/`admin`/`governor` at the deployer and takes two overrides from the
 environment: `BONEY_INITIAL_ATTESTOR` (default `DEV_ATTESTOR`) and `BONEY_KPI_REPORTER` (default the
-deployer). The second is the one that matters operationally — leaving it at the default makes the relayer
-key and the project key the same account, which is exactly what the independence of the cap is meant to
-prevent.
+deployer). The second controls who may write observed EventMetric totals. Set it to a separate relayer
+account to keep the ceiling independent from the project claim key.
+
+`OracleCoordinator` starts with an empty reporter allowlist. Its owner adds each approved reporter with
+`addReporter(address)` and may remove one with `removeReporter(address)` without changing pending or
+applied reports. CRE receivers are authorized separately, per campaign, by that campaign's project.
 
 ## Running the stack
 
@@ -360,43 +378,57 @@ pnpm abis               # regenerate lib/abis from forge artifacts
 pnpm deployments 84532  # regenerate lib/deployments.ts from the broadcast receipt
 pnpm index              # the project's indexer     → Campaign.reportUserAction
 pnpm relay              # Boney's KPI relayer       → EventMetricKpiVerifier.reportBatch
+pnpm relay -- --mode shadow --graph-url "$NEXT_PUBLIC_SUBGRAPH_URL" --campaign 0x… --kpi 0
+pnpm relay -- --mode subgraph --graph-url "$NEXT_PUBLIC_SUBGRAPH_URL" --campaign 0x… --kpi 0
 pnpm report-window      # derive a campaign's reporting block bounds
+
+cd ../boneyard/boneyard-cre-workflow
+bun install --frozen-lockfile
+bun test                # CRE workflow tests
+bun run typecheck       # CRE package TypeScript check
+bunx cre-compile main.ts
+```
+
+From `boneyard/`, after filling `config.simulation.json` with reviewed local-fork addresses:
+
+```bash
+cre workflow simulate boneyard-cre-workflow --target=simulation-settings
 ```
 
 `pnpm dev:up` exists because the order matters: it health-checks the reputation stub, starts `next dev`,
 runs one relay pass **synchronously**, and only then runs the indexer.
 
-Both scanners take `--dry-run`, which needs no key and is the right first move against an unfamiliar deployment. Both are safe to run
-repeatedly — the relayer is stateless with its checkpoint on chain, and the indexer's totals are
-cumulative, so a repeated pass reports the same figure and the contract returns early.
+Both scanners take `--dry-run`. The relay defaults to `rpc`; `shadow` compares complete RPC and
+block-pinned subgraph plans while keeping RPC authoritative, and `subgraph` removes historical
+`eth_getLogs` and block-timestamp reads. Subgraph errors never trigger an in-pass fallback or checkpoint
+advance. Both processes are safe to run repeatedly — the relayer is stateless with its checkpoint on
+chain, and the indexer's totals are cumulative, so a repeated pass reports the same figure and the
+contract returns early.
 
-Two operational facts worth knowing before debugging an RPC: Base's public endpoint rejects
-`eth_getLogs` ranges wider than 2000 blocks outright, and `sepolia.base.org` 502s roughly one call in
-three — use a `publicnode` endpoint for anything sequential.
+RPC mode still obeys Base's 2,000-block public `eth_getLogs` limit. Use a publicnode endpoint for
+sequential scans; subgraph mode retains RPC only for authoritative config, finality/hash checks, current
+totals, and writes.
 
 ## Shortened durations (bscoretest)
 
 `bscoretest` exists to make manual testing fast, so the time-based constants are far shorter than the
-protocol values. **Restore the protocol values before merging to main.** Each source constant carries a
-`[bscoretest]` comment naming its protocol value.
+protocol values.
 
 | Constant                                                               | Protocol      | This branch                         |
 | ---------------------------------------------------------------------- | ------------- | ----------------------------------- |
 | `Campaign.CLAIM_GRACE`                                               | 7 days        | **20 minutes**                |
 | `DeployBoney.DISPUTE_WINDOW`                                         | 1 day         | **4 minutes**                 |
-| `DeployBoney.UNSTAKE_DELAY`                                          | 2 days        | **10 minutes**                |
-| `DeployBoney.MAX_TOUCH_DURATION`                                     | 30 days       | 30 days (unchanged — see below)    |
+| `DeployBoney.MAX_TOUCH_DURATION`                                     | 360 days      | 360 days                            |
+| `Campaign.MAX_EXTENSION_DURATION`                                    | 360 days      | 360 days                            |
 | `attributionWindow` (`SeedLocal`, `SeedGated`, `SeedEventKpi`) | 7–14 days    | 30 minutes – 1 hour                |
 | `attributionWindow` (every other seed)                               | —            | equal to each campaign's own length |
-| `ETHOS_MAX_AGE` / `REACH_MAX_AGE` (`SeedLocal`, `SeedDevRep`)  | 180 / 90 days | 180 / 90 days (unchanged)           |
+| `ETHOS_MAX_AGE` / `REACH_MAX_AGE` (`SeedLocal`, `SeedDevRep`)  | 180 / 90 days | 180 / 90 days                       |
 
-`MAX_TOUCH_DURATION` is deliberately **not** shortened. The registry applies it as
-`min(campaign.attributionWindow, maxTouchDuration)`, and it applies *silently* — a campaign whose window
-exceeds the cap still reports its own longer window from `attributionWindow()`, which is what the UI
-renders. Shortening it does not shorten what the app says; it only makes the app disagree with the chain,
-which is a worse failure than a long window. `script/SeedExpiry.s.sol` asserts the deployed cap covers
-its longest campaign before spending gas, so a registry deployed with a short cap fails that seed rather
-than truncating it.
+`MAX_TOUCH_DURATION` and `MAX_EXTENSION_DURATION` are not shortened. The registry applies the touch
+cap as `min(campaign.attributionWindow, maxTouchDuration)`, while a campaign extension is capped at
+360 days and half its initial duration.
+
+ `SeedExpiry`asserts that the deployed touch cap covers its longest campaign before spending gas.
 
 Campaign `endTime` is a per-fixture choice rather than a constant. `SeedLocal`, `SeedGated` and
 `SeedEventKpi` run 30–60 days out, putting expiry out of reach of a testing session; the Base Sepolia
@@ -411,13 +443,17 @@ src/
   IBoney.sol
   campaign/
     Campaign.sol                  one campaign: config, KPIs, tiers, progress, settlement
+    CampaignDeployer.sol          registry-bound Campaign creation helper
     CampaignRegistry.sol          factory + directory + the vault's registrar
   escrow/EscrowVault.sol          custody only
   attribution/AttributionRegistry.sol
   reputation/
     ReputationRegistry.sol        weighted score from attested metrics
     AttestationVerifier.sol       k-of-n EIP-712 attestations
-  oracle/OracleCoordinator.sol    staked optimistic reporting
+  oracle/OracleCoordinator.sol    allowlisted optimistic reporting
+  automation/
+    BoneyCreReceiver.sol           authenticated CRE report receiver
+    BoneyCreRouter.sol             shared CRE report router
   verifiers/
     GuardedKpiVerifier.sol        the one a campaign points at
     EventMetricKpiVerifier.sol    Boney's independently-fed reading
@@ -429,11 +465,13 @@ src/
   mocks/OpenMintNFT.sol           the one KPI source the demo fixture deploys itself
 
 script/                           DeployBoney, the seed fixtures, promoter.sh
-test/                             19 Foundry suites
+test/                             20 Foundry suites
 web/
   src/app/                        Next 16 routes, including /docs and the /r referral landing
   src/lib/                        every rule that can be wrong, with a colocated .test.ts
   scripts/                        indexer.ts, relay-kpi-metric.ts, dev-up.sh, generators
+boneyard/
+  boneyard-cre-workflow/          Chainlink CRE workflow, configs, and tests
 ```
 
 ## License

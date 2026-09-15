@@ -1,4 +1,4 @@
-/** Throwaway: which tiers settled, and what each promoter has actually been paid. */
+/** Lists settled tiers and promoter payments. */
 import {createPublicClient, http, getAddress, formatUnits} from "viem";
 import {baseSepolia} from "viem/chains";
 import {CampaignAbi} from "../src/lib/abis/Campaign";
@@ -49,7 +49,7 @@ for (const p of PROMOTERS) {
   for (const l of lines) console.log(l);
 }
 const [pool, remaining, paid] = await Promise.all([
-  read<any>("config").then((c) => c.rewardPool as bigint),
+  read<{rewardPool: bigint}>("config").then((c) => c.rewardPool),
   read<bigint>("remainingPool"), read<bigint>("paidOut"),
 ]);
 console.log(`\npool ${formatUnits(pool, dec)} ${sym}  paidOut ${formatUnits(paid, dec)}  remaining ${formatUnits(remaining, dec)}`);

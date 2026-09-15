@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {EventMetricKpiVerifier} from "../src/verifiers/EventMetricKpiVerifier.sol";
 import {IEventMetricKpiVerifier} from "../src/interfaces/IEventMetricKpiVerifier.sol";
+import {IKpiAutomation} from "../src/interfaces/IKpiAutomation.sol";
 
 /// @title EventMetricKpiVerifierTest
 /// @notice Unit-tests the verifier in isolation. It holds no campaign references and `verify` reads
@@ -82,6 +83,16 @@ contract EventMetricKpiVerifierTest is Test {
         assertEq(cfg.windowEndBlock, WINDOW_END);
     }
 
+    function test_AutomationCapability_requiresConfiguration() public view {
+        (IKpiAutomation.AutomationMode mode, address adapter) = verifier.automationCapability(campaign, KPI);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.USER_EVIDENCE_FREE));
+        assertEq(adapter, address(verifier));
+
+        (mode, adapter) = verifier.automationCapability(campaign, KPI + 1);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.UNSUPPORTED));
+        assertEq(adapter, address(0));
+    }
+
     function test_SetKpiConfig_onlyOwner() public {
         vm.prank(reporter);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, reporter));
@@ -120,6 +131,8 @@ contract EventMetricKpiVerifierTest is Test {
 
         assertEq(verifier.verifiedTotalOf(campaign, KPI, alice), 42);
         assertEq(verifier.checkpointOf(campaign, KPI), WINDOW_END);
+        assertEq(verifier.observedUserCount(campaign, KPI), 1);
+        assertEq(verifier.observedUserAt(campaign, KPI, 0), alice);
 
         // And the relayer can now proceed past the old bound.
         vm.prank(reporter);
@@ -228,6 +241,107 @@ contract EventMetricKpiVerifierTest is Test {
     function test_ReportVerifiedTotal_onlyReporter() public {
         vm.expectRevert(abi.encodeWithSelector(IEventMetricKpiVerifier.NotReporter.selector, address(this)));
         verifier.reportVerifiedTotal(campaign, KPI, alice, 1);
+    }
+
+    // ── observed users ─────────────────────────────────────────────
+
+    function test_ObservedUsers_batchPreservesFirstSeenOrder() public {
+        address[] memory users = new address[](2);
+        uint256[] memory totals = new uint256[](2);
+        (users[0], users[1]) = (bob, alice);
+        (totals[0], totals[1]) = (7, 9);
+
+        vm.prank(reporter);
+        verifier.reportBatch(campaign, KPI, users, totals, 500);
+
+        assertEq(verifier.observedUserCount(campaign, KPI), 2);
+        assertEq(verifier.observedUserAt(campaign, KPI, 0), bob);
+        assertEq(verifier.observedUserAt(campaign, KPI, 1), alice);
+    }
+
+    function test_ObservedUsers_suppressesDuplicatesAcrossReportPaths() public {
+        _report(alice, 7, 400);
+        _report(alice, 9, 500);
+        vm.prank(reporter);
+        verifier.reportVerifiedTotal(campaign, KPI, alice, 11);
+
+        assertEq(verifier.observedUserCount(campaign, KPI), 1);
+        assertEq(verifier.observedUserAt(campaign, KPI, 0), alice);
+    }
+
+    function test_ObservedUsers_manualReportAddsUser() public {
+        vm.prank(reporter);
+        verifier.reportVerifiedTotal(campaign, KPI, alice, 33);
+
+        assertEq(verifier.observedUserCount(campaign, KPI), 1);
+        assertEq(verifier.observedUserAt(campaign, KPI, 0), alice);
+    }
+
+    function test_ObservedUsers_areScopedByCampaignAndKpi() public {
+        address otherCampaign = address(0xF00D);
+        vm.prank(owner);
+        verifier.setKpiConfig(
+            otherCampaign,
+            KPI,
+            address(0xDEAD),
+            SIG,
+            0,
+            IEventMetricKpiVerifier.Aggregation.SUM,
+            1,
+            1,
+            WINDOW_START,
+            WINDOW_END
+        );
+        vm.prank(owner);
+        verifier.setKpiConfig(
+            campaign,
+            1,
+            address(0xDEAD),
+            SIG,
+            0,
+            IEventMetricKpiVerifier.Aggregation.SUM,
+            1,
+            1,
+            WINDOW_START,
+            WINDOW_END
+        );
+
+        _report(alice, 7, 400);
+        vm.startPrank(reporter);
+        verifier.reportVerifiedTotal(otherCampaign, KPI, bob, 8);
+        verifier.reportVerifiedTotal(campaign, 1, bob, 9);
+        vm.stopPrank();
+
+        assertEq(verifier.observedUserAt(campaign, KPI, 0), alice);
+        assertEq(verifier.observedUserAt(otherCampaign, KPI, 0), bob);
+        assertEq(verifier.observedUserAt(campaign, 1, 0), bob);
+    }
+
+    function test_ObservedUsers_epochInvalidationStartsFresh() public {
+        _report(alice, 7, 400);
+        vm.prank(owner);
+        verifier.setKpiConfig(
+            campaign,
+            KPI,
+            address(0xBEEF),
+            SIG,
+            0,
+            IEventMetricKpiVerifier.Aggregation.SUM,
+            1,
+            1,
+            WINDOW_START,
+            WINDOW_END
+        );
+
+        assertEq(verifier.observedUserCount(campaign, KPI), 0);
+        vm.prank(reporter);
+        verifier.reportVerifiedTotal(campaign, KPI, bob, 9);
+        assertEq(verifier.observedUserAt(campaign, KPI, 0), bob);
+    }
+
+    function test_ObservedUserAt_revertsOutOfBounds() public {
+        vm.expectRevert();
+        verifier.observedUserAt(campaign, KPI, 0);
     }
 
     // ── verification ─────────────────────────────────────────────

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IKpiAutomation as IKpiAutomationRoute} from "../interfaces/IKpiAutomation.sol";
 import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {IGuardedKpiVerifier} from "../interfaces/IGuardedKpiVerifier.sol";
 
@@ -19,7 +20,7 @@ import {IGuardedKpiVerifier} from "../interfaces/IGuardedKpiVerifier.sol";
 ///      `TouchWindowVerifier` is the motivating case.
 ///
 ///      Either mode can only shrink a claim.
-contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
+contract GuardedKpiVerifier is IGuardedKpiVerifier, IKpiAutomationRoute, Ownable {
     /// @notice How one KPI's second opinion is sourced and combined.
     /// @param projectVerifier The second `IKpiVerifier`. `address(0)` trusts Boney alone, while
     ///        keeping the KPI routable through here so it can gain a second verifier later.
@@ -108,6 +109,29 @@ contract GuardedKpiVerifier is IGuardedKpiVerifier, Ownable {
 
         // Agreement confirmed; Boney's value stays canonical.
         return boneyValue;
+    }
+
+    /// @inheritdoc IKpiAutomationRoute
+    function automationCapability(address campaign, uint256 kpiIndex)
+        external
+        view
+        returns (IKpiAutomationRoute.AutomationMode mode, address observationAdapter)
+    {
+        GuardConfig memory cfg = guardConfigs[_key(campaign, kpiIndex)];
+        if (!cfg.configured) return (IKpiAutomationRoute.AutomationMode.UNSUPPORTED, address(0));
+        if (cfg.projectVerifier == address(0)) {
+            return (IKpiAutomationRoute.AutomationMode.USER_EVIDENCE_FREE, boneyVerifier);
+        }
+
+        try IKpiAutomationRoute(cfg.projectVerifier).automationCapability(campaign, kpiIndex) returns (
+            IKpiAutomationRoute.AutomationMode projectMode, address
+        ) {
+            if (
+                projectMode == IKpiAutomationRoute.AutomationMode.USER_EVIDENCE_FREE
+                    || projectMode == IKpiAutomationRoute.AutomationMode.USER_ACTIONS
+            ) return (projectMode, boneyVerifier);
+        } catch {}
+        return (IKpiAutomationRoute.AutomationMode.UNSUPPORTED, address(0));
     }
 
     /// @notice A KPI's guard config, addressed directly rather than by hashed key.

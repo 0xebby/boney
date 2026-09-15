@@ -28,6 +28,19 @@ export const AttributionRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_TOUCH_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "TOUCH_TYPEHASH",
     "inputs": [],
     "outputs": [
@@ -610,6 +623,11 @@ export const AttributionRegistryAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidPromoterId",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidShortString",
     "inputs": []
   },
@@ -672,6 +690,22 @@ export const AttributionRegistryAbi = [
       },
       {
         "name": "expiresAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TouchDurationTooLong",
+    "inputs": [
+      {
+        "name": "maximum",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "provided",
         "type": "uint64",
         "internalType": "uint64"
       }
@@ -744,11 +778,6 @@ export const AttributionRegistryAbi = [
   {
     "type": "error",
     "name": "ZeroAddress",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidPromoterId",
     "inputs": []
   },
   {

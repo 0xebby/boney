@@ -1,4 +1,4 @@
-import {projectName} from "./projects";
+import {campaignName} from "./campaignName";
 import type {CampaignStatus, CampaignView} from "./types";
 
 /**
@@ -50,7 +50,7 @@ export function isJoinable(
  * reasoning above does not apply to it: "aave" is not a prefix of every campaign the way "2" is.
  * Without this the placeholder's promise to search "projects" only held for people who knew the
  * project's address, which is nobody scanning a marketplace. Note names are display-layer data
- * (see `lib/projects`) — a campaign with no name simply never matches by name.
+ * (see `lib/campaignName`) — a campaign with no name simply never matches by name.
  */
 function matchesSearch(view: CampaignView, needle: string): boolean {
   const q = needle.trim().toLowerCase();
@@ -58,7 +58,7 @@ function matchesSearch(view: CampaignView, needle: string): boolean {
 
   if (/^\d+$/.test(q)) return view.campaignId.toString() === q;
 
-  if (projectName(view).toLowerCase().includes(q)) return true;
+  if (campaignName(view).toLowerCase().includes(q)) return true;
 
   const looksLikeAddress = q.startsWith("0x") || /^[0-9a-f]{4,}$/.test(q);
   if (!looksLikeAddress) return false;

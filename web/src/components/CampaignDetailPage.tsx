@@ -20,7 +20,7 @@ import {ProjectPromotersPanel} from "@/components/ProjectPromotersPanel";
 import {ReportPanel} from "@/components/ReportPanel";
 import {PromoterPanel} from "@/components/PromoterPanel";
 import {utilization, isReclaimable, reclaimAvailableIn} from "@/lib/campaign";
-import {hasProjectName, projectName} from "@/lib/projects";
+import {hasCampaignName, campaignName} from "@/lib/campaignName";
 import {viewerRole, visibleSections} from "@/lib/viewerRole";
 import {classifyTouch, type ReferredCampaign} from "@/lib/referrals";
 import {
@@ -171,8 +171,8 @@ export function CampaignDetailPage({campaignId}: {campaignId: bigint | undefined
    * The campaign's own name, with the registry index as the fallback for a campaign created directly
    * against the contracts without one.
    */
-  const title = hasProjectName(detail)
-    ? projectName({name: detail.name, project: detail.project})
+  const title = hasCampaignName(detail)
+    ? campaignName({name: detail.name, project: detail.project})
     : `Campaign #${campaignId.toString()}`;
 
   return (

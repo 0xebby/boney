@@ -2,8 +2,9 @@
 pragma solidity ^0.8.30;
 
 import {ICampaignRegistry} from "../interfaces/ICampaignRegistry.sol";
+import {ICampaignDeployer} from "../interfaces/ICampaignDeployer.sol";
 import {IEscrowVault} from "../interfaces/IEscrowVault.sol";
-import {Campaign} from "./Campaign.sol";
+import {CampaignDeployer} from "./CampaignDeployer.sol";
 import {Types} from "../libraries/Types.sol";
 import {Names} from "../libraries/Names.sol";
 
@@ -20,6 +21,10 @@ contract CampaignRegistry is ICampaignRegistry {
     address public immutable attributionRegistry;
     /// @inheritdoc ICampaignRegistry
     address public immutable oracleCoordinator;
+    /// @inheritdoc ICampaignRegistry
+    address public immutable automatedReporter;
+    /// @inheritdoc ICampaignRegistry
+    address public immutable campaignDeployer;
 
     /// @dev Every campaign ever deployed, indexed by campaign id.
     address[] private _campaigns;
@@ -38,21 +43,35 @@ contract CampaignRegistry is ICampaignRegistry {
     /// @param reputationRegistry_ Registry backing reputation lookups.
     /// @param attributionRegistry_ Registry storing attribution touches.
     /// @param oracleCoordinator_ Coordinator routing oracle reports.
+    /// @param automatedReporter_ Protocol reporter authorized by every campaign.
     constructor(
         address escrowVault_,
         address reputationRegistry_,
         address attributionRegistry_,
-        address oracleCoordinator_
+        address oracleCoordinator_,
+        address automatedReporter_
     ) {
         if (
             escrowVault_ == address(0) || reputationRegistry_ == address(0)
                 || attributionRegistry_ == address(0) || oracleCoordinator_ == address(0)
+                || automatedReporter_ == address(0)
         ) revert ZeroAddress();
 
         escrowVault = escrowVault_;
         reputationRegistry = reputationRegistry_;
         attributionRegistry = attributionRegistry_;
         oracleCoordinator = oracleCoordinator_;
+        automatedReporter = automatedReporter_;
+        campaignDeployer = address(
+            new CampaignDeployer(
+                address(this),
+                escrowVault_,
+                attributionRegistry_,
+                reputationRegistry_,
+                oracleCoordinator_,
+                automatedReporter_
+            )
+        );
     }
 
     /// @inheritdoc ICampaignRegistry
@@ -69,11 +88,7 @@ contract CampaignRegistry is ICampaignRegistry {
         address holder = campaignByName[nameKey];
         if (holder != address(0)) revert NameTaken(cfg.name, holder);
 
-        campaign = address(
-            new Campaign(
-                cfg, kpis, tiers, escrowVault, attributionRegistry, reputationRegistry, oracleCoordinator
-            )
-        );
+        campaign = ICampaignDeployer(campaignDeployer).deployCampaign(cfg, kpis, tiers);
 
         campaignId = _campaigns.length;
         _campaigns.push(campaign);

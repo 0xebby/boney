@@ -94,7 +94,9 @@ contract PostEndTouchTest is Test {
         attestation = new AttestationVerifier(admin, admin);
         reputation = new ReputationRegistry(admin, address(attestation));
         vault = new EscrowVault(address(this));
-        registry = new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
+        registry = new CampaignRegistry(
+            address(vault), address(reputation), address(attribution), oracle, address(this)
+        );
         vault.setRegistrar(address(registry));
 
         campaign = _createCampaign("Post End Touch");

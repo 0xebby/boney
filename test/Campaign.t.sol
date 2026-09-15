@@ -66,6 +66,7 @@ contract CampaignTest is Test {
     address internal admin = address(0xA11CE);
     address internal project = address(0xC0DE);
     address internal oracle = address(0x0BAC);
+    address internal automatedReporter = address(0xA070);
     address internal kol = address(0xC01);
     address internal kol2 = address(0xC02);
     address internal outsider = address(0xBAD);
@@ -92,7 +93,9 @@ contract CampaignTest is Test {
         reputation = new ReputationRegistry(admin, address(verifier));
 
         vault = new EscrowVault(address(this));
-        registry = new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
+        registry = new CampaignRegistry(
+            address(vault), address(reputation), address(attribution), oracle, automatedReporter
+        );
         vault.setRegistrar(address(registry));
 
         campaign = _createCampaign(0);
@@ -237,6 +240,17 @@ contract CampaignTest is Test {
         campaign.extend(maximum + 1);
     }
 
+    function test_Extend_capsLongInitialDurationAt360Days() public {
+        Types.CampaignConfig memory cfg = _defaultConfig(0);
+        cfg.endTime = cfg.startTime + 800 days;
+
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(cfg, _defaultKpis(), _defaultTiers());
+        Campaign longCampaign = Campaign(addr);
+
+        assertEq(longCampaign.maximumEndTime(), cfg.endTime + 360 days);
+    }
+
     function test_Extend_rejectsEndedCampaign() public {
         _activate(campaign);
         vm.prank(project);
@@ -325,7 +339,9 @@ contract CampaignTest is Test {
         token.mint(project, 1_500 ether);
         vm.startPrank(project);
         token.approve(address(depleted), 1_500 ether);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.ShortfallUnfunded.selector, 1_500 ether, 2_000 ether));
+        vm.expectRevert(
+            abi.encodeWithSelector(ICampaign.ShortfallUnfunded.selector, 1_500 ether, 2_000 ether)
+        );
         depleted.topUp(1_500 ether);
         vm.stopPrank();
     }
@@ -669,11 +685,7 @@ contract CampaignTest is Test {
         campaign.reportUserAction(0, user, 5, "");
     }
 
-    /// @dev An expired touch reverts the whole report rather than skipping the user, so the
-    ///      activity is not burned — it is merely unbanked. A fresh touch from the same promoter makes
-    ///      the same cumulative report land, and because `_userCredited` never advanced, the full total
-    ///      is still owed.
-    function test_Report_recoverableAfterAttributionExpires() public {
+    function test_Report_retouchAfterExpiryRequiresEvidence() public {
         _activate(campaign);
         bytes32 id1 = _join(campaign, kol);
         _join(campaign, kol2);
@@ -685,12 +697,13 @@ contract CampaignTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, 5, "");
 
-        // The same KOL re-engages the user and the same report now succeeds.
         _touch(campaign, userPk, user, id1, 7 days);
-        _report(campaign, project, user, 5);
+        vm.prank(project);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        campaign.reportUserAction(0, user, 5, "");
 
-        assertEq(campaign.progressOf(kol, 0), 5, "the lapse only deferred it");
-        assertEq(campaign.progressOf(kol2, 0), 0);
+        assertEq(campaign.progressOf(kol, 0), 0);
+        assertEq(campaign.userCreditedOf(user, 0), 0);
     }
 
     /// @dev A lapse no longer hands everything to whoever the user signs for next: the span the report
@@ -709,6 +722,228 @@ contract CampaignTest is Test {
         campaign.reportUserAction(0, user, 5, "");
 
         assertEq(campaign.progressOf(kol2, 0), 0, "kol's backlog is not kol2's to take");
+    }
+
+    // ── authorized reporters ───────────────────────────────────────
+
+    function test_AutomatedReporterMaySubmitBatch() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+        _touch(campaign, user2Pk, user2, id, 7 days);
+
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](2);
+        reports[0] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 5, evidence: ""});
+        reports[1] = ICampaign.UserActionReport({kpiIndex: 0, user: user2, newTotal: 8, evidence: ""});
+
+        vm.prank(automatedReporter);
+        campaign.reportUserActionsBatch(reports);
+
+        assertEq(campaign.progressOf(kol, 0), 13);
+        assertEq(campaign.userCreditedOf(user, 0), 5);
+        assertEq(campaign.userCreditedOf(user2, 0), 8);
+    }
+
+    function test_ReportBatch_acceptsMaximumLengthAndEqualDuplicates() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        uint256 max = campaign.MAX_REPORTS_PER_BATCH();
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](max);
+        for (uint256 i; i < max; ++i) {
+            reports[i] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 5, evidence: ""});
+        }
+
+        vm.prank(automatedReporter);
+        campaign.reportUserActionsBatch(reports);
+
+        assertEq(campaign.progressOf(kol, 0), 5);
+        assertEq(campaign.userCreditedOf(user, 0), 5);
+        assertEq(campaign.totalProgress(0), 5);
+    }
+
+    function test_ReportBatch_appliesIncreasingDuplicatesInOrder() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](3);
+        reports[0] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 5, evidence: ""});
+        reports[1] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 8, evidence: ""});
+        reports[2] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 13, evidence: ""});
+
+        vm.prank(automatedReporter);
+        campaign.reportUserActionsBatch(reports);
+
+        assertEq(campaign.progressOf(kol, 0), 13);
+        assertEq(campaign.userCreditedOf(user, 0), 13);
+        assertEq(campaign.totalProgress(0), 13);
+    }
+
+    function test_ReportBatch_revertsDecreasingDuplicateAtomically() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](2);
+        reports[0] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 50, evidence: ""});
+        reports[1] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 8, evidence: ""});
+
+        vm.prank(automatedReporter);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NonMonotonic.selector, 50, 8));
+        campaign.reportUserActionsBatch(reports);
+
+        assertEq(campaign.progressOf(kol, 0), 0);
+        assertEq(campaign.userCreditedOf(user, 0), 0);
+        assertEq(campaign.totalProgress(0), 0);
+        assertEq(campaign.paidOut(), 0);
+        assertEq(campaign.settledTiersOf(kol, 0), 0);
+        assertEq(campaign.lastReportBlockOf(user, 0), 0);
+        assertEq(token.balanceOf(kol), 0);
+    }
+
+    function test_ReportBatch_supportsMixedKpisAndEvidence() public {
+        Campaign mixed = _createTwoKpiCampaign();
+        _activate(mixed);
+        bytes32 id = _join(mixed, kol);
+        _touch(mixed, userPk, user, id, 7 days);
+        _touch(mixed, user2Pk, user2, id, 7 days);
+        vm.roll(block.number + 1);
+
+        Types.Action[] memory actions = new Types.Action[](1);
+        actions[0] =
+            Types.Action({blockNumber: uint64(block.number), timestamp: uint64(block.timestamp), amount: 7});
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](2);
+        reports[0] = ICampaign.UserActionReport({kpiIndex: 0, user: user, newTotal: 5, evidence: ""});
+        reports[1] =
+            ICampaign.UserActionReport({kpiIndex: 1, user: user2, newTotal: 7, evidence: abi.encode(actions)});
+
+        vm.prank(automatedReporter);
+        mixed.reportUserActionsBatch(reports);
+
+        assertEq(mixed.progressOf(kol, 0), 5);
+        assertEq(mixed.progressOf(kol, 1), 7);
+        assertEq(mixed.userCreditedOf(user2, 1), 7);
+    }
+
+    function test_ReportBatch_rejectsEmptyBatch() public {
+        _activate(campaign);
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](0);
+
+        vm.prank(automatedReporter);
+        vm.expectRevert(ICampaign.EmptyReportBatch.selector);
+        campaign.reportUserActionsBatch(reports);
+    }
+
+    function test_ReportBatch_rejectsTooManyReports() public {
+        _activate(campaign);
+        uint256 max = campaign.MAX_REPORTS_PER_BATCH();
+        ICampaign.UserActionReport[] memory reports = new ICampaign.UserActionReport[](max + 1);
+
+        vm.prank(automatedReporter);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.TooManyReports.selector, max + 1, max));
+        campaign.reportUserActionsBatch(reports);
+    }
+
+    function test_SetAuthorizedReporter_grantsAndRevokes() public {
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+        assertTrue(campaign.authorizedReporters(outsider));
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, false);
+        assertFalse(campaign.authorizedReporters(outsider));
+    }
+
+    function test_SetAuthorizedReporter_onlyProject() public {
+        vm.prank(outsider);
+        vm.expectRevert(ICampaign.NotProject.selector);
+        campaign.setAuthorizedReporter(outsider, true);
+    }
+
+    function test_SetAuthorizedReporter_rejectsZeroAddress() public {
+        vm.prank(project);
+        vm.expectRevert(ICampaign.InvalidReporter.selector);
+        campaign.setAuthorizedReporter(address(0), true);
+    }
+
+    function test_AuthorizedReporterMayReportAndReplayIsNoop() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        _report(campaign, outsider, user, 5);
+        _report(campaign, outsider, user, 5);
+
+        assertEq(campaign.progressOf(kol, 0), 5);
+        assertEq(campaign.userCreditedOf(user, 0), 5);
+    }
+
+    function test_RevokedReporterCannotReport() public {
+        _activate(campaign);
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.startPrank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+        campaign.setAuthorizedReporter(outsider, false);
+        vm.stopPrank();
+
+        vm.prank(outsider);
+        vm.expectRevert(ICampaign.NotReporter.selector);
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassLifecycle() public {
+        bytes32 id = _join(campaign, kol);
+        _touch(campaign, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Pending));
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassAttribution() public {
+        _activate(campaign);
+        vm.prank(project);
+        campaign.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
+        campaign.reportUserAction(0, user, 5, "");
+    }
+
+    function test_AuthorizedReporterCannotBypassVerifier() public {
+        HalvingVerifier half = new HalvingVerifier();
+        Campaign verified = _createWithVerifier(address(half));
+        _activate(verified);
+        bytes32 id = _join(verified, kol);
+        _touch(verified, userPk, user, id, 7 days);
+
+        vm.prank(project);
+        verified.setAuthorizedReporter(outsider, true);
+        _report(verified, outsider, user, 10);
+
+        assertEq(verified.progressOf(kol, 0), 5);
+    }
+
+    function test_AuthorizedReporterCannotReportAggregateKpi() public {
+        Campaign aggregate = _createAggregateCampaign();
+        _activate(aggregate);
+
+        vm.prank(project);
+        aggregate.setAuthorizedReporter(outsider, true);
+
+        vm.prank(outsider);
+        vm.expectRevert(abi.encodeWithSelector(ICampaign.AggregateKpi.selector, 0));
+        aggregate.reportUserAction(0, user, 5, "");
     }
 
     function test_Report_onlyReporters() public {
@@ -982,6 +1217,31 @@ contract CampaignTest is Test {
 
         vm.prank(project);
         (, address addr) = registry.createCampaign(_defaultConfig(0), kpis, _defaultTiers());
+        return Campaign(addr);
+    }
+
+    function _createTwoKpiCampaign() internal returns (Campaign) {
+        Types.KpiSpec[] memory kpis = new Types.KpiSpec[](2);
+        kpis[0] = Types.KpiSpec({
+            kind: Types.KpiKind.Mint,
+            verifier: address(0),
+            target: 100,
+            aggregate: false,
+            params: ""
+        });
+        kpis[1] = Types.KpiSpec({
+            kind: Types.KpiKind.Swap,
+            verifier: address(0),
+            target: 100,
+            aggregate: false,
+            params: ""
+        });
+        Types.RewardTier[][] memory tiers = new Types.RewardTier[][](2);
+        tiers[0] = _defaultTiers()[0];
+        tiers[1] = _defaultTiers()[0];
+
+        vm.prank(project);
+        (, address addr) = registry.createCampaign(_defaultConfig(0), kpis, tiers);
         return Campaign(addr);
     }
 

@@ -1,7 +1,4 @@
-/**
- * Throwaway: dumps everything a verification-flow write-up needs for two campaigns — the gated one
- * and an ungated one — read off the live Base Sepolia fixture rather than from docs.
- */
+/** Dumps verification-flow state for gated and ungated campaigns. */
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
 import {CampaignAbi} from "../src/lib/abis/Campaign";

@@ -1,28 +1,8 @@
 /**
- * Drives the event-source probe through the real create form, on Base Sepolia.
- *
- * What this proves that a unit test cannot: the probe's findings actually reach the DOM. The stub
- * tests in `kpiSource.test.ts` prove `probeEventSource` classifies a fake client's answers
- * correctly; they say nothing about whether `useEventSourceProbe` is wired to the form, whether the
- * debounce lets the query fire at all, or whether the findings render. A hook that resolves
- * correctly and renders nothing looks identical in a passing test suite.
- *
- * Base Sepolia rather than anvil because two of the four cases need a *live* contract: WETH at
- * `0x4200…0006` is deployed and actively emitting, which is the only way to reach the green
- * confirmation path.
- *
- * Cases driven:
- *   1. WETH + Deposit(address,uint256)  -> ok    (deployed, emitting)
- *   2. WETH + Transfer(address,uint256) -> warn  (deployed, wrong signature, no logs)
- *   3. EOA address                      -> error (no code)
- *   4. zero address                     -> error (preset placeholder left unfilled)
+ * Drives event-source probe findings through the Base Sepolia create form.
  *
  * Usage: node scripts/drive-event-probe.mjs
- * Requires `pnpm dev` on :3000. No wallet writes -- the probe is read-only -- but the form is gated
- * behind `isConnected`, so a provider still has to be injected.
- *
- * On WSL2 / minimal Linux, Playwright's chromium may need system libs in a local prefix:
- *   LD_LIBRARY_PATH=/tmp/pwlibs/extracted/usr/lib/x86_64-linux-gnu node scripts/drive-event-probe.mjs
+ * Requires the app on :3000 and an injected read-only wallet to mount the form.
  */
 import {chromium} from "playwright";
 import {createPublicClient, http, keccak256, toHex} from "viem";
@@ -34,7 +14,7 @@ const RPC = process.env.BASE_SEPOLIA_RPC ?? "https://base-sepolia-rpc.publicnode
 const WETH = "0x4200000000000000000000000000000000000006";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
-/** An address with a balance but no code -- the "looks valid, emits nothing" case. */
+/** Address with a balance and no deployed code. */
 const EOA = "0x489CA0f9df3d91AB3A1605c9f9729460ca7e319D";
 
 const rootPk = readFileSync(new URL("../../.env", import.meta.url), "utf8")
@@ -64,8 +44,7 @@ const page = await browser.newPage({viewport: {width: 1440, height: 1600}});
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(e.message));
 
-// Read-only provider: the probe never signs, but `CreateCampaignPage` returns an
-// "Connect a wallet" card unless wagmi reports a connection, so the form would never mount.
+// The read-only provider mounts the connected create form.
 await page.exposeFunction("__walletRequest", async ({method, params = []}) => {
   switch (method) {
     case "eth_requestAccounts":
@@ -100,8 +79,7 @@ await page.goto("http://localhost:3000/create", {
 await page.getByRole("button", {name: /Connect wallet/i}).click().catch(() => {});
 await page.waitForTimeout(2_500);
 
-// The event-source fields are collapsed until the toggle is on -- most KPIs have no source, so
-// showing five inputs by default would imply they are required.
+// Event-source fields remain collapsed until enabled.
 const toggle = page.getByLabel(/Credit progress from on-chain events/i).first();
 await toggle.waitFor({timeout: 30_000});
 check("create form mounted with the event-source toggle", true);
@@ -114,30 +92,30 @@ const signatureField = page.getByLabel("Event signature").first();
 check("toggle reveals the source fields", await sourceField.isVisible());
 
 /**
- * Types a source/signature pair and waits for the probe to settle.
- *
- * The hook debounces and then makes two round trips to a public RPC, so this polls for a rendered
- * finding rather than sleeping a fixed interval -- a fixed sleep would either be flaky on a slow
- * endpoint or waste seconds on a fast one.
+ * Runs one source/signature probe case.
+ * @param {string} source Source contract address.
+ * @param {string} signature Event signature.
+ * @param {{expect: string, matching: RegExp}} expected Expected result.
+ * @returns {Promise<void>}
  */
 async function probe(source, signature, {expect, matching}) {
-  // Set values via evaluate so the hook fires once, not once per keystroke. fill() types character
-  // by character, which resets the 600ms debounce on every pulse and stacks round trips behind a
-  // public RPC that is already rate-limited.
+  // Dispatch one input event per field update.
   await sourceField.evaluate((el, val) => {
-    const input = el as HTMLInputElement;
+    const input = el;
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype, "value"
-    )!.set!;
+      window.HTMLInputElement.prototype,
+      "value",
+    ).set;
     nativeInputValueSetter.call(input, val);
     input.dispatchEvent(new Event("input", {bubbles: true}));
     input.dispatchEvent(new Event("change", {bubbles: true}));
   }, source);
   await signatureField.evaluate((el, val) => {
-    const input = el as HTMLInputElement;
+    const input = el;
     const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype, "value"
-    )!.set!;
+      window.HTMLInputElement.prototype,
+      "value",
+    ).set;
     nativeInputValueSetter.call(input, val);
     input.dispatchEvent(new Event("input", {bubbles: true}));
     input.dispatchEvent(new Event("change", {bubbles: true}));
@@ -164,28 +142,25 @@ async function probe(source, signature, {expect, matching}) {
 
 console.log("\nprobe cases:");
 
-// 1. Live contract, live event -- the only case that can reach the green path.
+// Live contract and event.
 await probe(WETH, "Deposit(address,uint256)", {
   expect: "ok",
   matching: /emitting Deposit\(address,uint256\)/i,
 });
 
-// 2. Live contract, signature it does not emit. Cannot be distinguished from "idle contract",
-//    which is why this is a warning and not an error.
+// Live contract without the requested event.
 await probe(WETH, "Transfer(address,uint256)", {
   expect: "warn",
   matching: /no Transfer\(address,uint256\) in the last|idle/i,
 });
 
-// 3. A correctly-checksummed address holding no code. This is the failure the form could not
-//    catch before the probe existed.
+// Address without deployed code.
 await probe(EOA, "Deposit(address,uint256)", {
   expect: "error",
   matching: /no contract deployed/i,
 });
 
-// 4. The ERC-721 preset ships this deliberately; a project that skips the address field would
-//    otherwise deploy a KPI that credits nothing.
+// Zero-address preset.
 await probe(ZERO, "Transfer(address,address,uint256)", {
   expect: "error",
   matching: /zero address/i,
@@ -193,8 +168,7 @@ await probe(ZERO, "Transfer(address,address,uint256)", {
 
 await page.screenshot({path: "screenshots/event-probe.png", fullPage: true});
 
-// The probe is advisory: an error finding must not disable submission, because it reads the
-// *connected* chain and a campaign may legitimately name a contract deployed moments later.
+// Probe findings do not block submission.
 const submit = page.getByRole("button", {name: /Create Campaign/i}).first();
 if (await submit.count()) {
   check("an error finding does not disable submit", !(await submit.isDisabled()));

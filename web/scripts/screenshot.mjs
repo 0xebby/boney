@@ -1,15 +1,8 @@
 /**
- * Drives the app in a headless browser and screenshots it.
- *
- * `chromium-cli` is not available in this environment, so this is the documented fallback: a
- * minimal Playwright driver. It exists to answer one question a build cannot — does the page
- * actually paint the chain data, or does it render a shell while every read fails?
+ * Captures the campaign list and reports its rendered state.
  *
  * Usage: node scripts/screenshot.mjs [url] [outfile]
- *
- * Set `CHROME_PATH` when Playwright's bundled `headless_shell` cannot start. On this WSL box the
- * shell build is missing `libnspr4.so` while the full chromium build ships its own copies, so
- * point CHROME_PATH at `chrome-linux64/chrome` under the `chromium-<rev>` cache directory.
+ * Set `CHROME_PATH` when Playwright's bundled browser is unavailable.
  */
 import {chromium} from "playwright";
 import {mkdirSync} from "node:fs";
@@ -25,7 +18,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({viewport: {width: 1440, height: 900}});
 
-// Collect anything the page throws — a shell can render while every data fetch fails.
+// Capture browser errors.
 const consoleErrors = [];
 const pageErrors = [];
 page.on("console", (msg) => {
@@ -36,8 +29,7 @@ page.on("pageerror", (err) => pageErrors.push(err.message));
 console.log(`→ ${url}`);
 await page.goto(url, {waitUntil: "domcontentloaded", timeout: 60_000});
 
-// Wait for real data, not just the shell: a campaign row link, an empty state, or the
-// not-deployed message. Whichever appears tells us what actually happened.
+// Wait for a rendered data outcome.
 const outcome = await Promise.race([
   page
     .locator('a[href^="/campaign/"]')
@@ -56,12 +48,11 @@ const outcome = await Promise.race([
 
 console.log(`outcome: ${outcome}`);
 
-// Let meters and formatted numbers settle before capturing.
+// Allow meters and formatted values to settle.
 await page.waitForTimeout(1_500);
 await page.screenshot({path: out, fullPage: true});
 console.log(`screenshot: ${out}`);
 
-// Report what the table actually contains, so the check does not rest on the image alone.
 const rowCount = await page.locator('a[href^="/campaign/"]').count();
 const tiles = await page
   .locator("main, body")
@@ -86,7 +77,7 @@ if (consoleErrors.length) {
 
 await browser.close();
 
-// Fail loudly: a screenshot of a broken page is not a pass.
+// Missing or broken data is a failure.
 if (outcome === "timeout" || outcome === "not-deployed" || pageErrors.length > 0) {
   process.exitCode = 1;
 }

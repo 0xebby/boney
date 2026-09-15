@@ -1,7 +1,5 @@
-/**
- * Throwaway: one authoritative read for a campaign card — chain first, subgraph for the roster.
- *
- * @param argv[2] campaign address
+/** Reads campaign card state from the chain and its roster from the subgraph.
+ * @param argv[2] Campaign address.
  */
 import {readFileSync} from "node:fs";
 import {createPublicClient, http, getAddress, formatUnits, type Hex} from "viem";
@@ -20,9 +18,15 @@ const txt = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const url = txt.split("\n").find((l) => /^\s*NEXT_PUBLIC_SUBGRAPH_URL\s*=/.test(l))!
   .split("=").slice(1).join("=").trim().replace(/^["']|["']$/g, "");
 
-const gql = async (query: string) => {
+type Promoter = {promoterId: string; wallet: string; reputation: string};
+type Credit = {kpiIndex: number; promoterId: string; user: string; amount: string; blockNumber: string};
+type SubgraphData = {
+  campaign: {campaignId: string; name: string; project: string; promoters: Promoter[]; touches: unknown[]};
+  credits: Credit[]; _meta: {block: {number: number}; hasIndexingErrors: boolean};
+};
+const gql = async (query: string): Promise<SubgraphData> => {
   const r = await fetch(url, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query})});
-  const {data, errors} = await r.json();
+  const {data, errors} = await r.json() as {data: SubgraphData; errors?: unknown};
   if (errors) throw new Error(JSON.stringify(errors).slice(0, 500));
   return data;
 };
@@ -52,7 +56,13 @@ const client = createPublicClient({
 const read = <T,>(functionName: string, args: unknown[] = []) =>
   client.readContract({address: CAMPAIGN, abi: CampaignAbi, functionName, args}) as Promise<T>;
 
-const cfg = await read<any>("config");
+type CampaignConfig = {
+  name: string; token: Hex; rewardPool: bigint; startTime: bigint; endTime: bigint;
+  attributionWindow: bigint; minReputation: bigint;
+};
+type KpiSpec = {params: Hex; kind: number; target: bigint; aggregate: boolean};
+type Tier = {threshold: bigint; reward: bigint};
+const cfg = await read<CampaignConfig>("config");
 const [status, count, pool, paid, block] = await Promise.all([
   read<number>("status"), read<bigint>("kpiCount"),
   read<bigint>("remainingPool"), read<bigint>("paidOut"), client.getBlockNumber(),
@@ -69,16 +79,16 @@ console.log(`  pool=${amt(cfg.rewardPool)}  remaining=${amt(pool)}  paidOut=${am
 console.log(`  start=${new Date(Number(cfg.startTime)*1000).toISOString().slice(0,16)}Z  end=${new Date(Number(cfg.endTime)*1000).toISOString().slice(0,16)}Z`);
 console.log(`  attributionWindow=${Number(cfg.attributionWindow)/86400}d  minReputation=${cfg.minReputation}`);
 
-const promoters = (c.promoters as Array<{promoterId: string; wallet: string; reputation: string}>)
+const promoters = c.promoters
   .map((p) => ({...p, wallet: getAddress(p.wallet)}));
 
 for (let i = 0; i < Number(count); i++) {
-  const spec = await read<any>("kpi", [BigInt(i)]);
+  const spec = await read<KpiSpec>("kpi", [BigInt(i)]);
   const src = decodeEventSource(spec.params as Hex);
   const sig = src ? catalogSignature(src.topic0) : undefined;
   const noun = actionNoun(sig, kpiKindFromIndex(spec.kind));
   const [total, tiers] = await Promise.all([
-    read<bigint>("totalProgress", [BigInt(i)]), read<any[]>("tiers", [BigInt(i)]),
+    read<bigint>("totalProgress", [BigInt(i)]), read<Tier[]>("tiers", [BigInt(i)]),
   ]);
   console.log(`\nKPI #${i}  kind=${KPI_KIND_LABEL[kpiKindFromIndex(spec.kind)]}  target=${spec.target}  aggregate=${spec.aggregate}`);
   console.log(`  totalProgress=${total}   noun: one ${noun.one} / many ${noun.many}`);
@@ -87,7 +97,7 @@ for (let i = 0; i < Number(count); i++) {
     console.log(`  actorTopic=${src.actorTopic}  amountMode=${src.amountMode === AMOUNT_MODE.count ? "count" : "dataWord0"}  scale=${effectiveScale(src)}`);
     console.log(`  filterTopic=${src.filterTopic ?? "-"} filterValue=${src.filterValue ?? "-"}`);
   } else console.log(`  params did not decode`);
-  console.log(`  tiers: ${tiers.map((t: any) => `${t.threshold}→${amt(t.reward)}`).join("  ") || "none"}`);
+  console.log(`  tiers: ${tiers.map((t) => `${t.threshold}→${amt(t.reward)}`).join("  ") || "none"}`);
 
   let progSum = 0n, earnSum = 0n;
   for (const p of promoters) {
@@ -95,7 +105,7 @@ for (let i = 0; i < Number(count); i++) {
       read<bigint>("progressOf", [p.wallet, BigInt(i)]),
       read<bigint>("settledTiersOf", [p.wallet, BigInt(i)]),
     ]);
-    const earned = tiers.slice(0, Number(settled)).reduce((s: bigint, t: any) => s + t.reward, 0n);
+    const earned = tiers.slice(0, Number(settled)).reduce((s, t) => s + t.reward, 0n);
     progSum += prog; earnSum += earned;
     const cr = credits.filter((x) => Number(x.kpiIndex) === i && x.promoterId.toLowerCase() === p.promoterId.toLowerCase())
       .reduce((s, x) => s + BigInt(x.amount), 0n);

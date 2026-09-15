@@ -1,29 +1,10 @@
 /**
- * Local stand-in for the three upstream profile APIs — `pnpm ethos:stub`.
+ * Loopback stand-in for the upstream profile APIs.
  *
  * Usage: pnpm ethos:stub [--port 8787] [--score N] [--followers N]
  *                        [--no-profile 0xa,0xb] [--unclaimed 0xa,0xb]
  *
- * Why this exists: `/api/attest` refuses any wallet without a *claimed* Ethos profile, and no test
- * wallet has one
- * So the
- * interesting half of the flow (sign three attestations, submit them, watch the BoneyScore land)
- * is unreachable in a browser against live Ethos, which answers 404 for every address you own.
- *
- * `lib/ethos.ts` reads each upstream base URL from the environment for exactly this reason. Point
- * the four vars at this server and every address resolves to a plausible profile:
- *
- *   ETHOS_API=http://127.0.0.1:8787/ethos
- *   FXTWITTER_API=http://127.0.0.1:8787/fx
- *   VXTWITTER_API=http://127.0.0.1:8787/vx
- *   KAITO_API=http://127.0.0.1:8787/smart
- *
- * Values are derived from the address, not random, so a wallet keeps the same score across restarts
- * The spread is wide on purpose: addresses land across
- * the whole rank ladder, so the directory and rank badges have something to show.
- *
- * Only ever bound to loopback. The Next server fetches these URLs server-side from the same host,
- * so nothing else needs to reach it.
+ * Values are stable per address unless overridden.
  */
 
 import {createServer, type IncomingMessage, type ServerResponse} from "node:http";
@@ -45,16 +26,14 @@ function addressSet(name: string): Set<string> {
 }
 
 const PORT = Number(flag("--port") ?? 8787);
-/** Forced values, when you need a specific score rather than whatever the address hashes to. */
 const FORCED_SCORE = flag("--score") ? Number(flag("--score")) : undefined;
 const FORCED_FOLLOWERS = flag("--followers") ? Number(flag("--followers")) : undefined;
-/** Addresses Ethos 404s outright — the ordinary "go claim a profile" path. */
+/** Addresses served with a 404. */
 const NO_PROFILE = addressSet("--no-profile");
-/** Addresses Ethos knows but nobody claimed: a real score with `profileId: null`, which the route
- *  must refuse rather than attest. This is the sybil surface, so it is worth being able to test. */
+/** Addresses served with an unclaimed Ethos profile. */
 const UNCLAIMED = addressSet("--unclaimed");
 
-/** FNV-1a. Not cryptographic — it just needs to be stable and well spread over hex strings. */
+/** Stable FNV-1a hash. */
 function hash(input: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
@@ -64,14 +43,7 @@ function hash(input: string): number {
   return h;
 }
 
-/**
- * A stable pseudo-profile for one address.
- *
- * Ethos scores run 0–2800; 600–2650 covers questionable through renowned without pinning everyone
- * at the top. Followers are spread on a log scale (100 to ~5M) because that is the shape
- * `reachFromFollowers` is built for — a linear spread would put almost every wallet in the same
- * reach bucket and leave the curve untested.
- */
+/** Stable pseudo-profile spanning the score and follower ranges. */
 function profileFor(address: string) {
   const h = hash(address.toLowerCase());
   const score = FORCED_SCORE ?? 600 + (h % 2051);
@@ -80,7 +52,7 @@ function profileFor(address: string) {
   return {
     score,
     followers,
-    // Kaito tracks a small, reputable slice of an audience — a few tenths of a percent here.
+    // Smart followers are a small fraction of total followers.
     smartFollowers: Math.floor(followers * (0.001 + ((h >>> 21) % 40) / 10_000)),
     handle: `stub_${address.slice(2, 8).toLowerCase()}`,
     profileId: 10_000 + (h % 90_000),
@@ -98,13 +70,7 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
-/**
- * Routes, in the shape each upstream actually returns.
- *
- * The prefixes keep fxtwitter and vxtwitter apart: both are `${BASE}/${handle}` upstream, so
- * without distinct bases one path would have to satisfy two different readers and neither source
- * could be exercised on its own.
- */
+/** Upstream-compatible routes. */
 function handle(request: IncomingMessage, response: ServerResponse): void {
   const url = new URL(request.url ?? "/", `http://127.0.0.1:${PORT}`);
   const path = url.pathname;
@@ -121,8 +87,7 @@ function handle(request: IncomingMessage, response: ServerResponse): void {
     const p = profileFor(address);
     return json(response, 200, {
       id: p.profileId,
-      // Null for --unclaimed: Ethos returns a score for addresses nobody has claimed, and the
-      // route has to refuse those. Mirroring it here keeps that branch testable.
+      // `--unclaimed` preserves the score while returning a null profile ID.
       profileId: UNCLAIMED.has(lower) ? null : p.profileId,
       score: p.score,
       status: UNCLAIMED.has(lower) ? "UNINITIALIZED" : "ACTIVE",
@@ -161,13 +126,7 @@ function handle(request: IncomingMessage, response: ServerResponse): void {
   json(response, 404, {error: `No stub route for ${path}`});
 }
 
-/**
- * Follower counts hash the *handle*, while the Ethos score hashes the *address*.
- *
- * That is not an inconsistency to tidy up: `lib/ethos.ts` looks followers up by the handle Ethos
- * reported, and it never passes the address along. Hashing whatever key each endpoint is actually
- * given is what keeps a wallet's follower count stable across calls.
- */
+/** Follower endpoints derive values from handles; Ethos derives them from addresses. */
 const server = createServer((request, response) => {
   const started = Date.now();
   response.on("finish", () => {

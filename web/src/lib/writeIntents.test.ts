@@ -147,14 +147,17 @@ describe("reportIntent", () => {
   const report = (count: number, over?: Partial<ReportedCall>, ctx?: {kpiLabel?: string}) =>
     reportIntent(CAMPAIGN, 0, PROMOTER, reportCalls(count, over), ctx);
 
-  it("opens one transaction per referral", () => {
-    expect(report(3).prompts).toEqual(["transaction", "transaction", "transaction"]);
+  it("opens one transaction per 32-report batch", () => {
+    expect(report(3).prompts).toEqual(["transaction"]);
+    expect(report(32).prompts).toEqual(["transaction"]);
+    expect(report(33).prompts).toEqual(["transaction", "transaction"]);
     expect(report(3).confirmLabel).toBe("Send 3 reports");
     expect(report(1).confirmLabel).toBe("Send report");
   });
 
-  it("says that a partial run has already paid out", () => {
-    expect(report(3).important).toContain("already moved money");
+  it("describes atomic batches and earlier confirmed payouts", () => {
+    expect(report(33).important).toContain("batch is atomic");
+    expect(report(33).important).toContain("earlier batches have already moved money");
   });
 
   /** The question the old copy left open: it said the credit went "to the referrals". */

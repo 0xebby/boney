@@ -2,11 +2,24 @@
 pragma solidity ^0.8.30;
 
 import {Types} from "../libraries/Types.sol";
+import {IAttributionRegistry} from "./IAttributionRegistry.sol";
 
 /// @title ICampaign
 /// @notice A single performance campaign: escrowed rewards released as attributed KPI progress
 ///         crosses per-promoter thresholds.
 interface ICampaign {
+    /// @notice One cumulative user-action report in a campaign batch.
+    /// @param kpiIndex Index of the KPI being reported against.
+    /// @param user The end user whose action is credited.
+    /// @param newTotal Cumulative amount for the user and KPI pair.
+    /// @param evidence Report-specific proof forwarded to the KPI verifier.
+    struct UserActionReport {
+        uint256 kpiIndex;
+        address user;
+        uint256 newTotal;
+        bytes evidence;
+    }
+
     // ── errors ───────────────────────────────────────────────────
 
     error NotProject();
@@ -40,6 +53,8 @@ interface ICampaign {
     error TooManyKpis(uint256 provided, uint256 max);
     error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
     error TooManyActions(uint256 provided, uint256 max);
+    error EmptyReportBatch();
+    error TooManyReports(uint256 provided, uint256 max);
     error UnorderedEvidence(uint256 index);
     error ExtensionTooLarge(uint64 maximum, uint64 provided);
     error ExtensionNotForward(uint64 current, uint64 provided);
@@ -48,6 +63,7 @@ interface ICampaign {
     error ShortfallUnfunded(uint256 provided, uint256 required);
     error NoShortFallOwed(address promoter);
     error OutstandingShortfall(uint256 amount);
+    error InvalidReporter();
 
     // ── events ───────────────────────────────────────────────────
 
@@ -120,6 +136,11 @@ interface ICampaign {
         bytes32 indexed promoterId, address indexed promoter, uint256 indexed kpiIndex, uint256 amount
     );
 
+    /// @notice Emitted when a project grants or revokes an automated reporting account.
+    /// @param reporter Account whose reports are being configured.
+    /// @param allowed Whether the account may report user actions.
+    event AuthorizedReporterUpdated(address indexed reporter, bool allowed);
+
     /// @notice Emitted when unspent escrow returns to the project.
     /// @param to Recipient, always the project.
     /// @param amount Amount returned.
@@ -173,6 +194,16 @@ interface ICampaign {
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external;
 
+    /// @notice Credit an ordered batch of cumulative end-user actions atomically.
+    /// @dev Each item follows `reportUserAction` semantics. A failing item reverts the full batch.
+    /// @param reports Reports to process in caller-supplied order.
+    function reportUserActionsBatch(UserActionReport[] calldata reports) external;
+
+    /// @notice Allow or disallow an account to report user actions for this campaign.
+    /// @param reporter Account to configure.
+    /// @param allowed Whether the account may report.
+    function setAuthorizedReporter(address reporter, bool allowed) external;
+
     /// @notice Apply a campaign-level aggregate update. Oracle coordinator only.
     /// @param kpiIndex Index of the aggregate KPI.
     /// @param newTotal New campaign-level total; must be monotonically non-decreasing.
@@ -205,9 +236,25 @@ interface ICampaign {
     /// @return The current pool ceiling.
     function rewardPool() external view returns (uint256);
 
+    /// @notice Start of the reporting window.
+    /// @return The campaign start time.
+    function startTime() external view returns (uint64);
+
     /// @notice Current reporting deadline.
     /// @return The current end time.
     function endTime() external view returns (uint64);
+
+    /// @notice Timestamp when the campaign entered a terminal status.
+    /// @return The terminal transition time, or zero.
+    function endedAt() external view returns (uint64);
+
+    /// @notice Post-end report and settlement window.
+    /// @return The claim grace duration.
+    function CLAIM_GRACE() external view returns (uint64);
+
+    /// @notice Post-end deadline for applying previously submitted aggregate reports.
+    /// @return The aggregate update deadline.
+    function aggregateUpdateDeadline() external view returns (uint256);
 
     /// @notice Number of KPIs defined on this campaign.
     /// @return The KPI count.
@@ -244,11 +291,36 @@ interface ICampaign {
     /// @return The campaign-level total.
     function totalProgress(uint256 kpiIndex) external view returns (uint256);
 
+    /// @notice Attribution registry used by this campaign.
+    /// @return The campaign's attribution registry.
+    function attributionRegistry() external view returns (IAttributionRegistry);
+
     /// @notice Rewards released from the pool so far.
     /// @return The cumulative amount paid out.
     function paidOut() external view returns (uint256);
 
+    /// @notice Whether an account may report user actions for this campaign.
+    /// @param reporter Account to check.
+    /// @return True when the project has authorized the account.
+    function authorizedReporters(address reporter) external view returns (bool);
+
+    /// @notice Cumulative amount already credited for a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Amount credited so far.
+    function userCreditedOf(address user, uint256 kpiIndex) external view returns (uint256);
+
+    /// @notice Block of the last report that credited a `(user, kpi)` pair.
+    /// @param user The end user.
+    /// @param kpiIndex Index of the KPI.
+    /// @return Block number, or zero when the pair has not been credited.
+    function lastReportBlockOf(address user, uint256 kpiIndex) external view returns (uint64);
+
+    /// @notice The campaign's project.
+    /// @return The project address.
     function getProject() external view returns (address);
 
+    /// @notice The coordinator authorized to push oracle updates.
+    /// @return The oracle coordinator address.
     function getOracle() external view returns (address);
 }

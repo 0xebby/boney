@@ -1,7 +1,4 @@
-/**
- * Throwaway: times the two questions the verification pipeline asks, each answered twice — once off
- * chain reads/logs the way the indexer and relayer do it, once off the subgraph.
- */
+/** Compares verification query latency across chain and subgraph paths. */
 import {readFileSync} from "node:fs";
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
@@ -107,7 +104,7 @@ console.log(`  chain    ${String(chainMs).padStart(6)}ms  ${chainCalls} JSON-RPC
 console.log(`  subgraph ${String(sgMs).padStart(6)}ms  ${sgCalls} POST  (${credits.length} Credit + ${payouts.length} TierPayout rows → every figure above)`);
 console.log(`  ${(chainMs / sgMs).toFixed(1)}x faster, ${(chainCalls / sgCalls).toFixed(0)}x fewer requests\n`);
 
-// ================= Q2: the observation fold for one KPI — SuperBridge 0, WETH Deposit =================
+// SuperBridge WETH observation fold.
 const SB = getAddress("0x0a01B03EBaCBb553AD5b269297921F32D261C45F");
 const {campaign} = await gql<{campaign: {touches: {user: Hex; blockNumber: string}[]}}>(`{
   campaign(id: "${SB.toLowerCase()}") { touches(first: 1000) { user blockNumber } } }`);

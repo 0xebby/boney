@@ -1,5 +1,5 @@
 /**
- * Throwaway: renders `__dash-data.json` into `web/public/verification-dashboard.html` — the
+ * renders `__dash-data.json` into `web/public/verification-dashboard.html` — the
  * all-campaigns verification dashboard. Every figure on the page comes from the JSON, so the page
  * can be regenerated after any fixture change by re-running the collector then this.
  */
@@ -107,7 +107,7 @@ const TONE: Record<string, string> = {
   over: "bad", under: "warn", idle: "idle", slack: "pass",
 };
 
-// Reuse the sibling page's validated token block rather than restating 180 lines of it.
+// Reuse the sibling page's token styles.
 const precedent = readFileSync(new URL("../public/gyndore-verification.html", import.meta.url), "utf8");
 const baseStyles = precedent.match(/<style>([\s\S]*?)<\/style>/)![1]!;
 

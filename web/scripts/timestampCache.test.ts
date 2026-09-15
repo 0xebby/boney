@@ -3,7 +3,7 @@ import {existsSync, mkdirSync, readdirSync, rmSync, writeFileSync} from "node:fs
 import {dirname} from "node:path";
 import {cachePath, loadTimestampCache, saveTimestampCache} from "./timestampCache";
 
-/** A chain id no fixture uses, so the test never touches a real cache file. */
+/** Chain ID reserved for timestamp-cache tests. */
 const CHAIN = 987_654_321;
 
 afterEach(() => {
@@ -38,7 +38,7 @@ describe("saveTimestampCache / loadTimestampCache", () => {
     expect(loadTimestampCache(CHAIN).size).toBe(0);
   });
 
-  it("leaves no temp file behind, so a concurrent pass sees only whole files", () => {
+  it("leaves no temporary files", () => {
     saveTimestampCache(CHAIN, new Map([[BigInt(1), BigInt(2)]]));
     const strays = readdirSync(dirname(cachePath(CHAIN))).filter((f) => f.endsWith(".tmp"));
     expect(strays).toEqual([]);

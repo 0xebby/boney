@@ -1,0 +1,15 @@
+{
+  "schedule": "0 * * * * *",
+  "mode": "simulation",
+  "isTestnet": true,
+  "evm": {
+    "chainSelectorName": "ethereum-testnet-sepolia-base-1",
+    "receiverAddress": "0x0D1F3002f0E233Cd99c0743629e41525092D9947",
+    "campaignAddress": "0xFBa595cC897f7E40eb39946cCfd1F2aaB3774EA1",
+    "verifierAddress": "0x7a4c62fE69f2b78FB930cD7843174831A1f20B42",
+    "kpiIndex": "0",
+    "scanLimit": "32",
+    "gasLimit": "3000000",
+    "reportLifetimeSeconds": "300"
+  }
+}

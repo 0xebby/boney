@@ -11,21 +11,37 @@ export const OracleCoordinatorAbi = [
         "internalType": "address"
       },
       {
-        "name": "minStake_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
         "name": "disputeWindow_",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "unstakeDelay_",
         "type": "uint256",
         "internalType": "uint256"
       }
     ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "MAX_REPORTS_PER_BATCH",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "addReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
     "stateMutability": "nonpayable"
   },
   {
@@ -36,6 +52,19 @@ export const OracleCoordinatorAbi = [
         "name": "reportId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "applyReports",
+    "inputs": [
+      {
+        "name": "reportIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "outputs": [],
@@ -127,19 +156,6 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
-    "name": "minStake",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "owner",
     "inputs": [],
     "outputs": [
@@ -150,6 +166,19 @@ export const OracleCoordinatorAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "removeReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -283,6 +312,100 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
+    "name": "reportTarget",
+    "inputs": [
+      {
+        "name": "reportId",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "campaign",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "kpiIndex",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reporterAllowed",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reporterAt",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reporterCount",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "reporters",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "setCampaignRegistry",
     "inputs": [
       {
@@ -293,64 +416,6 @@ export const OracleCoordinatorAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "slashPool",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "stake",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "stakeLockedUntil",
-    "inputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "stakeOf",
-    "inputs": [
-      {
-        "name": "reporter",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -389,6 +454,47 @@ export const OracleCoordinatorAbi = [
         "name": "reportId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "submitReports",
+    "inputs": [
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct IOracleCoordinator.Report[]",
+        "components": [
+          {
+            "name": "campaign",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reportIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
       }
     ],
     "stateMutability": "nonpayable"
@@ -441,43 +547,56 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "function",
+    "name": "submitUserReports",
+    "inputs": [
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct IOracleCoordinator.UserReport[]",
+        "components": [
+          {
+            "name": "campaign",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "newTotal",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "reportIds",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "transferOwnership",
     "inputs": [
       {
         "name": "newOwner",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "unstake",
-    "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "unstakeDelay",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "withdrawSlashPool",
-    "inputs": [
-      {
-        "name": "to",
         "type": "address",
         "internalType": "address"
       }
@@ -594,7 +713,7 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "event",
-    "name": "ReporterSlashed",
+    "name": "ReporterAllowlistUpdated",
     "inputs": [
       {
         "name": "reporter",
@@ -603,32 +722,29 @@ export const OracleCoordinatorAbi = [
         "internalType": "address"
       },
       {
-        "name": "amount",
-        "type": "uint256",
+        "name": "allowed",
+        "type": "bool",
         "indexed": false,
-        "internalType": "uint256"
+        "internalType": "bool"
       }
     ],
     "anonymous": false
   },
   {
-    "type": "event",
-    "name": "ReporterStaked",
+    "type": "error",
+    "name": "CampaignOutsideWindow",
     "inputs": [
       {
-        "name": "reporter",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
+        "name": "startTime",
+        "type": "uint64",
+        "internalType": "uint64"
       },
       {
-        "name": "amount",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
+        "name": "endTime",
+        "type": "uint64",
+        "internalType": "uint64"
       }
-    ],
-    "anonymous": false
+    ]
   },
   {
     "type": "error",
@@ -651,6 +767,11 @@ export const OracleCoordinatorAbi = [
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "EmptyReportBatch",
+    "inputs": []
   },
   {
     "type": "error",
@@ -687,11 +808,6 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "error",
-    "name": "NothingStaked",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "OwnableInvalidOwner",
     "inputs": [
       {
@@ -711,11 +827,6 @@ export const OracleCoordinatorAbi = [
         "internalType": "address"
       }
     ]
-  },
-  {
-    "type": "error",
-    "name": "ReentrancyGuardReentrantCall",
-    "inputs": []
   },
   {
     "type": "error",
@@ -762,19 +873,41 @@ export const OracleCoordinatorAbi = [
   },
   {
     "type": "error",
-    "name": "StakeLocked",
+    "name": "ReporterAlreadyListed",
     "inputs": [
       {
-        "name": "until",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
       }
     ]
   },
   {
     "type": "error",
-    "name": "TransferFailed",
-    "inputs": []
+    "name": "ReporterNotListed",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyReports",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -795,6 +928,17 @@ export const OracleCoordinatorAbi = [
         "name": "reportId",
         "type": "bytes32",
         "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WrongCampaignStatus",
+    "inputs": [
+      {
+        "name": "actual",
+        "type": "uint8",
+        "internalType": "enum Types.CampaignStatus"
       }
     ]
   },

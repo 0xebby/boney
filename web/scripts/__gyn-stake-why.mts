@@ -7,7 +7,7 @@ const ABI = [parseAbiItem("function stake(address token, uint256 amount)")];
 try {
   await client.simulateContract({address: STAKING, abi: ABI, functionName: "stake", args: [GYND, parseUnits("1", 18)], account: getAddress("0x5Ae96df858Ed87F98a34b177Bd306c829316E727")});
 } catch (e) { console.log((e as Error).message.split("\n").slice(0, 8).join("\n")); }
-// Same call, with the allowance overridden so only the amount rule can fail.
+// Isolate the amount rule from allowance checks.
 const {encodeFunctionData} = await import("viem");
 for (const amt of ["0.0001", "1", "10", "100"]) {
   try {

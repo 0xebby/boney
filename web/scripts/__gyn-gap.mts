@@ -1,20 +1,12 @@
-/**
- * Throwaway: for each KPI, scans the whole report window for logs whose actor topic is one of the
- * campaign's referrals, then splits them by whether the KPI's own topic filter matches.
- *
- * Answers one question the on-chain totals cannot: is the gap between Boney's ceiling and the
- * project's claim the unfiltered/filtered asymmetry, or the indexer being behind?
- *
- * Run: pnpm tsx scripts/__gyn-gap.mts <campaign>
+/** Compares filtered and unfiltered referral activity across each KPI report window.
+ * @param argv[2] Campaign address.
  */
 import {createPublicClient, http, getAddress, pad, toHex, type Hex, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";
-import {GENERATED_DEPLOYMENTS} from "../src/lib/deployments";
 import {decodeEventSource} from "../src/lib/kpiSource";
 import {blockChunks} from "../src/lib/indexerCore";
 
 const RPC = "https://base-sepolia-rpc.publicnode.com";
-const D = GENERATED_DEPLOYMENTS[84532]!;
 const campaign = getAddress(process.argv[2]!);
 const FROM = 46215147n; // windowStartBlock, identical on all three KPIs
 const RANGE = 1900n;

@@ -1,7 +1,4 @@
-/**
- * Recounts every candidate event at the current head, one scan per address, so the figures quoted in
- * the write-up can be restated against one block rather than several.
- */
+/** Recounts candidate events at a single chain head. */
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
 

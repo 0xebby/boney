@@ -1,8 +1,5 @@
-/**
- * Throwaway: the write history of Boney's ceiling for one campaign — every `VerifiedTotalReported`
- * and `CheckpointAdvanced`, in block order, so an inflated total can be traced to the pass that wrote it.
- *
- * Run: pnpm tsx scripts/__gyn-ceiling-history.mts <campaign>
+/** Lists ceiling and checkpoint writes in block order.
+ * @param argv[2] Campaign address.
  */
 import {createPublicClient, http, getAddress, toHex, type Hex, type PublicClient} from "viem";
 import {GENERATED_DEPLOYMENTS} from "../src/lib/deployments";
@@ -14,7 +11,6 @@ const campaign = getAddress(process.argv[2]!);
 const FROM = 46215147n;
 const RANGE = 1900n;
 
-const REPORTED = "0x" + "" as Hex; // filled below
 const client = createPublicClient({transport: http(RPC, {retryCount: 6})}) as PublicClient;
 
 type Raw = {topics: readonly Hex[]; data: Hex; blockNumber: Hex; transactionHash: Hex};

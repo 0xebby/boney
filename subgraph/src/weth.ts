@@ -1,47 +1,46 @@
-import {Bytes} from "@graphprotocol/graph-ts";
+import {Bytes, ethereum} from "@graphprotocol/graph-ts";
 import {Deposit} from "../generated/templates/WethDeposit/WETH";
 import {Withdrawal} from "../generated/templates/WethWithdrawal/WETH";
-import {KpiAction} from "../generated/schema";
-import {DEPOSIT_TOPIC0, WITHDRAWAL_TOPIC0} from "./kpiSource";
+import {addressTopic, eventData, writeAction} from "./action";
+import {
+  DEPOSIT_TOPIC0,
+  EVENT_SHAPE_WETH_DEPOSIT,
+  EVENT_SHAPE_WETH_WITHDRAWAL,
+  WITHDRAWAL_TOPIC0,
+} from "./kpiSource";
 
-/**
- * The WETH-shaped presets: one indexed address, one `uint256` in data.
- *
- * `Deposit(address indexed dst, uint256 wad)` backs the `weth-deposit` preset in
- * `web/src/lib/kpiSource.ts`, whose shape was confirmed against a real Base Sepolia log. `Withdrawal`
- * is its counterpart, and is here because the current fixture actually uses it — it is not in
- * `EVENT_PRESETS` yet, which is a gap on the TypeScript side rather than here.
- *
- * Separate templates rather than one with two handlers, even though both events live on the same
- * contract and share an ABI. Two data sources on one address is fine — each declares only its own
- * event, so neither sees the other's logs — and it keeps one KPI's spawn from silently indexing a
- * second event the KPI never asked for.
- *
- * Same two omissions as the `Transfer` presets: no scaling, no attribution check. See `transfer.ts`.
- */
-
+/** Stores one WETH deposit. */
 export function handleWethDeposit(event: Deposit): void {
-  const action = new KpiAction(
-    event.transaction.hash.toHexString() + "-" + event.logIndex.toString(),
+  const topics = new Array<Bytes>(1);
+  topics[0] = addressTopic(event.params.dst);
+  const values = new Array<ethereum.Value>(1);
+  values[0] = ethereum.Value.fromUnsignedBigInt(event.params.wad);
+
+  writeAction(
+    event,
+    DEPOSIT_TOPIC0,
+    topics,
+    eventData(values),
+    EVENT_SHAPE_WETH_DEPOSIT,
+    event.params.dst,
+    event.params.wad,
   );
-  action.source = event.address;
-  action.topic0 = Bytes.fromHexString(DEPOSIT_TOPIC0);
-  action.user = event.params.dst;
-  action.value = event.params.wad;
-  action.blockNumber = event.block.number;
-  action.timestamp = event.block.timestamp;
-  action.save();
 }
 
+/** Stores one WETH withdrawal. */
 export function handleWethWithdrawal(event: Withdrawal): void {
-  const action = new KpiAction(
-    event.transaction.hash.toHexString() + "-" + event.logIndex.toString(),
+  const topics = new Array<Bytes>(1);
+  topics[0] = addressTopic(event.params.src);
+  const values = new Array<ethereum.Value>(1);
+  values[0] = ethereum.Value.fromUnsignedBigInt(event.params.wad);
+
+  writeAction(
+    event,
+    WITHDRAWAL_TOPIC0,
+    topics,
+    eventData(values),
+    EVENT_SHAPE_WETH_WITHDRAWAL,
+    event.params.src,
+    event.params.wad,
   );
-  action.source = event.address;
-  action.topic0 = Bytes.fromHexString(WITHDRAWAL_TOPIC0);
-  action.user = event.params.src;
-  action.value = event.params.wad;
-  action.blockNumber = event.block.number;
-  action.timestamp = event.block.timestamp;
-  action.save();
 }
