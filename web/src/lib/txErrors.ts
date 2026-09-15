@@ -133,7 +133,9 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     args.length === 2
       ? `Only the project that created this campaign can do that. Connected as ${addr(args[1])}, expected ${addr(args[0])}.`
       : "Only the project that created this campaign can do that. Switch to the wallet that created it.",
-  NotReporter: () => "Only the project or the oracle can report progress on this campaign.",
+  NotReporter: () =>
+    "Only the project, oracle coordinator, or an authorized reporter can report progress.",
+  InvalidReporter: () => "The reporter address can't be zero.",
   NotOracle: () => "Only the oracle coordinator can submit that report.",
   NotFunded: () =>
     "Escrow doesn't hold the full reward pool yet. Fund the campaign before activating it.",
@@ -156,6 +158,7 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `The available escrow (${count(provided)}) does not cover the outstanding shortfall of ${count(required)}.`,
   OutstandingShortfall: ([amount]) =>
     `${count(amount)} remains owed to promoters and must be claimed before funds can be reclaimed.`,
+  NoShortFallOwed: () => "This promoter has no outstanding shortfall to claim.",
 
   // ── Campaign: joining ──
   AlreadyJoined: () => "This wallet is already promoting the campaign.",
@@ -183,6 +186,9 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `That report carries ${count(provided)} actions as evidence, and the limit is ${count(max)}. Report a narrower range, or merge the actions.`,
   UnorderedEvidence: ([index]) =>
     `The evidence goes backwards at action ${Number(index) + 1}. Actions have to be ordered oldest first.`,
+  EmptyReportBatch: () => "That batch carries no reports. Add at least one.",
+  TooManyReports: ([provided, max]) =>
+    `That batch carries ${count(provided)} reports, and the limit is ${count(max)}. Split it into smaller batches.`,
 
   // ── Campaign: creation ──
   NoKpis: () => "Add at least one KPI before creating the campaign.",
@@ -215,6 +221,8 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `That referral link expired at ${at(expiresAt)}. Ask the promoter for a fresh one.`,
   TouchTooLong: () =>
     "That referral link is valid for longer than the registry allows. Ask the promoter for a fresh one.",
+  TouchDurationTooLong: ([maximum]) =>
+    `That attribution window exceeds the protocol maximum of ${count(maximum)} seconds.`,
   TouchNotYetValid: () =>
     "That referral link is dated in the future — usually a clock that's running fast. Try again in a moment.",
   TouchNotNewer: () =>
@@ -274,9 +282,9 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
     `A threshold of ${count(threshold)} is impossible with ${count(attestors)} attestors.`,
 
   // ── Oracle ──
-  NotAReporter: ([who]) => `${addr(who)} isn't a registered oracle reporter.`,
-  NothingStaked: () => "Stake is required first, and the amount must be above zero.",
-  StakeLocked: ([until]) => `Stake is locked until ${at(until)}.`,
+  NotAReporter: ([who]) => `${addr(who)} isn't a listed oracle reporter.`,
+  ReporterAlreadyListed: ([who]) => `${addr(who)} is already listed as an oracle reporter.`,
+  ReporterNotListed: ([who]) => `${addr(who)} isn't listed as an oracle reporter.`,
   UnknownReport: ([report]) => `Report ${id(report)} doesn't exist.`,
   ReportAlreadyExists: ([report]) => `Report ${id(report)} has already been filed.`,
   DisputeWindowOpen: ([until]) =>
@@ -286,6 +294,10 @@ const MESSAGES: Record<string, (args: readonly unknown[]) => string> = {
   ReportAlreadyApplied: () => "This report has already been applied.",
   NotUserReport: () => "That report is campaign-wide, not per-user.",
   NotAggregateReport: () => "That report is per-user, not campaign-wide.",
+  WrongCampaignStatus: ([actual]) =>
+    `That campaign is ${statusName(actual).toLowerCase()}, so a campaign-wide report can't be filed against it.`,
+  CampaignOutsideWindow: ([start, end]) =>
+    `That campaign's reporting window runs ${at(start)} → ${at(end)}, and now is outside it.`,
   RegistryAlreadySet: () => "The campaign registry is already set and can't be changed.",
   RegistryNotSet: () => "The oracle isn't wired to a campaign registry yet.",
 

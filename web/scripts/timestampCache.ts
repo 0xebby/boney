@@ -1,10 +1,4 @@
-/**
- * The block-timestamp cache both reporting processes keep on disk.
- *
- * `relay-kpi-metric.ts` runs once per gated KPI and `indexer.ts` once per pass, so a cache held only
- * in memory is discarded between invocations whose block ranges almost entirely overlap. One file per
- * chain is shared by both: a block's timestamp is the same fact whoever asked for it.
- */
+/** Shared on-disk block-timestamp cache for reporting processes. */
 import {readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, unlinkSync} from "node:fs";
 import {resolve, dirname} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -17,7 +11,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-/** Blocks the cache keeps between passes, oldest dropped first. */
+/** Maximum cached blocks per chain. */
 const TIMESTAMP_CACHE_LIMIT = 150_000;
 
 /**
@@ -47,13 +41,12 @@ export function loadTimestampCache(chainId: number): BlockTimestamps {
 }
 
 /**
- * Stores the timestamps a pass gathered, trimmed to the cache limit.
+ * Saves timestamps within the cache limit.
  *
- * Written to a sibling temp file and renamed over the target, so a relay pass and an indexer pass
- * writing at once leave a whole file rather than a half-written one.
+ * Writes through a sibling temporary file so readers only see complete cache files.
  *
  * @param chainId Chain the cache belongs to.
- * @param cache Timestamps to store; pruned in place to the cache limit.
+ * @param cache Timestamps to prune and store.
  * @returns Nothing.
  */
 export function saveTimestampCache(chainId: number, cache: BlockTimestamps): void {
@@ -65,11 +58,10 @@ export function saveTimestampCache(chainId: number, cache: BlockTimestamps): voi
     writeFileSync(temp, serializeTimestamps(cache));
     renameSync(temp, path);
   } catch {
-    // A cache that cannot be written costs the next pass some reads and nothing else.
     try {
       unlinkSync(temp);
     } catch {
-      // Nothing to clean up.
+      // Temporary-file cleanup is best effort.
     }
   }
 }

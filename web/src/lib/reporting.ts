@@ -2,6 +2,34 @@ import {classifyTouch, type TouchStatus} from "./referrals";
 import {nextTier} from "./campaign";
 import type {EvidenceAction} from "./indexerCore";
 import type {RewardTier} from "./types";
+import type {Hex} from "viem";
+
+/** Maximum reports accepted by `Campaign.reportUserActionsBatch`. */
+export const CAMPAIGN_REPORT_BATCH_SIZE = 32;
+
+/** One report encoded for `Campaign.reportUserActionsBatch`. */
+export type CampaignReportPayload = {
+  kpiIndex: bigint;
+  user: `0x${string}`;
+  newTotal: bigint;
+  evidence: Hex;
+};
+
+/**
+ * Splits reports into stable Campaign-sized batches.
+ *
+ * @param reports Reports in execution order.
+ * @returns Ordered batches of at most 32 reports.
+ */
+export function campaignReportBatches(
+  reports: readonly CampaignReportPayload[],
+): CampaignReportPayload[][] {
+  const batches: CampaignReportPayload[][] = [];
+  for (let start = 0; start < reports.length; start += CAMPAIGN_REPORT_BATCH_SIZE) {
+    batches.push(reports.slice(start, start + CAMPAIGN_REPORT_BATCH_SIZE));
+  }
+  return batches;
+}
 
 /**
  * Planning `reportUserAction` calls from a KOL selection — the dev(project) reporting tool.

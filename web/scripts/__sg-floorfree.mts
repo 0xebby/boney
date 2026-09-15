@@ -1,5 +1,5 @@
 /**
- * Throwaway: the floor-free overcredit test. Compares credited against the whole of history for the
+ * the floor-free overcredit test. Compares credited against the whole of history for the
  * KPI's own source, unfiltered by attribution — a ceiling no honest report can exceed, so a breach
  * needs no attribution logic to be conclusive.
  */

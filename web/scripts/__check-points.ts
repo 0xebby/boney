@@ -1,10 +1,4 @@
-/**
- * Throwaway probe: run the real leaderboard read *and* the real fold against the deployed subgraph.
- *
- * `POINTS_QUERY` and `foldPoints` were both written against hand-written fixtures, and a field the
- * deployment does not have fails GraphQL *validation* — taking the whole document with it. This is
- * what catches that, and the point totals that only look right against a fixture.
- */
+/** Runs live leaderboard reads through the production fold. */
 import {readFileSync} from "node:fs";
 
 import {fetchPointsFromGraph} from "../src/lib/pointsGraph";

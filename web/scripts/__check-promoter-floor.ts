@@ -1,11 +1,8 @@
-/**
- * Throwaway check for the promoter directory's block floor: after enough blocks, does the log scan
- * lose a promoter the chain still knows about, and does the subgraph path still find them?
- *
- * Replicates `useCampaignPromoters`' log path exactly — same `planWindows`, same `getLogs` — so the
- * scan under test is the one the app runs.
- *
- * Run: pnpm tsx scripts/__check-promoter-floor.ts <rpc> <startBlock> <campaign[,campaign…]> [promoter]
+/** Compares promoter discovery across the production log scan, chain state, and subgraph.
+ * @param argv[2] RPC URL.
+ * @param argv[3] Start block.
+ * @param argv[4] Comma-separated campaign addresses.
+ * @param argv[5] Optional promoter address.
  */
 import {createPublicClient, http, type PublicClient} from "viem";
 import {CampaignAbi} from "../src/lib/abis";

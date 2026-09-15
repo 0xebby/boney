@@ -508,6 +508,8 @@ describe("describeConfigDrift", () => {
     // `Transfer(from, to, value)`: param 1 is `to`, which is the second indexed param, so the
     // matching `actorTopic` is 2.
     verifierUserParamIndex: 1,
+    // `value` is the first unindexed param, which is what `dataWord0` reads.
+    verifierValueParamIndex: 2,
     indexerTopic0: TOPIC_A,
     indexerSource: TOKEN,
     indexerScale: BigInt(1e18),
@@ -678,6 +680,7 @@ describe("describeConfigDrift — a filtered event source", () => {
       verifierScale: BigInt(1e18),
       verifierAggregation: AGGREGATION.sum,
       verifierUserParamIndex: 1,
+      verifierValueParamIndex: 2,
       indexerTopic0: decoded!.topic0,
       indexerSource: decoded!.source,
       indexerScale: decoded!.scale,

@@ -1,11 +1,4 @@
-/**
- * Throwaway: collects every verification layer for every campaign on the live Base Sepolia fixture
- * and writes one JSON blob the static verification dashboard is built from.
- *
- * Layers per KPI: the claim (`userCreditedOf`), the ceiling (`verifiedTotalOf` /
- * `observedProgressOf`), the subgraph's fold of `Credit` and `TierPayout`, an independent
- * `eth_getLogs` re-scan of the KPI's own `params`, and escrow (`paidOut` / `remainingPool`).
- */
+/** Collects campaign verification layers for the static dashboard. */
 import {writeFileSync, readFileSync} from "node:fs";
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
@@ -168,8 +161,7 @@ for (let id = 0n; id < count; id++) {
       if (relay?.windowStartBlock) windowStarts.push(relay.windowStartBlock as bigint);
     }
 
-    // The one column that does not come from the code path that produced the number it checks:
-    // the KPI's own params, replayed against the node, narrowed to this campaign's referrals.
+    // Independently replay KPI parameters for campaign referrals.
     const observed = new Map<string, {units: bigint; logs: number}>();
     const failed: string[] = [];
     if (src && RESCAN && live.size > 0 && firstTouchBlock > 0n) {

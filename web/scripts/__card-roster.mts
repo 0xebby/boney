@@ -1,7 +1,5 @@
-/**
- * Throwaway: the referral roster for a campaign card — who signed with whom, and what they did.
- *
- * @param argv[2] campaign address
+/** Reads the referral roster and activity for a campaign card.
+ * @param argv[2] Campaign address.
  */
 import {readFileSync} from "node:fs";
 import {getAddress} from "viem";
@@ -34,7 +32,7 @@ for (const p of [...promoters].sort((a, b) => Number(a.joinedAtBlock) - Number(b
   console.log(`  ${getAddress(p.wallet)}  rep=${Number(p.reputation).toLocaleString("en-US")}  joinedAtBlock=${p.joinedAtBlock}  touches=${refs}`);
 }
 
-/** user → {promoter, per-KPI totals} */
+/** Referral rows keyed by user. */
 const rows = new Map<string, {promoter: string; signedAt: number; k: Record<number, bigint>}>();
 for (const t of touches) {
   rows.set(t.user.toLowerCase(), {

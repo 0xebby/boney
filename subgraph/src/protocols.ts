@@ -1,69 +1,53 @@
-import {BigInt, Bytes} from "@graphprotocol/graph-ts";
+import {BigInt, Bytes, ethereum} from "@graphprotocol/graph-ts";
 import {Supply} from "../generated/templates/AaveSupply/AavePool";
 import {Deposit} from "../generated/templates/SygmaDeposit/SygmaBridge";
-import {KpiAction} from "../generated/schema";
-import {AAVE_SUPPLY_TOPIC0, SYGMA_DEPOSIT_TOPIC0} from "./kpiSource";
+import {addressTopic, eventData, uintTopic, writeAction} from "./action";
+import {
+  AAVE_SUPPLY_TOPIC0,
+  EVENT_SHAPE_AAVE_SUPPLY,
+  EVENT_SHAPE_SYGMA_DEPOSIT,
+  SYGMA_DEPOSIT_TOPIC0,
+} from "./kpiSource";
 
-/**
- * Real third-party protocol presets — the ones that make a fixture demonstrate something.
- *
- * Both are COUNT-only, which is a property of the events rather than a preference. `amountMode` can
- * only read the *first* 32-byte data word, and neither event puts a creditable amount there: Aave's
- * first word is `user` and Sygma's amount is encoded inside `data`. A SUM KPI over either would leave
- * the project's claim and Boney's observation denominated in different things, so `templateFor` refuses
- * that combination outright.
- *
- * Every action is stored with `value = 1`. The unit is "one supply" / "one bridge deposit".
- */
-
-/**
- * Aave V3 `Supply`, crediting `onBehalfOf`.
- *
- * **Not `user`.** `user` is whoever sent the transaction; `onBehalfOf` is who receives the aTokens and
- * therefore who performed the action being credited. They differ whenever a contract or a helper
- * supplies for someone else, and crediting the sender would pay the promoter of the wrong wallet — or
- * of no wallet at all, when the sender is a router with no attribution touch.
- */
+/** Stores one Aave V3 supply credited to `onBehalfOf`. */
 export function handleAaveSupply(event: Supply): void {
-  write(
-    event.transaction.hash,
-    event.logIndex,
-    event.address,
-    Bytes.fromHexString(AAVE_SUPPLY_TOPIC0),
+  const topics = new Array<Bytes>(3);
+  topics[0] = addressTopic(event.params.reserve);
+  topics[1] = addressTopic(event.params.onBehalfOf);
+  topics[2] = uintTopic(BigInt.fromI32(event.params.referralCode));
+  const values = new Array<ethereum.Value>(2);
+  values[0] = ethereum.Value.fromAddress(event.params.user);
+  values[1] = ethereum.Value.fromUnsignedBigInt(event.params.amount);
+
+  writeAction(
+    event,
+    AAVE_SUPPLY_TOPIC0,
+    topics,
+    eventData(values),
+    EVENT_SHAPE_AAVE_SUPPLY,
     event.params.onBehalfOf,
-    event.block.number,
-    event.block.timestamp,
+    BigInt.fromI32(1),
   );
 }
 
-/** Sygma bridge `Deposit`, crediting its single indexed `user`. */
+/** Stores one Sygma bridge deposit credited to its indexed user. */
 export function handleSygmaDeposit(event: Deposit): void {
-  write(
-    event.transaction.hash,
-    event.logIndex,
-    event.address,
-    Bytes.fromHexString(SYGMA_DEPOSIT_TOPIC0),
-    event.params.user,
-    event.block.number,
-    event.block.timestamp,
-  );
-}
+  const topics = new Array<Bytes>(1);
+  topics[0] = addressTopic(event.params.user);
+  const values = new Array<ethereum.Value>(5);
+  values[0] = ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(event.params.destinationDomainID));
+  values[1] = ethereum.Value.fromFixedBytes(event.params.resourceID);
+  values[2] = ethereum.Value.fromUnsignedBigInt(event.params.depositNonce);
+  values[3] = ethereum.Value.fromBytes(event.params.data);
+  values[4] = ethereum.Value.fromBytes(event.params.handlerResponse);
 
-function write(
-  txHash: Bytes,
-  logIndex: BigInt,
-  source: Bytes,
-  topic0: Bytes,
-  user: Bytes,
-  blockNumber: BigInt,
-  timestamp: BigInt,
-): void {
-  const action = new KpiAction(txHash.toHexString() + "-" + logIndex.toString());
-  action.source = source;
-  action.topic0 = topic0;
-  action.user = user;
-  action.value = BigInt.fromI32(1);
-  action.blockNumber = blockNumber;
-  action.timestamp = timestamp;
-  action.save();
+  writeAction(
+    event,
+    SYGMA_DEPOSIT_TOPIC0,
+    topics,
+    eventData(values),
+    EVENT_SHAPE_SYGMA_DEPOSIT,
+    event.params.user,
+    BigInt.fromI32(1),
+  );
 }

@@ -1,5 +1,5 @@
 /**
- * Throwaway: for every campaign on the registry, compare what the subgraph can serve against what
+ * for every campaign on the registry, compare what the subgraph can serve against what
  * the chain says — observability per KPI, the `Credit` fold against `totalProgress`/`progressOf`,
  * and the `TierPayout` fold against escrow drain.
  */

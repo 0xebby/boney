@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
 # Runs `pnpm relay` over every gated KPI on a cycle.
 #
-# The relayer is an off-chain process, not a contract — nothing on chain wakes up and scans logs, so a
-# gated KPI's ceiling stays at 0 until this has run. A report that lands first succeeds and credits
-# nothing, with no revert to surface it. This is the "just press the button" prerequisite.
-#
 # Usage: RPC=<url> ./scripts/relay-loop.sh [--once] [interval_seconds]
-#
-# `--once` runs a single pass and exits, which is what `dev-up.sh` needs: the indexer must not report
-# before the ceiling has been raised, so startup blocks on one synchronous pass and only then leaves a
-# loop running behind it. It lives here rather than in `dev-up.sh` so the target list has one home.
+# `--once` completes one pass before exiting.
 set -u
 ONCE=0
 if [ "${1:-}" = "--once" ]; then ONCE=1; shift; fi
@@ -49,8 +42,7 @@ if [ "${#TARGETS[@]}" -eq 0 ]; then
   exit 0
 fi
 
-# The relayer's own scan progress is worth seeing while it runs, and the summary below still needs
-# the whole output, so it goes through `tee` rather than command substitution.
+# Preserve live relay output and retain it for pass classification.
 PASS_LOG="$(mktemp -t boney-relay-pass.XXXXXX)"
 trap 'rm -f "$PASS_LOG"' EXIT
 
@@ -60,9 +52,7 @@ while true; do
     printf '[%s] %s kpi %s scanning…\n' "$(date -u +%H:%M:%S)" "${c:0:10}" "$k"
     pnpm relay --campaign "$c" --kpi "$k" --rpc "$RPC" 2>&1 | tee "$PASS_LOG"
     out=$(cat "$PASS_LOG")
-    # Match an address followed by `old → new`. The looser "contains an arrow" test is wrong: the
-    # relayer prints `scanning: <from> → <to>` on every cycle that has new blocks, so it reported a
-    # credit every time.
+    # Credit lines contain an address followed by `old → new`; scan-range lines do not.
     credited=$(printf '%s' "$out" | command grep -E '0x[0-9a-fA-F]{40}: [0-9]+ → [0-9]+')
     if [ -n "$credited" ]; then
       printf '[%s] %s kpi %s CREDITED: %s\n' "$(date -u +%H:%M:%S)" "${c:0:10}" "$k" \

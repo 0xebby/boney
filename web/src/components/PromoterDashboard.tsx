@@ -17,7 +17,7 @@ import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {PromoterDirectory} from "@/components/PromoterDirectory";
 import {ReferredCampaigns} from "@/components/ReferredCampaigns";
 import {trackingLink} from "@/lib/promoter";
-import { projectName, hasProjectName } from "@/lib/projects";
+import { campaignName, hasCampaignName } from "@/lib/campaignName";
 import {classifyTouch} from "@/lib/referrals";
 import {
   countLiveAttributions,
@@ -305,18 +305,18 @@ function buildColumns(tokens: Record<string, TokenMeta>, now: number): Column<Jo
       header: "Campaign",
       // Sorts on the displayed title. Unnamed rows sort together under "Campaign #".
       sortValue: (r) =>
-        hasProjectName(r.view) ? projectName(r.view) : `Campaign #${r.view.campaignId}`,
+        hasCampaignName(r.view) ? campaignName(r.view) : `Campaign #${r.view.campaignId}`,
       render: (r) => (
         <span className="inline-flex items-center gap-2">
           <Link
             href={`/campaign/${r.view.campaignId}`}
             className="font-medium text-ink hover:underline"
           >
-            {hasProjectName(r.view)
-              ? projectName(r.view)
+            {hasCampaignName(r.view)
+              ? campaignName(r.view)
               : `Campaign #${r.view.campaignId.toString()}`}
           </Link>
-          {hasProjectName(r.view) ? (
+          {hasCampaignName(r.view) ? (
             <span className="tnum text-xs text-ink-muted">#{r.view.campaignId.toString()}</span>
           ) : null}
         </span>
@@ -457,7 +457,7 @@ function ReferralGroupRows({
           href={`/campaign/${group.view.campaignId}`}
           className="text-sm font-medium text-ink hover:underline"
         >
-          {projectName(group.view)}
+          {campaignName(group.view)}
           <span className="tnum ml-2 text-xs font-normal text-ink-muted">
             #{group.view.campaignId.toString()}
           </span>

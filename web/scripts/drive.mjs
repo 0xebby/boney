@@ -1,13 +1,6 @@
 /**
- * Drives the campaign filters and sorting to prove the interactive layer works.
- *
- * A static screenshot only proves the first paint. This clicks through the controls a user
- * would actually use and asserts the table responds — the filters are pure functions that are
- * unit-tested, but nothing except a real browser proves they are wired to the UI.
- *
- * Set `CHROME_PATH` when Playwright's bundled `headless_shell` cannot start. On this WSL box the
- * shell build is missing `libnspr4.so` while the full chromium build ships its own copies, so
- * point CHROME_PATH at `chrome-linux64/chrome` under the `chromium-<rev>` cache directory.
+ * Drives campaign filtering and sorting controls.
+ * Set `CHROME_PATH` when Playwright's bundled browser is unavailable.
  */
 import {chromium} from "playwright";
 import {mkdirSync} from "node:fs";
@@ -26,8 +19,7 @@ page.on("pageerror", (e) => errors.push(e.message));
 
 const rows = () => page.locator('a[href^="/campaign/"]');
 
-// Read the id from the href rather than the cell text: the cell renders id and address
-// adjacently ("#00x61c3…33e1"), so any text parse has to disambiguate the "0" of "0x".
+// Read campaign ids from row links.
 const firstId = async () => {
   const href = await rows().first().getAttribute("href");
   return `#${href.split("/").pop()}`;
@@ -44,7 +36,6 @@ await rows().first().waitFor({timeout: 45_000});
 console.log("interaction checks:");
 check("all campaigns shown", await rows().count(), 5);
 
-// ── status filter ────────────────────────────────────────────
 await page.getByRole("button", {name: "Active", exact: true}).click();
 await page.waitForTimeout(300);
 check("Active filter", await rows().count(), 3);
@@ -57,7 +48,6 @@ await page.getByRole("button", {name: "All", exact: true}).click();
 await page.waitForTimeout(300);
 check("back to All", await rows().count(), 5);
 
-// ── search: numeric query is id-only ────────────────────────
 const search = page.locator("#campaign-search");
 await search.fill("2");
 await page.waitForTimeout(300);
@@ -67,8 +57,7 @@ check("search '2' matched campaign #2", await firstId(), "#2");
 await search.fill("");
 await page.waitForTimeout(300);
 
-// ── sorting ──────────────────────────────────────────────────
-// Default sort is reward pool descending, so the 50K campaign leads.
+// Default reward-pool sort is descending.
 check("default sort puts largest pool first", await firstId(), "#0");
 
 await page.getByRole("button", {name: /Reward pool/}).click();
@@ -77,7 +66,6 @@ check("ascending sort puts smallest pool first", await firstId(), "#3");
 
 await page.screenshot({path: "screenshots/campaigns-sorted-asc.png", fullPage: true});
 
-// ── aria-sort is announced, not just visual ─────────────────
 const ariaSort = await page
   .locator("th", {has: page.getByRole("button", {name: /Reward pool/})})
   .getAttribute("aria-sort");

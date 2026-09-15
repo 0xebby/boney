@@ -68,7 +68,9 @@ contract TouchWindowVerifierTest is Test {
         verifier = new TouchWindowVerifier();
 
         vault = new EscrowVault(address(this));
-        registry = new CampaignRegistry(address(vault), address(reputation), address(attribution), oracle);
+        registry = new CampaignRegistry(
+            address(vault), address(reputation), address(attribution), oracle, address(this)
+        );
         vault.setRegistrar(address(registry));
 
         campaign = _createCampaign(abi.encode(LOOKBACK));

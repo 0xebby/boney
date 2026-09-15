@@ -71,7 +71,7 @@ export const TOUCH_EIP712_TYPES = {
 /**
  * Reads `maxTouchDuration` from the attribution registry.
  *
- * The protocol-wide ceiling, typically 30 days. Prefer `fetchEffectiveMaxDuration` when building a
+ * The protocol-wide ceiling, typically 360 days. Prefer `fetchEffectiveMaxDuration` when building a
  * touch: a campaign may configure a shorter window, and the registry enforces the tighter of the
  * two. This remains exported because it is the bound that applies when there is no campaign window
  * to read.

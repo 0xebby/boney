@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
+import {IKpiAutomation} from "../src/interfaces/IKpiAutomation.sol";
 import {IKpiVerifier} from "../src/interfaces/IKpiVerifier.sol";
 import {EventMetricKpiVerifier} from "../src/verifiers/EventMetricKpiVerifier.sol";
 import {IEventMetricKpiVerifier} from "../src/interfaces/IEventMetricKpiVerifier.sol";
@@ -15,11 +16,22 @@ import {Types} from "../src/libraries/Types.sol";
 
 /// @dev A project verifier whose answer the test controls, for exercising the agreement arithmetic
 ///      without dragging a second real measurement pipeline into it.
-contract StubVerifier is IKpiVerifier {
+contract StubVerifier is IKpiVerifier, IKpiAutomation {
     uint256 public value;
+    AutomationMode public automationMode;
+    address public observationAdapter;
 
     function set(uint256 v) external {
         value = v;
+    }
+
+    function setAutomation(AutomationMode mode, address adapter) external {
+        automationMode = mode;
+        observationAdapter = adapter;
+    }
+
+    function automationCapability(address, uint256) external view returns (AutomationMode, address) {
+        return (automationMode, observationAdapter);
     }
 
     function verify(address, uint256, address, uint256, bytes calldata, bytes calldata)
@@ -90,6 +102,30 @@ contract GuardedKpiVerifierTest is Test {
         assertEq(cfg.projectVerifier, address(stub));
         assertEq(cfg.toleranceBps, 25);
         assertEq(uint8(cfg.mode), uint8(IGuardedKpiVerifier.Mode.AGREE));
+    }
+
+    function test_AutomationCapability_usesCanonicalObservationAndProjectMode() public {
+        _guard(address(0), 0, IGuardedKpiVerifier.Mode.AGREE);
+        (IKpiAutomation.AutomationMode mode, address adapter) = guard.automationCapability(campaign, KPI);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.USER_EVIDENCE_FREE));
+        assertEq(adapter, address(boney));
+
+        stub.setAutomation(IKpiAutomation.AutomationMode.USER_ACTIONS, address(stub));
+        _guard(address(stub), 0, IGuardedKpiVerifier.Mode.CAP);
+        (mode, adapter) = guard.automationCapability(campaign, KPI);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.USER_ACTIONS));
+        assertEq(adapter, address(boney));
+    }
+
+    function test_AutomationCapability_rejectsUnconfiguredAndUnsupportedProject() public {
+        (IKpiAutomation.AutomationMode mode, address adapter) = guard.automationCapability(campaign, KPI);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.UNSUPPORTED));
+        assertEq(adapter, address(0));
+
+        _guard(address(stub), 0, IGuardedKpiVerifier.Mode.AGREE);
+        (mode, adapter) = guard.automationCapability(campaign, KPI);
+        assertEq(uint8(mode), uint8(IKpiAutomation.AutomationMode.UNSUPPORTED));
+        assertEq(adapter, address(0));
     }
 
     function test_SetGuardConfig_onlyOwner() public {

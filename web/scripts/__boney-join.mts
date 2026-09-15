@@ -62,7 +62,7 @@ for (const [name, address] of CLONES) {
       return `err:${(e as Error).message.split("\n")[0]}`;
     }
   };
-  const [gate, status, start, end, maxDur] = await Promise.all(
+  const [gate, status, , end, maxDur] = await Promise.all(
     ["minReputation", "status", "startTime", "endTime", "maxAttributionDuration"].map(read),
   );
   const endTs = typeof end === "bigint" ? Number(end) : 0;

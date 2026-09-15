@@ -8,7 +8,7 @@ import {DataTable, type Column} from "@/components/ui/DataTable";
 import {StatusPill} from "@/components/ui/StatusPill";
 import {Card, CardHeader} from "@/components/ui/Card";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
-import {projectName, hasProjectName} from "@/lib/projects";
+import {campaignName, hasCampaignName} from "@/lib/campaignName";
 import {classifyTouch, sortReferrals, type ReferredCampaign} from "@/lib/referrals";
 import {formatTimeUntil, shortAddress} from "@/lib/format";
 import type {CampaignView} from "@/lib/types";
@@ -92,18 +92,18 @@ function buildReferredColumns(now: number): Column<ReferredCampaign>[] {
       header: "Campaign",
       // Sorts on the displayed title. Unnamed rows sort together under "Campaign #".
       sortValue: (r) =>
-        hasProjectName(r.view) ? projectName(r.view) : `Campaign #${r.view.campaignId}`,
+        hasCampaignName(r.view) ? campaignName(r.view) : `Campaign #${r.view.campaignId}`,
       render: (r) => (
         <span className="inline-flex items-center gap-2">
           <Link
             href={`/campaign/${r.view.campaignId}`}
             className="font-medium text-ink hover:underline"
           >
-            {hasProjectName(r.view)
-              ? projectName(r.view)
+            {hasCampaignName(r.view)
+              ? campaignName(r.view)
               : `Campaign #${r.view.campaignId.toString()}`}
           </Link>
-          {hasProjectName(r.view) ? (
+          {hasCampaignName(r.view) ? (
             <span className="tnum text-xs text-ink-muted">#{r.view.campaignId.toString()}</span>
           ) : null}
         </span>

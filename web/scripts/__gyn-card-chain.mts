@@ -1,4 +1,4 @@
-/** Throwaway: the on-chain truth for the Gyndore card — specs, ladders, and credited progress. */
+/** Reads Gyndore card specs, ladders, and credited progress from chain state. */
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
 import {CampaignAbi} from "../src/lib/abis/Campaign";
@@ -25,7 +25,13 @@ const client = createPublicClient({
 const read = <T,>(functionName: string, args: unknown[] = []) =>
   client.readContract({address: CAMPAIGN, abi: CampaignAbi, functionName, args}) as Promise<T>;
 
-const cfg = await read<any>("config");
+type CampaignConfig = {
+  name: string; token: Hex; rewardPool: bigint; startTime: bigint; endTime: bigint;
+  attributionWindow: bigint; minReputation: bigint;
+};
+type KpiSpec = {params: Hex; kind: number; target: bigint; aggregate: boolean};
+type Tier = {threshold: bigint; reward: bigint};
+const cfg = await read<CampaignConfig>("config");
 const [status, count, pool, paid] = await Promise.all([
   read<number>("status"), read<bigint>("kpiCount"),
   read<bigint>("remainingPool"), read<bigint>("paidOut"),
@@ -36,12 +42,12 @@ console.log(`  start=${new Date(Number(cfg.startTime)*1000).toISOString().slice(
 console.log(`  attributionWindow=${Number(cfg.attributionWindow)/86400}d  minReputation=${cfg.minReputation}`);
 
 for (let i = 0; i < Number(count); i++) {
-  const spec = await read<any>("kpi", [BigInt(i)]);
+  const spec = await read<KpiSpec>("kpi", [BigInt(i)]);
   const src = decodeEventSource(spec.params as Hex);
   const sig = src ? catalogSignature(src.topic0) : undefined;
   const noun = actionNoun(sig, kpiKindFromIndex(spec.kind));
   const total = await read<bigint>("totalProgress", [BigInt(i)]);
-  const tiers = await read<any[]>("tiers", [BigInt(i)]);
+  const tiers = await read<Tier[]>("tiers", [BigInt(i)]);
   console.log(`\nKPI #${i}  kind=${KPI_KIND_LABEL[kpiKindFromIndex(spec.kind)]}  target=${spec.target}  aggregate=${spec.aggregate}  totalProgress=${total}`);
   if (src) {
     console.log(`  watches ${knownContractName(src.source) ?? src.source}  ${sig ?? shortTopic(src.topic0)}`);
@@ -49,7 +55,7 @@ for (let i = 0; i < Number(count); i++) {
     console.log(`  filterTopic=${src.filterTopic ?? "-"} filterValue=${src.filterValue ?? "-"}`);
   } else console.log(`  params did not decode (${(spec.params as string).length} chars)`);
   console.log(`  noun: one ${noun.one} / many ${noun.many}`);
-  console.log(`  tiers: ${tiers.map((t: any) => `${t.threshold}→${t.reward}`).join("  ") || "none"}`);
+  console.log(`  tiers: ${tiers.map((t) => `${t.threshold}→${t.reward}`).join("  ") || "none"}`);
 
   for (const p of PROMOTERS) {
     const prog = await read<bigint>("progressOf", [p, BigInt(i)]);

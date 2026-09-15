@@ -120,6 +120,11 @@ export const CampaignAbi = [
         "name": "oracleCoordinator_",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "automatedReporter_",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -165,6 +170,19 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "MAX_EXTENSION_DURATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_EXTENSION_NUMERATOR",
     "inputs": [],
     "outputs": [
@@ -179,6 +197,19 @@ export const CampaignAbi = [
   {
     "type": "function",
     "name": "MAX_KPIS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_REPORTS_PER_BATCH",
     "inputs": [],
     "outputs": [
       {
@@ -208,6 +239,19 @@ export const CampaignAbi = [
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "aggregateUpdateDeadline",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -249,6 +293,25 @@ export const CampaignAbi = [
         "name": "",
         "type": "uint64",
         "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "authorizedReporters",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -761,6 +824,41 @@ export const CampaignAbi = [
   },
   {
     "type": "function",
+    "name": "reportUserActionsBatch",
+    "inputs": [
+      {
+        "name": "reports",
+        "type": "tuple[]",
+        "internalType": "struct ICampaign.UserActionReport[]",
+        "components": [
+          {
+            "name": "kpiIndex",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "user",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "newTotal",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "evidence",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "reputationRegistry",
     "inputs": [],
     "outputs": [
@@ -784,6 +882,24 @@ export const CampaignAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "setAuthorizedReporter",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1018,6 +1134,25 @@ export const CampaignAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AuthorizedReporterUpdated",
+    "inputs": [
+      {
+        "name": "reporter",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "allowed",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -1296,6 +1431,11 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "EmptyReportBatch",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EmptyTiers",
     "inputs": [
       {
@@ -1371,6 +1511,11 @@ export const CampaignAbi = [
   },
   {
     "type": "error",
+    "name": "InvalidReporter",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidWindow",
     "inputs": []
   },
@@ -1405,6 +1550,17 @@ export const CampaignAbi = [
     "type": "error",
     "name": "NoKpis",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoShortFallOwed",
+    "inputs": [
+      {
+        "name": "promoter",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1573,6 +1729,22 @@ export const CampaignAbi = [
   {
     "type": "error",
     "name": "TooManyKpis",
+    "inputs": [
+      {
+        "name": "provided",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "max",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyReports",
     "inputs": [
       {
         "name": "provided",

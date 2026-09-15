@@ -1,4 +1,4 @@
-/** Throwaway: who is attributed on the Uniswap campaign, and what their recent logs actually are. */
+/** Lists attributed Uniswap users and their recent logs. */
 import {createPublicClient, http, getAddress, pad, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
 import {AttributionRegistryAbi} from "../src/lib/abis/AttributionRegistry";

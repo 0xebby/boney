@@ -1,7 +1,4 @@
-/**
- * Runs the app's own event-source probe over the Aave V3 Base Sepolia market, so each proposed KPI is
- * judged by the same code the create form uses.
- */
+/** Runs the app event-source probe against Aave V3 on Base Sepolia. */
 import {createPublicClient, http, getAddress} from "viem";
 import {baseSepolia} from "viem/chains";
 import {
@@ -113,7 +110,7 @@ const PROPOSALS: Proposal[] = [
     src: {source: A.pool, topic0: eventTopic(SIG.eMode), actorTopic: 1,
           amountMode: AMOUNT_MODE.count, scale: BigInt(1)},
   },
-  // Rejected shapes, probed to show why.
+  // Additional candidate event shapes.
   {
     name: "REJECTED: Supply as a volume KPI",
     signature: SIG.supply,

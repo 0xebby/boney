@@ -1,4 +1,4 @@
-/** Throwaway: full addresses, credited per kpi, for the Gyndore card. */
+/** Lists Gyndore card users and per-KPI credit. */
 import {readFileSync} from "node:fs";
 const txt = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const url = txt.split("\n").find((l) => /^\s*NEXT_PUBLIC_SUBGRAPH_URL\s*=/.test(l))!
@@ -7,9 +7,14 @@ const C = "0x86b7b22aed09452232ca1a072db5be7a837f06fc";
 const q = `{ credits(first:1000, where:{campaign:"${C}"}) { kpiIndex promoterId user amount }
   campaign(id:"${C}"){ promoters{promoterId wallet} touches(first:1000){user promoterId signedAt} } }`;
 const r = await fetch(url, {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({query:q})});
-const {data} = await r.json();
+type Promoter = {promoterId: string; wallet: string};
+type Touch = {user: string; promoterId: string; signedAt: string};
+type Credit = {kpiIndex: number; promoterId: string; user: string; amount: string};
+const {data} = await r.json() as {data: {
+  campaign: {promoters: Promoter[]; touches: Touch[]}; credits: Credit[];
+}};
 const per = new Map<string, {swaps: bigint; stakes: bigint; promoter: string}>();
-const pw = new Map<string,string>(data.campaign.promoters.map((p:any)=>[p.promoterId, p.wallet]));
+const pw = new Map<string,string>(data.campaign.promoters.map((p)=>[p.promoterId, p.wallet]));
 for (const t of data.campaign.touches) {
   if (!per.has(t.user)) per.set(t.user, {swaps: 0n, stakes: 0n, promoter: pw.get(t.promoterId) ?? "?"});
 }

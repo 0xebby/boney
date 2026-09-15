@@ -1,4 +1,4 @@
-/** Throwaway: what the subgraph actually exposes on the entities the Gyndore card needs. */
+/** Lists subgraph fields required by the Gyndore card. */
 import {readFileSync} from "node:fs";
 
 const txt = readFileSync(new URL("../.env.local", import.meta.url), "utf8");

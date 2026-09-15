@@ -1,7 +1,4 @@
-/**
- * Throwaway: the Q2 fold disagreement — whether the subgraph's `KpiAction` superset reconciles with
- * a chain scan once the campaign's own attribution floor is applied to both sides.
- */
+/** Reconciles subgraph and chain activity under matching attribution floors. */
 import {readFileSync} from "node:fs";
 import {createPublicClient, http, getAddress, type Hex} from "viem";
 import {baseSepolia} from "viem/chains";
@@ -30,7 +27,7 @@ async function gql<T>(q: string): Promise<T> {
 }
 const ms = () => Number(process.hrtime.bigint() / 1_000_000n);
 
-// Honest RPC round trip: readContract, not the cached getBlockNumber action.
+// Read the uncached chain head.
 {
   const t = ms();
   for (let i = 0; i < 5; i++) await client.request({method: "eth_getBlockByNumber", params: ["latest", false]} as never);
@@ -62,7 +59,7 @@ const sgNoFloor = fold(rowsAll, () => true);
 const sgCampaignFloor = fold(rowsAll, (r) => BigInt(r.blockNumber) >= floorBlock);
 const sgUserFloor = fold(rowsAll, (r) => BigInt(r.blockNumber) >= (perUserFloor.get(r.user.toLowerCase()) ?? 0n));
 
-// Chain scan from the campaign-wide floor, same narrowing.
+// Apply the campaign-wide floor to the chain scan.
 const chainAll = new Map<string, number>();
 const chainBlocks = new Map<string, bigint[]>();
 const topics = [DEPOSIT, referrals.map((a) => `0x${"0".repeat(24)}${a.slice(2)}`)];

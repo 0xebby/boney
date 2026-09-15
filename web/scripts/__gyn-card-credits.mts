@@ -1,4 +1,4 @@
-/** Throwaway: every Gyndore credit, one line each. */
+/** Lists Gyndore credits. */
 import {readFileSync} from "node:fs";
 const txt = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const url = txt.split("\n").find((l) => /^\s*NEXT_PUBLIC_SUBGRAPH_URL\s*=/.test(l))!
@@ -8,9 +8,14 @@ const q = `{ credits(first:1000, where:{campaign:"${C}"}, orderBy: blockNumber) 
   kpiIndex promoterId user amount blockNumber timestamp } 
   campaign(id:"${C}"){ promoters { promoterId wallet } touches(first:1000, orderBy:signedAt){ user promoterId signedAt expiresAt blockNumber } } }`;
 const r = await fetch(url, {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({query:q})});
-const {data} = await r.json();
+type Promoter = {promoterId: string; wallet: string};
+type Touch = {user: string; promoterId: string; signedAt: string; expiresAt: string; blockNumber: string};
+type Credit = {kpiIndex: number; promoterId: string; user: string; amount: string; blockNumber: string; timestamp: string};
+const {data} = await r.json() as {data: {
+  campaign: {promoters: Promoter[]; touches: Touch[]}; credits: Credit[];
+}};
 const short = (a: string) => `${a.slice(0,6)}…${a.slice(-4)}`;
-const pw = new Map<string,string>(data.campaign.promoters.map((p:any)=>[p.promoterId, short(p.wallet)]));
+const pw = new Map<string,string>(data.campaign.promoters.map((p)=>[p.promoterId, short(p.wallet)]));
 console.log("KIND: 1=Mint 2=Swap 5=Stake   #0=Swap #1=Stake #2=Mint");
 console.log("\nkpi  promoter        user            amount  block      when");
 for (const c of data.credits) {

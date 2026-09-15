@@ -1,9 +1,5 @@
-// Full-page shots of the two routes the shell's label register shows up on: the home page with no
-// wallet, and a campaign page read by the promoter wallet that owns it.
-//
-// The sticky header is pinned to `static` before the shot, otherwise a full-page capture stamps it
-// across the middle of the image where the scroll happened to be.
-//
+// Captures full-page shell labels with disconnected and promoter-wallet contexts.
+// The header is static during full-page capture.
 // Usage: node scripts/shoot-shell.mjs [before|after] [baseUrl]
 import {chromium} from "../node_modules/playwright/index.mjs";
 import {mkdirSync} from "node:fs";

@@ -115,7 +115,7 @@ export function CampaignFilters({
         <div
           ref={panelRef}
           id="campaign-filters"
-          className="absolute right-0 top-full z-30 mt-2 w-[min(20rem,calc(100vw-2rem))] space-y-3 rounded-lg border border-hairline bg-surface-1 p-3 text-left shadow-lg"
+          className="absolute right-0 top-full z-30 mt-2 w-[min(22rem,calc(100vw-2rem))] space-y-3 rounded-lg border border-hairline bg-surface-1 p-3 text-left shadow-lg"
         >
           <div>
             <label className="sr-only" htmlFor="campaign-search">
@@ -137,10 +137,11 @@ export function CampaignFilters({
               Status
             </p>
 
-            {/* `flex-wrap`: six chips measure wider than a phone’s content column, and wrapping
-                inside their own box keeps every status visible — an `overflow-x-auto` strip would
-                put half of them behind a gesture nothing advertises. */}
-            <div className="flex flex-wrap items-center gap-1 rounded-md border border-hairline p-0.5">
+            {/* Three columns, two rows, no box. Six chips never fit one line at this width, and a
+                wrapping row inside a border left "Cancelled" alone in a boxed second line that read
+                as a separate control. A grid wraps on purpose: two even rows of three, every status
+                visible, at every width the panel has. */}
+            <div className="grid grid-cols-3 gap-1">
               {STATUS_OPTIONS.map((option) => {
                 const active = filters.status === option;
                 return (
@@ -149,8 +150,10 @@ export function CampaignFilters({
                     type="button"
                     onClick={() => setFilters((f) => ({...f, status: option}))}
                     aria-pressed={active}
-                    className={`rounded px-2 py-1.5 text-xs transition-colors sm:py-1 ${
-                      active ? "bg-surface-2 font-medium text-ink" : "text-ink-muted hover:text-ink"
+                    className={`rounded-md px-2 py-1.5 text-xs transition-colors ${
+                      active
+                        ? "bg-surface-2 font-medium text-ink"
+                        : "text-ink-muted hover:bg-surface-hover hover:text-ink"
                     }`}
                   >
                     {option === "all" ? "All" : option}
