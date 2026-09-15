@@ -11,7 +11,7 @@ import {RankBadge} from "@/components/ui/RankBadge";
 import {TrustReachBar} from "@/components/ui/TrustReachBar";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
 import {shortAddress} from "@/lib/format";
-import {projectName} from "@/lib/projects";
+import {campaignName} from "@/lib/campaignName";
 import {scoreSplit, type ScoreParts} from "@/lib/boneyscore";
 import {type Rank} from "@/lib/ranks";
 import {
@@ -137,7 +137,7 @@ export function DiscoverPage({
               <option value={ALL_CAMPAIGNS}>All campaigns</option>
               {withPromoters.map((g) => (
                 <option key={g.view.campaign} value={g.view.campaign}>
-                  {projectName(g.view)} · #{g.view.campaignId.toString()} —{" "}
+                  {campaignName(g.view)} · #{g.view.campaignId.toString()} —{" "}
                   {g.promoters.length} promoter
                   {g.promoters.length === 1 ? "" : "s"}
                 </option>

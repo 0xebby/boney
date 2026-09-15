@@ -2,6 +2,7 @@
 
 import {useMemo, useState} from "react";
 import Link from "next/link";
+import {useRouter} from "next/navigation";
 import {useAccount} from "wagmi";
 import {useCampaigns, useReputation} from "@/hooks/useCampaigns";
 import {useCampaignKpiSpecs} from "@/hooks/useCampaignKpiSpecs";
@@ -16,12 +17,11 @@ import {StatusPill} from "@/components/ui/StatusPill";
 import {JoinedBadge} from "@/components/ui/JoinedBadge";
 import {Meter} from "@/components/ui/Meter";
 import {Card} from "@/components/ui/Card";
+import {ButtonLink} from "@/components/ui/Button";
 import {JoinCampaignMenu} from "@/components/ui/JoinCampaignMenu";
 import {CampaignFilters as CampaignFilterControls} from "@/components/CampaignFilters";
 import {LeaderboardTeaser} from "@/components/LeaderboardTeaser";
 import {EmptyState, ErrorState, SkeletonRows} from "@/components/ui/States";
-import {WelcomeDialog} from "@/components/WelcomeDialog";
-import {welcomeFigure} from "@/lib/welcome";
 import {
   filterCampaigns,
   summarize,
@@ -31,7 +31,7 @@ import {
 import {joinOptions} from "@/lib/joinPicker";
 import {utilization} from "@/lib/campaign";
 import {summarizeKinds} from "@/lib/kpiSummary";
-import {projectName, hasProjectName} from "@/lib/projects";
+import {campaignName, hasCampaignName} from "@/lib/campaignName";
 import type {ResolvedGuide} from "@/lib/campaignGuide";
 import {formatTokenAmount, formatPercent, formatTimeUntil, formatUsd} from "@/lib/format";
 import type {CampaignView, KpiSpec} from "@/lib/types";
@@ -41,6 +41,7 @@ export function CampaignsPage() {
     useCampaigns();
   const {reputation} = useReputation();
   const {isConnected} = useAccount();
+  const router = useRouter();
   const [filters, setFilters] = useState<CampaignFilters>(EMPTY_FILTERS);
 
   /*
@@ -93,16 +94,6 @@ export function CampaignsPage() {
   // retotal what the filter produced rather than leave the row reporting rows it no longer shows.
   const value = useMemo(() => poolValue(visible, tokens), [visible, tokens]);
 
-  // The welcome dialog's headline number, from the same totals the tiles below read.
-  const welcome = useMemo(
-    () =>
-      welcomeFigure({
-        pool: value.pool,
-        activeCount: summary.activeCount,
-      }),
-    [value.pool, summary.activeCount],
-  );
-
   const columns = useMemo(
     () => buildColumns(tokens, now, joinedAddresses, kpiSpecs, guides, chainId),
     [tokens, now, joinedAddresses, kpiSpecs, guides, chainId],
@@ -131,87 +122,45 @@ export function CampaignsPage() {
   }
 
   return (
-    <>
-      {/* Outside the column below, not the first child of it: `space-y-5` would give the overlay a
-          top margin, and an `inset-0` box shifts for one. */}
-      <WelcomeDialog figure={welcome} ready={!isLoading && !error} />
+    <div className="space-y-5">
+      {/*
+        The list page doubles as the landing page, so it opens with what the marketplace does rather
+        than with its own name: the top bar already carries the wordmark, and a second one below it
+        spent the first screen saying "Boneyard" twice and nothing else.
 
-      <div className="space-y-5">
-        {/*
-          The list page doubles as the landing page, so the name gets hero treatment here rather
-          than the small page-title treatment every other route uses. Lowercase to match the brand
-          mark in the top bar.
-        */}
-        <header className="py-6 text-center sm:py-12">
-          {/*
-            The wordmark and both lines are one lockup, inside a `w-fit` box.
+        One left-aligned lockup on the table's own axis — headline, the line that explains it, the
+        two actions with a caption each, the way in for anyone who wants the mechanics first, and the
+        live figures under a hairline. The figures are evidence for the headline rather than a panel
+        of their own, so they sit inside the lockup instead of in a card.
+      */}
+      <header className="pt-2 sm:pt-4">
+        <h1 className="animate-rise-in max-w-[18ch] text-balance font-display text-4xl leading-tight text-ink sm:text-5xl">
+          Pay only for verified growth.
+        </h1>
 
-            That box is as wide as its widest child, so no line can run wider than the name it sits
-            under: on a phone both wrap inside the wordmark's own measure, on a desktop they centre under
-            it. Centring them against the page instead let the blocks meet at a shared midpoint while
-            their edges disagreed, which is what read as misaligned — and capping only the first line
-            left the second free to set the box's width, so the first one wrapped early inside a box
-            wider than the wordmark.
-          */}
-          <div className="mx-auto w-fit">
-            <h1 className="animate-rise-in font-display text-5xl lowercase leading-none text-brand sm:text-7xl">
-              Boneyard
-            </h1>
-            <p className="animate-rise-in mx-auto mt-3 max-w-[15rem] text-balance text-sm leading-snug text-brand [animation-delay:60ms] sm:mt-4 sm:max-w-none sm:text-base">
-              The Marketplace for Verifiable Web3 Growth.
-            </p>
+        <p className="animate-rise-in mt-3 max-w-[48ch] text-balance text-sm leading-snug text-ink-secondary [animation-delay:60ms] sm:mt-4 sm:text-base">
+          The marketplace for verifiable Web3 growth: projects escrow rewards, promoters earn them
+          per verified result.
+        </p>
 
-            {/*
-              Capped to the same measure as the line above it. Left unbounded it was the widest child,
-              so it — not the wordmark — decided how wide the box was.
-            */}
-          </div>
-        </header>
+        {/* The two actions the page exists to start, ranked by register: one solid primary for the
+            project side, the brand outline for the promoter's. Promoting is a menu rather than a
+            link because the campaign has to be chosen, and the choice is the part a promoter needs
+            help with — every offerable campaign is listed, with the ones this wallet cannot promote
+            yet saying why.
 
-        {/* One panel across the width: what the marketplace is paying out and how much of it has
-            landed. Four figures reading left to right, the pool set larger as the one everything
-            else is a share of. Unheaded — each figure carries its own label, so a heading above them
-            would only name the panel a second time.
-
-            One gap for both axes, equal to the card's own inset: every space inside the panel —
-            figure to figure, figure to edge — measures the same. */}
-        <Card>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Figure
-              label="Total Reward Pool"
-              value={formatUsd(value.pool, {compact: true})}
-              size="lg"
-            />
-            <Figure
-              label="Active campaigns"
-              value={summary.activeCount.toLocaleString("en-US")}
-              qualifier={`of ${summary.count.toLocaleString("en-US")}`}
-            />
-            <Figure label="Rewards Earned" value={formatUsd(value.paidOut, {compact: true})} />
-            <Figure label="Pool Utilization" value={formatPercent(value.paidOut, value.pool)} />
-          </div>
-        </Card>
-
-        {/* The two actions the page exists to start, centred between the overview above and the table
-            below. Promoting is a menu rather than a link because the campaign has to be chosen, and
-            the choice is the part a promoter needs help with — every offerable campaign is listed,
-            with the ones this wallet cannot promote yet saying why. */}
-        {/* A capped band rather than two text-width buttons or a pair stretched across the panel:
-            each takes half of a measure narrow enough to stay a pair, wide enough to read as the
-            page’s two entry points. A caption under each states what that side of the marketplace
-            does. Stacked below `sm`, where half of a phone is not a button, and spaced wider there
-            so a caption groups with the button above it instead of reading as four loose lines. */}
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-6 py-2 sm:flex-row sm:gap-3 sm:py-4">
-          <div className="flex flex-col gap-2 sm:flex-1">
-            <Link
-              href="/create"
-              className="flex min-h-11 w-full items-center justify-center rounded-md bg-brand px-5 text-sm font-semibold text-plane transition-opacity hover:opacity-90"
-            >
+            A fixed measure each rather than halves of a band: side by side they read as a pair, and
+            a caption under each states what that side of the marketplace does. Stacked below `sm`,
+            where half a phone is not a button, and spaced wider there so a caption groups with the
+            button above it instead of reading as four loose lines. */}
+        <div className="mt-5 flex flex-col gap-6 sm:mt-6 sm:flex-row sm:items-start sm:gap-6">
+          <div className="flex flex-col gap-2 sm:w-64">
+            <ButtonLink href="/create" variant="primary" full>
               Create a campaign
-            </Link>
+            </ButtonLink>
 
-            <p className="text-balance text-center text-xs leading-snug text-brand">
-              <i>Set your KPIs. Escrow reward pool. Pay for verifiable results.</i>
+            <p className="text-balance text-xs leading-snug text-ink-muted">
+              Set the KPIs, escrow the reward pool, pay for verified results.
             </p>
           </div>
 
@@ -219,88 +168,114 @@ export function CampaignsPage() {
             options={joinable}
             onJoined={refetchJoined}
             loading={isLoading}
-            caption="Generate a unique boneylink, share and earn rewards."
-            className="sm:flex-1"
+            variant="brand-outline"
+            caption="Generate a boneylink, share it, earn per verified result."
+            className="sm:w-64"
           />
         </div>
 
-        <Card padded={false}>
-          {/* The table’s own header carries what the list is showing and the one control that
-              changes it — filters live behind it rather than in a row of their own above the panel.
-              Padded to the table’s own cell inset, so the title starts where the first column does. */}
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-2 py-2.5 sm:px-3">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h2 className="text-sm font-bold text-brand">Browse campaigns</h2>
-
-              {visible.length !== campaigns.length ? (
-                <span className="tnum text-xs text-ink-muted">
-                  {visible.length} of {campaigns.length}
-                </span>
-              ) : null}
-
-              {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
-                  column that quietly stopped describing the tail of the list would read as “no KPIs
-                  here”. */}
-              {kpiSpecsDropped > 0 ? (
-                <span className="text-xs text-ink-muted">
-                  KPI kinds not loaded for {kpiSpecsDropped} campaign
-                  {kpiSpecsDropped === 1 ? "" : "s"}
-                </span>
-              ) : null}
-            </div>
-
-            <CampaignFilterControls filters={filters} setFilters={setFilters} />
-          </div>
-
-          {isLoading ? (
-            <SkeletonRows rows={4} cols={8} />
-          ) : error ? (
-            <ErrorState message={String(error)} onRetry={() => refetch()} />
-          ) : (
-            <DataTable
-              rows={visible}
-              columns={columns}
-              rowKey={(c) => c.campaign}
-              initialSort={{key: "project", dir: "asc"}}
-              isRefreshing={isRefreshing}
-              emptyState={
-                <EmptyState
-                  title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
-                  description={
-                    campaigns.length === 0
-                      ? "Create the first campaign to start a performance-based collaboration."
-                      : "Try clearing the filters or widening your search."
-                  }
-                  action={
-                    campaigns.length === 0 ? (
-                      <Link
-                        href="/create"
-                        className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
-                      >
-                        Create a campaign
-                      </Link>
-                    ) : null
-                  }
-                />
-              }
-            />
-          )}
-        </Card>
-
-        {/* Who is already earning, below the table rather than above it: the panel renders nothing
-            until the subgraph answers, so a slot here shifts only the docs link under it. */}
-        <LeaderboardTeaser />
-
-        {/* The docs link sits after the table rather than in the hero: a visitor who has read the list
-            and not found what they came for is the one who wants an explanation, and the hero's job is
-            to get them to the list. */}
-        <p className="text-xs text-ink-muted">
+        {/* The mechanics, as a quiet link inside the lockup. It used to sit under the table, which
+            put the explanation after the thing it explains. */}
+        <p className="mt-5 text-xs">
           <Link href="/docs" className="text-brand underline-offset-2 hover:underline">
             See how it works
           </Link>
         </p>
-      </div>
-    </>
+
+        {/* What the marketplace is paying out and how much of it has landed, reading left to right
+            with the pool set larger as the figure everything else is a share of. One hairline above
+            them and no box: each carries its own label, so a panel with a border would only fence
+            off four numbers that belong to the sentence at the top of the page. */}
+        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-hairline pt-5 sm:mt-7 lg:grid-cols-4">
+          <Figure
+            label="Total reward pool"
+            value={formatUsd(value.pool, {compact: true})}
+            size="lg"
+          />
+          <Figure
+            label="Active campaigns"
+            value={summary.activeCount.toLocaleString("en-US")}
+            qualifier={`of ${summary.count.toLocaleString("en-US")}`}
+          />
+          <Figure label="Rewards earned" value={formatUsd(value.paidOut, {compact: true})} />
+          <Figure label="Pool utilization" value={formatPercent(value.paidOut, value.pool)} />
+        </div>
+      </header>
+
+      {/* The name column's measure, as a property the column and its cells both read: a wide
+          share of the viewport while the row is a name and one number, the desktop 220px from `md`,
+          where the five columns that share the row with it come back. */}
+      <Card padded={false} className="[--name-col:62vw] md:[--name-col:220px]">
+        {/* The table’s own header carries what the list is showing and the one control that
+            changes it — filters live behind it rather than in a row of their own above the panel.
+            Padded to the table’s own cell inset, so the title starts where the first column does. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline px-2 py-2.5 sm:px-3">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h2 className="text-sm font-bold text-ink">Browse campaigns</h2>
+
+            {visible.length !== campaigns.length ? (
+              <span className="tnum text-xs text-ink-muted">
+                {visible.length} of {campaigns.length}
+              </span>
+            ) : null}
+
+            {/* Said out loud rather than absorbed: those rows show a KPI count, not a kind, and a
+                column that quietly stopped describing the tail of the list would read as “no KPIs
+                here”. */}
+            {kpiSpecsDropped > 0 ? (
+              <span className="text-xs text-ink-muted">
+                KPI kinds not loaded for {kpiSpecsDropped} campaign
+                {kpiSpecsDropped === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+
+          <CampaignFilterControls filters={filters} setFilters={setFilters} />
+        </div>
+
+        {isLoading ? (
+          <SkeletonRows rows={4} cols={7} />
+        ) : error ? (
+          <ErrorState message={String(error)} onRetry={() => refetch()} />
+        ) : (
+          <DataTable
+            rows={visible}
+            columns={columns}
+            rowKey={(c) => c.campaign}
+            initialSort={{key: "name", dir: "asc"}}
+            isRefreshing={isRefreshing}
+            /* The whole row opens the campaign, so a reader aiming at a status or a number lands
+               somewhere instead of nowhere. The project name stays a real link inside it — it is
+               how you open one in a new tab — and stops the click from being handled twice. */
+            onRowClick={(c) => router.push(`/campaign/${c.campaignId}`)}
+            emptyState={
+              <EmptyState
+                title={campaigns.length === 0 ? "No campaigns yet" : "No campaigns match"}
+                description={
+                  campaigns.length === 0
+                    ? "Create the first campaign to start a performance-based collaboration."
+                    : "Try clearing the filters or widening your search."
+                }
+                action={
+                  campaigns.length === 0 ? (
+                    <Link
+                      href="/create"
+                      className="rounded-md border border-hairline-strong px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-hover"
+                    >
+                      Create a campaign
+                    </Link>
+                  ) : null
+                }
+              />
+            }
+          />
+        )}
+      </Card>
+
+      {/* Who is already earning, below the table rather than above it: the panel renders nothing
+          until the subgraph answers, so an empty slot here costs the page nothing. */}
+      <LeaderboardTeaser />
+    </div>
   );
 }
 
@@ -339,14 +314,21 @@ function buildColumns(
 
   return [
     {
-      key: "project",
-      header: "Project",
-      // The campaign's on-chain name, which is what a project puts its own name in. The project
+      key: "name",
+      header: "Campaign",
+      // The campaign's on-chain name, chosen at creation and unique across the registry. The project
       // wallet stands in where a campaign was created without one.
-      sortValue: (c) => (hasProjectName(c) ? projectName(c) : c.project.toLowerCase()),
-      // `min()` rather than a flat 220px: the same declaration is the column's share of a phone's
-      // width and its measure on a desktop, which an inline width cannot express with a breakpoint.
-      width: "min(220px, 42vw)",
+      sortValue: (c) => (hasCampaignName(c) ? campaignName(c) : c.project.toLowerCase()),
+      /*
+        A custom property set on the panel, so an inline width can change at a breakpoint — see
+        `--name-col` on the `Card` this table mounts in.
+
+        The wide share holds until `md`, which is exactly where the columns it makes room for come
+        back. Below that the row is a name, a sub-line and one number, and the sub-line carries the
+        status, the end date, the gate and the share paid; capped at the desktop 220px it wrapped to
+        a second line while the middle of the row sat empty.
+      */
+      width: "var(--name-col)",
       /*
         Capped at the column's own width, with the name truncating inside it.
         `overflow-x-auto` handles the table's total; this line only has to stop one cell from
@@ -355,63 +337,60 @@ function buildColumns(
         and vanishes when it disconnects — moved every column to its right. The cap makes this
         column's measure a constant, so the badge is free to come and go.
       */
-      render: (c) => (
-        <div className="flex max-w-[42vw] flex-col gap-0.5 sm:max-w-[220px]">
-          <span className="flex items-center gap-2">
-            <Link
-              href={`/campaign/${c.campaignId}`}
-              title={projectName(c)}
-              className="min-w-0 truncate font-medium text-ink hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {projectName(c)}
-            </Link>
-            {hasJoined(c) ? <JoinedBadge /> : null}
-          </span>
-
-          {/* A phone drops six of the nine columns, which left it a name, a status and a number.
-              The three that decide whether a campaign is worth opening — when it ends, what it
-              gates on, how much of the pool has moved — ride under the name instead, and go away
-              from `md` up where the table shows them itself. */}
-          <span className="text-[11px] leading-snug text-ink-muted md:hidden">
-            {now > 0 ? `${formatTimeUntil(c.endTime, now)} · ` : ""}
-            {c.minReputation === BigInt(0)
-              ? "open to all"
-              : `min ${c.minReputation.toLocaleString("en-US")}`}
-            {c.paidOut > BigInt(0)
-              ? ` · ${formatPercent(Number(c.paidOut), Number(c.rewardPool))} paid`
-              : ""}
-          </span>
-        </div>
-      ),
-    },
-    {
-      key: "why",
-      header: "Campaign",
-      hideOnMobile: true,
-      width: "320px",
-      // Sorts on the summary, so campaigns that say what they are for group ahead of the ones that
-      // do not. The numeric id is not here at all — it is on the campaign's own page.
-      sortValue: (c) => summaryFor(c) ?? "",
       render: (c) => {
         const summary = summaryFor(c);
 
-        // Nothing published yet. Said as an absence rather than filled with the KPI kinds, which
-        // are their own column and describe what is measured rather than what it is for.
-        if (!summary) {
-          return <span className="text-ink-muted">No campaign info yet</span>;
-        }
-
         return (
-          <span className="line-clamp-2 text-ink-secondary" title={summary}>
-            {summary}
-          </span>
+          <div className="flex max-w-(--name-col) flex-col gap-0.5">
+            <span className="flex items-center gap-2">
+              <Link
+                href={`/campaign/${c.campaignId}`}
+                title={campaignName(c)}
+                className="min-w-0 truncate font-medium text-ink hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {campaignName(c)}
+              </Link>
+              {hasJoined(c) ? <JoinedBadge /> : null}
+            </span>
+
+            {/* What the campaign is for, in the project's own words, under the name it belongs to
+                rather than in a 320px column of its own — most rows have nothing to put there, and
+                a column of "No campaign info yet" was the widest thing on the page. Absent, this
+                line is simply not rendered. */}
+            {summary ? (
+              <span className="hidden md:block">
+                {/* `line-clamp-2` sets its own `display`, so the breakpoint has to live on a
+                    wrapper rather than fight it for the same property. */}
+                <span className="line-clamp-2 text-xs leading-snug text-ink-muted" title={summary}>
+                  {summary}
+                </span>
+              </span>
+            ) : null}
+
+            {/* A phone drops five of the seven columns, which leaves it a name and a number. The
+                four facts that decide whether a campaign is worth opening — what state it is in,
+                when it ends, what it gates on, how much of the pool has moved — ride under the name
+                instead, and go away from `md` up where the table shows them itself. */}
+            <span className="text-[11px] leading-snug text-ink-muted md:hidden">
+              {c.status}
+              {now > 0 ? ` · ${formatTimeUntil(c.endTime, now)}` : ""}
+              {c.minReputation === BigInt(0)
+                ? " · open to all"
+                : ` · min ${c.minReputation.toLocaleString("en-US")}`}
+              {c.paidOut > BigInt(0)
+                ? ` · ${formatPercent(Number(c.paidOut), Number(c.rewardPool))} paid`
+                : ""}
+            </span>
+          </div>
         );
       },
     },
     {
       key: "status",
       header: "Status",
+      // A phone spends the width on the name instead; the status leads the sub-line under it.
+      hideOnMobile: true,
       sortValue: (c) => c.status,
       render: (c) => <StatusPill status={c.status} />,
     },
@@ -462,8 +441,10 @@ function buildColumns(
           return <span className="text-ink-muted">{c.kpiCount.toString()}</span>;
         }
 
+        // One line: `NFT mints +1` broken across two reads as two separate KPIs, and the column has
+        // the room now that the summary is not a column of its own.
         return (
-          <span title={summary.title} className="text-ink-secondary">
+          <span title={summary.title} className="whitespace-nowrap text-ink-secondary">
             {summary.label}
             {summary.extra > 0 ? (
               <span className="ml-1 text-ink-muted">+{summary.extra}</span>

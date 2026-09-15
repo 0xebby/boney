@@ -15,7 +15,7 @@ import type {CampaignView} from "./types";
  * behaviour by design — a name belongs to a campaign, not to the wallet behind it, so one project
  * running three campaigns names each of them separately.
  */
-export function projectName(view: Pick<CampaignView, "name" | "project">): string {
+export function campaignName(view: Pick<CampaignView, "name" | "project">): string {
   // Falls back to the shortened address rather than an empty cell. A campaign created through this
   // app or any of the seed scripts always has a name; a campaign constructed directly against the
   // contracts is validated too, so the fallback is defensive rather than a path anything takes.
@@ -23,11 +23,11 @@ export function projectName(view: Pick<CampaignView, "name" | "project">): strin
 }
 
 /**
- * Whether `projectName` returned a real name rather than the address fallback.
+ * Whether `campaignName` returned a real name rather than the address fallback.
  *
  * Lets a caller style the two differently — a name reads as content, a bare address reads as
  * missing metadata — without duplicating the lookup or string-matching the result.
  */
-export function hasProjectName(view: Pick<CampaignView, "name">): boolean {
+export function hasCampaignName(view: Pick<CampaignView, "name">): boolean {
   return Boolean(view.name?.trim());
 }
