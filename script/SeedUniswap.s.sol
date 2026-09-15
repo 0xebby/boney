@@ -177,7 +177,7 @@ contract SeedUniswap is Script {
         // `value` is the first data word of `Transfer`. The filter pins topics[1] to the pool, so only
         // USDC the pool paid out counts and a faucet drip to the same wallet does not.
         kpis[1] = Types.KpiSpec({
-            kind: Types.KpiKind.GenerateVolume,
+            kind: Types.KpiKind.Volume,
             verifier: address(guardedVerifier),
             target: 500,
             aggregate: false,

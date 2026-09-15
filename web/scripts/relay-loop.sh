@@ -9,8 +9,23 @@ if [ "${1:-}" = "--once" ]; then ONCE=1; shift; fi
 RPC="${RPC:-https://base-sepolia-rpc.publicnode.com}"
 INTERVAL="${1:-120}"
 
-# Gated campaign:kpiIndex targets. Refresh addresses after deployment or reseeding.
-# Never include a KPI that watches its campaign's escrow token.
+# campaign:kpiIndex.
+#
+# Only the **gated** KPIs belong here. Relaying an ungated one is pointless: with `verifier == 0x0` the
+# campaign credits the reported figure as-is, so there is no ceiling to raise. Venus, Sdy Labs and
+# SuperBridge are ungated throughout and never belong here; Gyndore and Uniswap gate all three of
+# theirs, so those six are the whole list. The empty-list branch below stays for a fixture reseed, where a
+# stale address must be removed before the new one exists.
+#
+# Addresses change with every `DeployBoney` + reseed, and a stale one is silent: the relayer reports
+# against a dead campaign, credits nothing, and the gated KPI simply stays flat.
+#
+# Keep any KPI that watches the escrow token *out* of this list. Its `Transfer` events include things
+# that are not user actions — the referral's own self-transfers, tier payouts leaving the EscrowVault,
+# the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
+# observed ceiling, which unlocks the next tier, which pays out again. Both campaigns below pay in a
+# token none of their own KPIs watch — Gyndore in GYND, Uniswap in bUSD against pool, USDC and WETH
+# events — so all six are safe to list.
 TARGETS=(
   # Gyndore Testnet, seeded 2026-08-31: swaps, GYND stakes, LP mints.
   0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:0

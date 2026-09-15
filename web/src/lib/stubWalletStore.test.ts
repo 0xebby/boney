@@ -7,6 +7,7 @@ import {
   isStubListPersisted,
   isStubbedWallet,
   listStubWallets,
+  loadStubWallets,
   removeStubWallet,
   stubAdminWallet,
 } from "./stubWalletStore";
@@ -54,50 +55,51 @@ afterEach(() => {
 });
 
 describe("defaults", () => {
-  it("stubs the dev wallet with nothing configured", () => {
-    expect(listStubWallets()).toEqual([DEV_STUB_WALLET]);
-    expect(isStubbedWallet(DEV_STUB_WALLET)).toBe(true);
-    expect(isStubListPersisted()).toBe(false);
+  it("stubs the dev wallet with nothing configured", async () => {
+    expect(await listStubWallets()).toEqual([DEV_STUB_WALLET]);
+    expect(isStubbedWallet(DEV_STUB_WALLET, await loadStubWallets())).toBe(true);
+    expect(await isStubListPersisted()).toBe(false);
   });
 
-  it("accepts the dev wallet in any hex case", () => {
+  it("accepts the dev wallet in any hex case", async () => {
     const upper = `0x${DEV_STUB_WALLET.slice(2).toUpperCase()}`;
-    expect(isStubbedWallet(upper)).toBe(true);
+    expect(isStubbedWallet(upper, await loadStubWallets())).toBe(true);
   });
 
-  it("stubs nothing else", () => {
-    expect(isStubbedWallet(WALLET)).toBe(false);
-    expect(isStubbedWallet(undefined)).toBe(false);
-    expect(isStubbedWallet("not-an-address")).toBe(false);
+  it("stubs nothing else", async () => {
+    const wallets = await loadStubWallets();
+    expect(isStubbedWallet(WALLET, wallets)).toBe(false);
+    expect(isStubbedWallet(undefined, wallets)).toBe(false);
+    expect(isStubbedWallet("not-an-address", wallets)).toBe(false);
   });
 
-  it("unions BONEY_STUB_WALLETS with the defaults", () => {
+  it("unions BONEY_STUB_WALLETS with the defaults", async () => {
     process.env.BONEY_STUB_WALLETS = `${WALLET}, ${OTHER}`;
-    expect(listStubWallets()).toEqual([WALLET, OTHER, DEV_STUB_WALLET].sort());
+    expect(await listStubWallets()).toEqual([WALLET, OTHER, DEV_STUB_WALLET].sort());
   });
 
-  it("ignores malformed entries in BONEY_STUB_WALLETS", () => {
+  it("ignores malformed entries in BONEY_STUB_WALLETS", async () => {
     process.env.BONEY_STUB_WALLETS = `${WALLET},nonsense,0x123`;
-    expect(listStubWallets()).toEqual([WALLET, DEV_STUB_WALLET].sort());
+    expect(await listStubWallets()).toEqual([WALLET, DEV_STUB_WALLET].sort());
   });
 });
 
 describe("writes", () => {
-  it("persists an addition and reports that it did", () => {
-    const result = addStubWallet(WALLET);
+  it("persists an addition and reports that it did", async () => {
+    const result = await addStubWallet(WALLET);
     expect(result.persisted).toBe(true);
     expect(result.wallets).toContain(WALLET);
-    expect(isStubListPersisted()).toBe(true);
-    expect(isStubbedWallet(WALLET)).toBe(true);
+    expect(await isStubListPersisted()).toBe(true);
+    expect(isStubbedWallet(WALLET, await loadStubWallets())).toBe(true);
   });
 
-  it("normalises a mixed-case address on the way in", () => {
-    const {wallets} = addStubWallet("0xAbCdEf0123456789aBcDeF0123456789AbCdEf01");
+  it("normalises a mixed-case address on the way in", async () => {
+    const {wallets} = await addStubWallet("0xAbCdEf0123456789aBcDeF0123456789AbCdEf01");
     expect(wallets).toContain("0xabcdef0123456789abcdef0123456789abcdef01");
   });
 
-  it("refuses an address that is not one", () => {
-    expect(() => addStubWallet("0x123")).toThrow(/Invalid wallet address/);
+  it("refuses an address that is not one", async () => {
+    await expect(addStubWallet("0x123")).rejects.toThrow(/Invalid wallet address/);
   });
 
   /**
@@ -105,49 +107,49 @@ describe("writes", () => {
    * the dev wallet is undone by the very next read. The file has to replace the defaults, not extend
    * them.
    */
-  it("keeps a removed default removed", () => {
-    const {persisted, wallets} = removeStubWallet(DEV_STUB_WALLET);
+  it("keeps a removed default removed", async () => {
+    const {persisted, wallets} = await removeStubWallet(DEV_STUB_WALLET);
     expect(persisted).toBe(true);
     expect(wallets).not.toContain(DEV_STUB_WALLET);
-    expect(isStubbedWallet(DEV_STUB_WALLET)).toBe(false);
-    expect(listStubWallets()).toEqual([]);
+    expect(isStubbedWallet(DEV_STUB_WALLET, await loadStubWallets())).toBe(false);
+    expect(await listStubWallets()).toEqual([]);
   });
 
-  it("is idempotent in both directions", () => {
-    addStubWallet(WALLET);
-    const twice = addStubWallet(WALLET);
+  it("is idempotent in both directions", async () => {
+    await addStubWallet(WALLET);
+    const twice = await addStubWallet(WALLET);
     expect(twice.wallets.filter((w) => w === WALLET)).toHaveLength(1);
 
-    removeStubWallet(WALLET);
-    expect(removeStubWallet(WALLET).wallets).not.toContain(WALLET);
+    await removeStubWallet(WALLET);
+    expect((await removeStubWallet(WALLET)).wallets).not.toContain(WALLET);
   });
 
-  it("materialises the whole resolved set on first write, not just the change", () => {
+  it("materialises the whole resolved set on first write, not just the change", async () => {
     process.env.BONEY_STUB_WALLETS = OTHER;
-    addStubWallet(WALLET);
+    await addStubWallet(WALLET);
 
     // The env var is no longer consulted once the file exists, so anything it contributed has to have
     // been written down or it would silently vanish.
     delete process.env.BONEY_STUB_WALLETS;
-    expect(listStubWallets()).toEqual([WALLET, OTHER, DEV_STUB_WALLET].sort());
+    expect(await listStubWallets()).toEqual([WALLET, OTHER, DEV_STUB_WALLET].sort());
   });
 });
 
 describe("a store file that cannot be trusted", () => {
-  it("reads unparseable JSON as absent", () => {
+  it("reads unparseable JSON as absent", async () => {
     writeFileSync(storeFile, "{ not json", "utf8");
-    expect(isStubListPersisted()).toBe(false);
-    expect(listStubWallets()).toEqual([DEV_STUB_WALLET]);
+    expect(await isStubListPersisted()).toBe(false);
+    expect(await listStubWallets()).toEqual([DEV_STUB_WALLET]);
   });
 
-  it("reads a file with no wallets array as absent", () => {
+  it("reads a file with no wallets array as absent", async () => {
     writeFileSync(storeFile, JSON.stringify({wallets: "0xdeadbeef"}), "utf8");
-    expect(listStubWallets()).toEqual([DEV_STUB_WALLET]);
+    expect(await listStubWallets()).toEqual([DEV_STUB_WALLET]);
   });
 
-  it("drops junk entries but keeps the valid ones", () => {
+  it("drops junk entries but keeps the valid ones", async () => {
     writeFileSync(storeFile, JSON.stringify({wallets: [WALLET, "0x1", 42, null]}), "utf8");
-    expect(listStubWallets()).toEqual([WALLET]);
+    expect(await listStubWallets()).toEqual([WALLET]);
   });
 
   /**
@@ -155,18 +157,18 @@ describe("a store file that cannot be trusted", () => {
    * the filesystem is read-only outside `/tmp`. Reporting `persisted: false` is how the panel can say
    * the change will not outlive a redeploy without pretending it failed.
    */
-  it("still applies a change it could not write, and says so", () => {
+  it("still applies a change it could not write, and says so", async () => {
     // A regular file where a directory would have to be: `mkdirSync` fails ENOTDIR, which is the
     // portable way to make the write fail without depending on permissions.
     const blocker = join(dir, "blocker");
     writeFileSync(blocker, "not a directory", "utf8");
     process.env.BONEY_STUB_STORE = join(blocker, "stub-wallets.json");
 
-    const result = addStubWallet(WALLET);
+    const result = await addStubWallet(WALLET);
 
     expect(result.persisted).toBe(false);
     expect(result.wallets).toContain(WALLET);
-    expect(isStubbedWallet(WALLET)).toBe(true);
+    expect(isStubbedWallet(WALLET, await loadStubWallets())).toBe(true);
   });
 });
 

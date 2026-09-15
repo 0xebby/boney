@@ -12,7 +12,13 @@ import {
   EthosError,
   type EthosProfile,
 } from "./ethos";
-import {addStubWallet, removeStubWallet, listStubWallets, isStubbedWallet} from "./stubWalletStore";
+import {
+  addStubWallet,
+  loadStubWallets,
+  removeStubWallet,
+  listStubWallets,
+  isStubbedWallet,
+} from "./stubWalletStore";
 import {DEV_STUB_WALLET} from "./stubWallets";
 import {stubFiguresFor} from "./stubProfile";
 import {reachFromFollowers} from "./boneyscore";
@@ -114,7 +120,7 @@ describe("stub wallet routing", () => {
     await fetchEthosProfile(WALLET);
 
     expect(urls[0]).toContain("https://live-ethos.example/api/v2/user/by/address/");
-    expect(isStubbedWallet(WALLET)).toBe(false);
+    expect(isStubbedWallet(WALLET, await loadStubWallets())).toBe(false);
   });
 
   /**
@@ -126,9 +132,9 @@ describe("stub wallet routing", () => {
     process.env.ETHOS_API = "https://live-ethos.example";
     process.env.FXTWITTER_API = "https://live-x.example";
 
-    addStubWallet(WALLET);
-    expect(isStubbedWallet(WALLET)).toBe(true);
-    expect(listStubWallets()).toContain(WALLET.toLowerCase());
+    await addStubWallet(WALLET);
+    expect(isStubbedWallet(WALLET, await loadStubWallets())).toBe(true);
+    expect(await listStubWallets()).toContain(WALLET.toLowerCase());
 
     const urls = stubFetch(() => ({body: profile()}));
     const report = await buildScoreReport(WALLET);
@@ -144,9 +150,9 @@ describe("stub wallet routing", () => {
   it("stops stubbing a wallet once it is removed", async () => {
     process.env.ETHOS_API = "https://live-ethos.example";
 
-    addStubWallet(WALLET);
-    removeStubWallet(WALLET);
-    expect(isStubbedWallet(WALLET)).toBe(false);
+    await addStubWallet(WALLET);
+    await removeStubWallet(WALLET);
+    expect(isStubbedWallet(WALLET, await loadStubWallets())).toBe(false);
 
     const urls = stubFetch(() => ({body: profile()}));
     await fetchEthosProfile(WALLET);
@@ -158,8 +164,8 @@ describe("stub wallet routing", () => {
    * is stubbed with no configuration at all — including on a deploy with nothing writable, where the
    * store file never comes into existence.
    */
-  it("stubs the dev wallet with no configuration", () => {
-    expect(isStubbedWallet(DEV_STUB_WALLET)).toBe(true);
+  it("stubs the dev wallet with no configuration", async () => {
+    expect(isStubbedWallet(DEV_STUB_WALLET, await loadStubWallets())).toBe(true);
   });
 });
 

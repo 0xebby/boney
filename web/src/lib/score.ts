@@ -1,4 +1,5 @@
 import {buildScoreReport, EthosError, type ScoreReport} from "@/lib/ethos";
+import {loadStubWallets} from "@/lib/stubWalletStore";
 
 /**
  * The prospective score, cached, in the one shape both readers need.
@@ -106,14 +107,15 @@ function remember(key: string, entry: Entry) {
 export async function scoreResponse(
   wallet: `0x${string}`,
 ): Promise<{status: number; body: ScorePayload | ScoreError}> {
-  const key = wallet.toLowerCase();
+  const stubWallets = await loadStubWallets();
+  const key = `${wallet.toLowerCase()}:${stubWallets.has(wallet.toLowerCase()) ? "stub" : "live"}`;
   const hit = cache.get(key);
   if (hit && hit.until > Date.now()) {
     return hit.kind === "ok" ? {status: 200, body: hit.body} : {status: hit.status, body: hit.body};
   }
 
   try {
-    const body = payloadFrom(await buildScoreReport(wallet));
+    const body = payloadFrom(await buildScoreReport(wallet, stubWallets));
     remember(key, {kind: "ok", body, until: Date.now() + OK_TTL_MS});
     return {status: 200, body};
   } catch (error) {

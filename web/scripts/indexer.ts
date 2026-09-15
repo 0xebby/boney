@@ -97,7 +97,11 @@ const READ_CONCURRENCY = 300;
 /** Per-request timeout. */
 const RPC_TIMEOUT = 60_000;
 
-/** Retries per request. */
+/**
+ * Retries per request. A public endpoint rate-limits partway through a long pass rather than at its
+ * start, and the pass has no checkpoint of its own to resume from, so every request has to outlast
+ * the limiter's window.
+ */
 const RPC_RETRY_COUNT = 6;
 
 /** Initial exponential-backoff delay. */
@@ -126,7 +130,9 @@ async function fetchLogs(
   for (const [i, chunk] of chunks.entries()) {
     progress(`scanning ${i + 1}/${chunks.length} chunks`);
 
-    // Filter at the node to avoid downloading unrelated logs.
+    // Filtered by the node, and sent raw to make sure of it: these sources are busy contracts, and
+    // every non-matching log downloaded is payload the run pays for and then discards.
+    // `aggregateByActor` applies both the signature and the filter again over whatever comes back.
     const logs = (await client.request({
       method: "eth_getLogs",
       params: [logRequest(source.source, source.topic0, source, chunk.from, chunk.to)],
