@@ -45,7 +45,7 @@ contract SeedCreDemo is Script {
     uint256 public constant DEPOSIT_VALUE = 0.01 ether;
 
     /// @dev the seeded promoter.
-    uint256 PROMOTER_PK =vm.envUint("PROMOTER_PK");
+    uint256 PROMOTER_PK = vm.envUint("PROMOTER_PK");
     /// @dev the seeded end user.
     uint256 USER_PK = vm.envUint("KOL1_REF2");
 
@@ -89,7 +89,9 @@ contract SeedCreDemo is Script {
         console.log("  kpiIndex:          ", uint256(0));
         console.log("  promoter:          ", vm.addr(promoterPk));
         console.log("  user:              ", user);
-        console.log("  observed progress: ", EventMetricKpiVerifier(kpiVerifier).observedProgressOf(campaign, 0, user));
+        console.log(
+            "  observed progress: ", EventMetricKpiVerifier(kpiVerifier).observedProgressOf(campaign, 0, user)
+        );
         console.log("  credited progress: ", Campaign(campaign).userCreditedOf(user, 0));
         console.log("  eventVerifier:     ", kpiVerifier);
     }
@@ -189,8 +191,7 @@ contract SeedCreDemo is Script {
                 touch.expiresAt
             )
         );
-        bytes32 digest =
-            keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", attribution.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userPk, digest);
 
         vm.broadcast(relayer);

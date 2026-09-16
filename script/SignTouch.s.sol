@@ -14,31 +14,23 @@ contract SignTouch is Script {
         address user = vm.addr(KOL1_REF2);
         address relayer = vm.addr(relayerPk);
 
-        address registry = vm.parseAddress(
-            vm.prompt("AttributionRegistry address")
-        );
+        address registry = vm.parseAddress(vm.prompt("AttributionRegistry address"));
 
-        address campaign = vm.parseAddress(
-            vm.prompt("Campaign address")
-        );
+        address campaign = vm.parseAddress(vm.prompt("Campaign address"));
 
-        bytes32 promoterId = vm.parseBytes32(
-            vm.prompt("Promoter ID (bytes32)")
-        );
+        bytes32 promoterId = vm.parseBytes32(vm.prompt("Promoter ID (bytes32)"));
 
         uint64 signedAt = uint64(block.timestamp);
         uint64 expiresAt = signedAt + TOUCH_DURATION;
 
-        IAttributionRegistry.Touch memory touch =
-            IAttributionRegistry.Touch({
-                campaign: campaign,
-                promoterId: promoterId,
-                signedAt: signedAt,
-                expiresAt: expiresAt
-            });
+        IAttributionRegistry.Touch memory touch = IAttributionRegistry.Touch({
+            campaign: campaign,
+            promoterId: promoterId,
+            signedAt: signedAt,
+            expiresAt: expiresAt
+        });
 
-        IAttributionRegistry registryContract =
-            IAttributionRegistry(registry);
+        IAttributionRegistry registryContract = IAttributionRegistry(registry);
 
         bytes32 structHash = keccak256(
             abi.encode(
@@ -50,13 +42,8 @@ contract SignTouch is Script {
             )
         );
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                registryContract.DOMAIN_SEPARATOR(),
-                structHash
-            )
-        );
+        bytes32 digest =
+            keccak256(abi.encodePacked("\x19\x01", registryContract.DOMAIN_SEPARATOR(), structHash));
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(KOL1_REF2, digest);
 
@@ -86,27 +73,18 @@ contract SignTouch is Script {
         console2.log("Digest:");
         console2.logBytes32(digest);
 
-        string memory answer =
-            vm.prompt("Submit touch to registry? (y/n)");
+        string memory answer = vm.prompt("Submit touch to registry? (y/n)");
 
-        if (
-            keccak256(bytes(answer)) !=
-            keccak256(bytes("y"))
-        ) {
+        if (keccak256(bytes(answer)) != keccak256(bytes("y"))) {
             return;
         }
 
         vm.startBroadcast(relayerPk);
 
-        registryContract.storeTouch(
-            user,
-            touch,
-            signature,
-            relayer
-        );
+        registryContract.storeTouch(user, touch, signature, relayer);
 
         vm.stopBroadcast();
-        
+
         console2.log("Touch submitted successfully.");
     }
 }
