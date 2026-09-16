@@ -1,5 +1,3 @@
-forge script script/DeployBoney.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --chain-id 84532 --verify --verifier etherscan --etherscan-api-k
-ey $BASESCAN_API_KEY --optimize --optimizer-runs 200
 
 # Boneyard
 
@@ -438,7 +436,12 @@ Campaign `endTime` is a per-fixture choice rather than a constant. `SeedLocal`, 
 fixture (`script/SeedDemo.s.sol`) instead expires campaigns at 24 hours and 3/5/7/10/14 days, so the
 window-closed → `end()` → grace → `reclaimUnspent` path is reachable without warping a chain.
 
-Deployment and verifi
+# Deployment and verification:
+
+```
+forge script script/DeployBoney.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --chain-id 84532 --verify --verifier etherscan --etherscan-api-k
+ey $BASESCAN_API_KEY --optimize --optimizer-runs 200
+```
 
 ## Repository layout
 
