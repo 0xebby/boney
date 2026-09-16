@@ -58,7 +58,7 @@ contract SeedTouchKpi is Script {
 
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](1);
         kpis[0] = Types.KpiSpec({
-            kind: Types.KpiKind.ActiveUser,
+            kind: Types.KpiKind.OnboardAnActiveUser,
             verifier: address(0),
             target: 1000,
             aggregate: false,

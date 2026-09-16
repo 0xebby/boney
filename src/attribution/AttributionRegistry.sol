@@ -5,6 +5,7 @@ import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {IAttributionRegistry} from "../interfaces/IAttributionRegistry.sol";
 import {Types} from "../libraries/Types.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 /// @dev What this registry reads back from a campaign. Read through low-level staticcalls rather than
 ///      typed calls, so registrants that are not campaigns still work.
@@ -59,9 +60,9 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @notice Deploys the attribution registry with a maximum touch duration.
     /// @param maxTouchDuration_ Longest attribution horizon a single touch may claim.
     constructor(uint64 maxTouchDuration_) EIP712("Boney Attribution", "1") {
-        if (maxTouchDuration_ == 0) revert ZeroWindow();
+        if (maxTouchDuration_ == 0) revert Errors.ZeroWindow();
         if (maxTouchDuration_ > MAX_TOUCH_DURATION) {
-            revert TouchDurationTooLong(MAX_TOUCH_DURATION, maxTouchDuration_);
+            revert Errors.TouchDurationTooLong(MAX_TOUCH_DURATION, maxTouchDuration_);
         }
         maxTouchDuration = maxTouchDuration_;
     }
@@ -70,7 +71,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     /// @dev `msg.sender` is the campaign. Permissionless and idempotent; a registration only writes
     ///      the caller's own namespace.
     function registerPromoter(bytes32 promoterId) external {
-        if (promoterId == bytes32(0)) revert InvalidPromoterId();
+        if (promoterId == bytes32(0)) revert Errors.InvalidPromoterId();
         if (_registered[msg.sender][promoterId]) return;
 
         _registered[msg.sender][promoterId] = true;
@@ -81,17 +82,17 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
     function storeTouch(address user, Touch calldata touch, bytes calldata signature, address relayer)
         external
     {
-        if (user == address(0) || touch.campaign == address(0)) revert ZeroAddress();
-        if (touch.promoterId == bytes32(0)) revert InvalidPromoterId();
+        if (user == address(0) || touch.campaign == address(0)) revert (Errors.ZERO_ADDRESS);
+        if (touch.promoterId == bytes32(0)) revert Errors.InvalidPromoterId();
 
         uint64 nowTs = uint64(block.timestamp);
-        if (touch.signedAt > nowTs) revert TouchNotYetValid(touch.signedAt, nowTs);
-        if (touch.expiresAt <= nowTs) revert TouchExpired(touch.expiresAt, nowTs);
+        if (touch.signedAt > nowTs) revert Errors.TouchNotYetValid(touch.signedAt, nowTs);
+        if (touch.expiresAt <= nowTs) revert Errors.TouchExpired(touch.expiresAt, nowTs);
 
         // The campaign's own window binds here.
         uint64 maxExpiresAt = nowTs + _effectiveMaxDuration(touch.campaign);
         if (touch.expiresAt > maxExpiresAt) {
-            revert TouchTooLong(touch.expiresAt, maxExpiresAt);
+            revert Errors.TouchTooLong(touch.expiresAt, maxExpiresAt);
         }
 
         // A touch cannot be created once the campaign can no longer accrue creditable work.
@@ -99,23 +100,23 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
 
         // The campaign named in the signed payload must have registered the id itself.
         if (!_registered[touch.campaign][touch.promoterId]) {
-            revert PromoterNotRegistered(touch.campaign, touch.promoterId);
+            revert Errors.PromoterNotRegistered(touch.campaign, touch.promoterId);
         }
 
         bytes32 structHash = keccak256(
             abi.encode(TOUCH_TYPEHASH, touch.campaign, touch.promoterId, touch.signedAt, touch.expiresAt)
         );
         address recovered = _hashTypedDataV4(structHash).recover(signature);
-        if (recovered != user) revert InvalidSignature();
+        if (recovered != user) revert Errors.InvalidSignature();
 
         // LAST_TOUCH, ordered by the user's own clock. Replaying a superseded signature reverts.
         Touch storage prev = _touches[user][touch.campaign];
-        if (touch.signedAt <= prev.signedAt) revert TouchNotNewer(touch.signedAt, prev.signedAt);
+        if (touch.signedAt <= prev.signedAt) revert Errors.TouchNotNewer(touch.signedAt, prev.signedAt);
 
         // The promoter already holding a live touch cannot be re-attributed;
         // only a switch or a lapsed window admits a new one.
         if (prev.expiresAt > nowTs && touch.promoterId == prev.promoterId) {
-            revert TouchAlreadyActive(prev.promoterId, prev.expiresAt);
+            revert Errors.TouchAlreadyActive(prev.promoterId, prev.expiresAt);
         }
 
         _touches[user][touch.campaign] = touch;
@@ -165,7 +166,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
             // Decoded as uint256, not uint64, so a dirty upper word reads as far-future not a revert.
             uint256 end = abi.decode(endData, (uint256));
             // Zero means "not a campaign", not "already over".
-            if (end != 0 && uint256(nowTs) > end) revert CampaignOver(end, nowTs);
+            if (end != 0 && uint256(nowTs) > end) revert Errors.CampaignOver(end, nowTs);
         }
 
         (bool okStatus, bytes memory statusData) =
@@ -174,7 +175,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
             // Decoded as uint256, not the enum, so an out-of-range value fails closed instead of
             // panicking. `Ended`/`Cancelled` are the last two members.
             uint256 state = abi.decode(statusData, (uint256));
-            if (state >= uint256(Types.CampaignStatus.Ended)) revert CampaignTerminal(state);
+            if (state >= uint256(Types.CampaignStatus.Ended)) revert Errors.CampaignTerminal(state);
         }
     }
 
@@ -207,7 +208,7 @@ contract AttributionRegistry is IAttributionRegistry, EIP712 {
         uint64[] calldata atTimestamps
     ) external view returns (bytes32[] memory promoterIds) {
         if (atBlocks.length != atTimestamps.length) {
-            revert LengthMismatch(atBlocks.length, atTimestamps.length);
+            revert Errors.LengthMismatch(atBlocks.length, atTimestamps.length);
         }
 
         TouchRecord[] storage history = _history[user][campaign];

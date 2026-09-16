@@ -17,6 +17,7 @@ import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IAttestationVerifier} from "../src/interfaces/IAttestationVerifier.sol";
 import {Types} from "../src/libraries/Types.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -204,7 +205,7 @@ contract BoneyTest is Test {
 
         // 4. KOL cannot join without reputation.
         vm.prank(kol);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 0, 5_000));
+        vm.expectRevert(abi.encodeWithSelector(Errors.InsufficientReputation.selector, 0, 5_000));
         c.join();
 
         // 5. Attestor vouches for the KOL's follower count; now they qualify.

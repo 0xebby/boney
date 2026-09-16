@@ -19,6 +19,7 @@ import {IGuardedKpiVerifier} from "../src/interfaces/IGuardedKpiVerifier.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {IReceiver} from "../src/interfaces/IReceiver.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract CreGuardMock {
     address public boneyVerifier;
@@ -185,7 +186,7 @@ contract BoneyCreReceiverIntegrationTest is Test {
         eventVerifier.reportVerifiedTotal(address(campaign), 0, unattributed, 5);
 
         vm.prank(FORWARDER);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, unattributed));
+        vm.expectRevert(abi.encodeWithSelector(Errors.NoAttribution.selector, unattributed));
         receiver.onReport("", _report(0, 1, unattributed, 5, true));
 
         assertEq(receiver.cursor(), 0);

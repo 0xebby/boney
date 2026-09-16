@@ -8,23 +8,6 @@ pragma solidity ^0.8.30;
 ///      "newer" decided by the signed `signedAt` rather than relay order.
 ///      Superseded touches are kept as history, so `promoterAt` can answer who held a user at a past block.
 interface IAttributionRegistry {
-    // ── errors ───────────────────────────────────────────────────
-
-    error ZeroAddress();
-    error InvalidPromoterId();
-    error TouchExpired(uint64 expiresAt, uint64 timestamp);
-    error TouchTooLong(uint64 expiresAt, uint64 maxExpiresAt);
-    error TouchNotYetValid(uint64 signedAt, uint64 timestamp);
-    error TouchNotNewer(uint64 signedAt, uint64 storedSignedAt);
-    error TouchAlreadyActive(bytes32 promoterId, uint64 expiresAt);
-    error InvalidSignature();
-    error PromoterNotRegistered(address campaign, bytes32 promoterId);
-    error ZeroWindow();
-    error TouchDurationTooLong(uint64 maximum, uint64 provided);
-    /// @dev `endTime` is the full 32-byte word the campaign answered with.
-    error CampaignOver(uint256 endTime, uint64 timestamp);
-    error CampaignTerminal(uint256 status);
-    error LengthMismatch(uint256 blocks, uint256 timestamps);
 
     // ── events ───────────────────────────────────────────────────
 
@@ -181,4 +164,6 @@ interface IAttributionRegistry {
     /// @notice Domain separator used for touch signatures.
     /// @return The EIP-712 domain separator.
     function DOMAIN_SEPARATOR() external view returns (bytes32);
+
+    function TOUCH_TYPEHASH() external view returns (bytes32);
 }

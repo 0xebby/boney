@@ -12,6 +12,7 @@ import {IKpiVerifier} from "../interfaces/IKpiVerifier.sol";
 import {IOracleCoordinator} from "../interfaces/IOracleCoordinator.sol";
 import {Types} from "../libraries/Types.sol";
 import {Names} from "../libraries/Names.sol";
+import {Errors} from "../libraries/Errors.sol";
 
 /// @title Campaign
 /// @notice One performance campaign: escrowed rewards released automatically as attributed KPI
@@ -117,13 +118,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @dev Restricts a call to the campaign's project.
     modifier onlyProject() {
-        if (msg.sender != project) revert NotProject();
+        if (msg.sender != project) revert Errors.NotProject();
         _;
     }
 
     /// @dev Restricts a call to an Active campaign.
     modifier onlyActive() {
-        if (status != Types.CampaignStatus.Active) revert WrongStatus(status);
+        if (status != Types.CampaignStatus.Active) revert Errors.WrongStatus(status);
         _;
     }
 
@@ -150,10 +151,10 @@ contract Campaign is ICampaign, ReentrancyGuard {
             cfg.project == address(0) || cfg.token == address(0) || escrowVault_ == address(0)
                 || attributionRegistry_ == address(0) || reputationRegistry_ == address(0)
                 || oracleCoordinator_ == address(0) || automatedReporter_ == address(0)
-        ) revert ZeroAddress();
-        if (cfg.rewardPool == 0) revert ZeroRewardPool();
-        if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert InvalidWindow();
-        if (cfg.attributionWindow == 0) revert InvalidWindow();
+        ) revert Errors.ZeroAddress();
+        if (cfg.rewardPool == 0) revert Errors.ZeroRewardPool();
+        if (cfg.endTime <= cfg.startTime || cfg.endTime <= block.timestamp) revert Errors.InvalidWindow();
+        if (cfg.attributionWindow == 0) revert Errors.InvalidWindow();
 
         /// @dev Reverts EmptyName / NameTooLong / InvalidNameChar. Uniqueness is CampaignRegistry's.
         Names.validate(cfg.name);
@@ -163,30 +164,30 @@ contract Campaign is ICampaign, ReentrancyGuard {
         try IReputationRegistry(reputationRegistry_).maxScore() returns (uint256 reported) {
             reputationCap = reported;
         } catch {}
-        if (cfg.minReputation > reputationCap) revert UnreachableReputation(cfg.minReputation, reputationCap);
+        if (cfg.minReputation > reputationCap) revert Errors.UnreachableReputation(cfg.minReputation, reputationCap);
 
-        if (kpis_.length == 0) revert NoKpis();
-        if (kpis_.length > MAX_KPIS) revert TooManyKpis(kpis_.length, MAX_KPIS);
-        if (kpis_.length != tiers_.length) revert TierLengthMismatch();
+        if (kpis_.length == 0) revert Errors.NoKpis();
+        if (kpis_.length > MAX_KPIS) revert Errors.TooManyKpis(kpis_.length, MAX_KPIS);
+        if (kpis_.length != tiers_.length) revert Errors.TierLengthMismatch();
 
         for (uint256 i; i < kpis_.length; ++i) {
             // A Custom KPI requires a verifier adapter.
             if (kpis_[i].kind == Types.KpiKind.Custom && kpis_[i].verifier == address(0)) {
-                revert CustomKpiNeedsVerifier(i);
+                revert Errors.CustomKpiNeedsVerifier(i);
             }
 
             Types.RewardTier[] memory t = tiers_[i];
             // Aggregate KPIs are analytics-only and may carry no tiers.
-            if (t.length == 0 && !kpis_[i].aggregate) revert EmptyTiers(i);
+            if (t.length == 0 && !kpis_[i].aggregate) revert Errors.EmptyTiers(i);
             if (t.length > MAX_TIERS_PER_KPI) {
-                revert TooManyTiers(i, t.length, MAX_TIERS_PER_KPI);
+                revert Errors.TooManyTiers(i, t.length, MAX_TIERS_PER_KPI);
             }
 
             uint256 previous;
             for (uint256 j; j < t.length; ++j) {
-                if (t[j].reward == 0) revert ZeroTierReward(i, j);
+                if (t[j].reward == 0) revert Errors.ZeroTierReward(i, j);
                 // @dev Thresholds must ascend strictly.
-                if (t[j].threshold <= previous) revert TiersNotAscending(i, j);
+                if (t[j].threshold <= previous) revert Errors.TiersNotAscending(i, j);
                 previous = t[j].threshold;
             }
 
@@ -227,10 +228,10 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @dev Requires the full reward pool to be escrowed first.
     function activate() external onlyProject {
-        if (status != Types.CampaignStatus.Pending) revert WrongStatus(status);
+        if (status != Types.CampaignStatus.Pending) revert Errors.WrongStatus(status);
         uint256 balance = escrowVault.balanceOf(address(this));
-        if (balance < _rewardPool) revert NotFunded(balance, _rewardPool);
-        if (block.timestamp >= _endTime) revert OutsideWindow(startTime, _endTime);
+        if (balance < _rewardPool) revert Errors.NotFunded(balance, _rewardPool);
+        if (block.timestamp >= _endTime) revert Errors.OutsideWindow(startTime, _endTime);
 
         _setStatus(Types.CampaignStatus.Active);
         emit Activated(startTime, _endTime);
@@ -243,7 +244,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     function unpause() external onlyProject {
-        if (status != Types.CampaignStatus.Paused) revert WrongStatus(status);
+        if (status != Types.CampaignStatus.Paused) revert Errors.WrongStatus(status);
         _setStatus(Types.CampaignStatus.Active);
     }
 
@@ -251,14 +252,14 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev The project may end early; anyone may end it once `endTime` has passed.
     function end() external {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
         if (msg.sender != project && block.timestamp < _endTime) {
-            revert OutsideWindow(startTime, _endTime);
+            revert Errors.OutsideWindow(startTime, _endTime);
         }
 
         if (status == Types.CampaignStatus.Active) {
-            if (_totalShortfall != 0) revert OutstandingShortfall(_totalShortfall);
+            if (_totalShortfall != 0) revert Errors.OutstandingShortfall(_totalShortfall);
         }
 
         endedAt = uint64(block.timestamp);
@@ -268,7 +269,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @dev Only from `Pending`.
     function cancel() external onlyProject {
-        if (status != Types.CampaignStatus.Pending) revert WrongStatus(status);
+        if (status != Types.CampaignStatus.Pending) revert Errors.WrongStatus(status);
 
         endedAt = uint64(block.timestamp);
         _setStatus(Types.CampaignStatus.Cancelled);
@@ -279,11 +280,11 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ///      subsequent calls.
     function extend(uint64 newEndTime) external onlyProject {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
-        if (newEndTime <= _endTime) revert ExtensionNotForward(_endTime, newEndTime);
+        if (newEndTime <= _endTime) revert Errors.ExtensionNotForward(_endTime, newEndTime);
 
-        if (newEndTime > maximumEndTime) revert ExtensionTooLarge(maximumEndTime, newEndTime);
+        if (newEndTime > maximumEndTime) revert Errors.ExtensionTooLarge(maximumEndTime, newEndTime);
 
         uint64 oldEndTime = _endTime;
         _endTime = newEndTime;
@@ -295,26 +296,26 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ///      by the amount the vault actually credits. Any recorded shortfall must be fully covered.
     function topUp(uint256 amount) external onlyProject nonReentrant {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
 
         uint256 requiredPaidOut = (_rewardPool * 90) / 100;
-        if (paidOut < requiredPaidOut) revert TopUpTooEarly(paidOut, requiredPaidOut);
+        if (paidOut < requiredPaidOut) revert Errors.TopUpTooEarly(paidOut, requiredPaidOut);
 
         uint256 minimum = (initialRewardPool * 20) / 100;
-        if (amount < minimum) revert TopUpTooSmall(amount, minimum);
+        if (amount < minimum) revert Errors.TopUpTooSmall(amount, minimum);
 
         IERC20 poolToken = IERC20(token);
         uint256 before = poolToken.balanceOf(address(this));
         poolToken.safeTransferFrom(project, address(this), amount);
         uint256 received = poolToken.balanceOf(address(this)) - before;
-        if (received < minimum) revert TopUpTooSmall(received, minimum);
+        if (received < minimum) revert Errors.TopUpTooSmall(received, minimum);
 
         poolToken.forceApprove(address(escrowVault), received);
         uint256 escrowBefore = escrowVault.balanceOf(address(this));
         escrowVault.deposit(address(this), received);
         uint256 deposited = escrowVault.balanceOf(address(this)) - escrowBefore;
-        if (deposited < _totalShortfall) revert ShortfallUnfunded(deposited, _totalShortfall);
+        if (deposited < _totalShortfall) revert Errors.ShortfallUnfunded(deposited, _totalShortfall);
 
         uint256 oldRewardPool = _rewardPool;
         _rewardPool += deposited;
@@ -325,18 +326,18 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Callable by the owed promoter after a top-up. A partial payment leaves the remainder
     ///      recorded for a later claim.
     function claimShortfall(uint256 kpiIndex) external nonReentrant {
-        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        if (kpiIndex >= _kpis.length) revert Errors.UnknownKpi(kpiIndex);
         if (
             status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Paused
                 && status != Types.CampaignStatus.Ended
-        ) revert WrongStatus(status);
+        ) revert Errors.WrongStatus(status);
 
         uint256 amount = _shortfall[msg.sender][kpiIndex];
-        if (amount == 0) revert NoShortFallOwed(msg.sender);
+        if (amount == 0) revert Errors.NoShortFallOwed(msg.sender);
 
         uint256 available = _rewardPool - paidOut;
         uint256 payout = amount > available ? available : amount;
-        if (payout == 0) revert ShortfallUnfunded(available, amount);
+        if (payout == 0) revert Errors.ShortfallUnfunded(available, amount);
 
         bytes32 promoterId = _promoterIdOf[msg.sender];
         _shortfall[msg.sender][kpiIndex] = amount - payout;
@@ -360,13 +361,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Allowed while `Pending` as well as `Active`.
     function join() external returns (bytes32 promoterId) {
         if (status != Types.CampaignStatus.Active && status != Types.CampaignStatus.Pending) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
-        if (_promoterIdOf[msg.sender] != bytes32(0)) revert AlreadyJoined();
+        if (_promoterIdOf[msg.sender] != bytes32(0)) revert Errors.AlreadyJoined();
 
         uint256 score = reputationRegistry.scoreOf(msg.sender);
         if (minReputation != 0 && score < minReputation) {
-            revert InsufficientReputation(score, minReputation);
+            revert Errors.InsufficientReputation(score, minReputation);
         }
 
         promoterId = keccak256(abi.encode(address(this), msg.sender));
@@ -383,7 +384,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     function setAuthorizedReporter(address reporter, bool allowed) external onlyProject {
-        if (reporter == address(0)) revert InvalidReporter();
+        if (reporter == address(0)) revert Errors.InvalidReporter();
         authorizedReporters[reporter] = allowed;
         emit AuthorizedReporterUpdated(reporter, allowed);
     }
@@ -401,9 +402,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     function reportUserActionsBatch(UserActionReport[] calldata reports) external nonReentrant {
         uint256 reportsLength = reports.length;
-        if (reportsLength == 0) revert EmptyReportBatch();
+        if (reportsLength == 0) revert Errors.EmptyReportBatch();
         if (reportsLength > MAX_REPORTS_PER_BATCH) {
-            revert TooManyReports(reportsLength, MAX_REPORTS_PER_BATCH);
+            revert Errors.TooManyReports(reportsLength, MAX_REPORTS_PER_BATCH);
         }
 
         _requireReportAccess();
@@ -417,7 +418,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function _requireReportAccess() private view {
         _requireReportableStatus();
         if (msg.sender != project && msg.sender != oracleCoordinator && !authorizedReporters[msg.sender]) {
-            revert NotReporter();
+            revert Errors.NotReporter();
         }
         _requireReportWindow();
     }
@@ -430,14 +431,14 @@ contract Campaign is ICampaign, ReentrancyGuard {
     function _reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         private
     {
-        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
-        if (user == address(0)) revert ZeroAddress();
+        if (kpiIndex >= _kpis.length) revert Errors.UnknownKpi(kpiIndex);
+        if (user == address(0)) revert Errors.ZeroAddress();
 
         Types.KpiSpec storage spec = _kpis[kpiIndex];
-        if (spec.aggregate) revert AggregateKpi(kpiIndex);
+        if (spec.aggregate) revert Errors.AggregateKpi(kpiIndex);
 
         uint256 already = _userCredited[user][kpiIndex];
-        if (newTotal < already) revert NonMonotonic(already, newTotal);
+        if (newTotal < already) revert Errors.NonMonotonic(already, newTotal);
         if (newTotal == already) return; // idempotent replay
 
         // With no evidence there is nothing to segment.
@@ -445,16 +446,16 @@ contract Campaign is ICampaign, ReentrancyGuard {
         address current;
         if (evidence.length == 0) {
             currentId = _resolvePromoterId(user);
-            if (currentId == bytes32(0)) revert NoAttribution(user);
+            if (currentId == bytes32(0)) revert Errors.NoAttribution(user);
             current = _promoterOf[currentId];
-            if (current == address(0)) revert NoAttribution(user);
+            if (current == address(0)) revert Errors.NoAttribution(user);
 
             // A switch inside the unreported span would hand one promoter's work to another, and with
             // no per-action timing there is nothing to place the work by.
             bytes32 sole = attributionRegistry.soleAttributionSince(
                 address(this), user, _lastReportBlock[user][kpiIndex]
             );
-            if (sole != currentId) revert AmbiguousAttribution(user, kpiIndex);
+            if (sole != currentId) revert Errors.AmbiguousAttribution(user, kpiIndex);
         }
 
         uint256 verifiedTotal = newTotal;
@@ -464,7 +465,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
                 address(this), kpiIndex, user, newTotal, evidence, spec.params
             );
             // A verifier may discount a claim but never inflate it.
-            if (verifiedTotal > newTotal) revert VerifierOvercredit(verifiedTotal, newTotal);
+            if (verifiedTotal > newTotal) revert Errors.VerifierOvercredit(verifiedTotal, newTotal);
         }
 
         // Credit only the newly verified portion.
@@ -498,7 +499,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     ) private {
         Types.Action[] memory actions = abi.decode(evidence, (Types.Action[]));
         if (actions.length > MAX_EVIDENCE_ACTIONS) {
-            revert TooManyActions(actions.length, MAX_EVIDENCE_ACTIONS);
+            revert Errors.TooManyActions(actions.length, MAX_EVIDENCE_ACTIONS);
         }
 
         (bytes32[] memory ids, uint256[] memory owed, uint256 distinct) = _tally(user, verifiedTotal, actions);
@@ -621,7 +622,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
         for (uint256 i; i < actions.length; ++i) {
             if (i != 0 && actions[i].blockNumber < actions[i - 1].blockNumber) {
-                revert UnorderedEvidence(i);
+                revert Errors.UnorderedEvidence(i);
             }
             blocks[i] = actions[i].blockNumber;
             timestamps[i] = actions[i].timestamp;
@@ -633,13 +634,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @dev Aggregate KPIs (TVL, volume) are campaign-level and never credit an individual promoter.
     function applyAggregateUpdate(uint256 kpiIndex, uint256 newTotal) external {
-        if (msg.sender != oracleCoordinator) revert NotOracle();
-        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
-        if (!_kpis[kpiIndex].aggregate) revert NotAggregateKpi(kpiIndex);
+        if (msg.sender != oracleCoordinator) revert Errors.NotOracle();
+        if (kpiIndex >= _kpis.length) revert Errors.UnknownKpi(kpiIndex);
+        if (!_kpis[kpiIndex].aggregate) revert Errors.NotAggregateKpi(kpiIndex);
         _requireAggregateReportWindow();
 
         uint256 current = _totalProgress[kpiIndex];
-        if (newTotal < current) revert NonMonotonic(current, newTotal);
+        if (newTotal < current) revert Errors.NonMonotonic(current, newTotal);
 
         _totalProgress[kpiIndex] = newTotal;
         emit AggregateProgress(kpiIndex, newTotal);
@@ -650,14 +651,14 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @dev Permissionless, including during the post-end claim grace window.
     function settle(address promoter, uint256 kpiIndex) external nonReentrant {
-        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        if (kpiIndex >= _kpis.length) revert Errors.UnknownKpi(kpiIndex);
         bytes32 promoterId = _promoterIdOf[promoter];
-        if (promoterId == bytes32(0)) revert NotJoined();
+        if (promoterId == bytes32(0)) revert Errors.NotJoined();
 
         if (status == Types.CampaignStatus.Ended) {
-            if (block.timestamp > endedAt + CLAIM_GRACE) revert WrongStatus(status);
+            if (block.timestamp > endedAt + CLAIM_GRACE) revert Errors.WrongStatus(status);
         } else if (status != Types.CampaignStatus.Active) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
 
         _settle(promoter, promoterId, kpiIndex);
@@ -703,16 +704,16 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @inheritdoc ICampaign
     /// @dev Cancelled campaigns return funds immediately; Ended campaigns wait out `CLAIM_GRACE`.
     function reclaimUnspent() external nonReentrant onlyProject {
-        if (_totalShortfall != 0) revert OutstandingShortfall(_totalShortfall);
+        if (_totalShortfall != 0) revert Errors.OutstandingShortfall(_totalShortfall);
         if (status == Types.CampaignStatus.Ended) {
             uint64 until = endedAt + CLAIM_GRACE;
-            if (block.timestamp <= until) revert ClaimWindowOpen(until);
+            if (block.timestamp <= until) revert Errors.ClaimWindowOpen(until);
         } else if (status != Types.CampaignStatus.Cancelled) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
 
         uint256 amount = escrowVault.balanceOf(address(this));
-        if (amount == 0) revert NothingToReclaim();
+        if (amount == 0) revert Errors.NothingToReclaim();
 
         escrowVault.reclaim(project, amount);
         emit Reclaimed(project, amount);
@@ -721,7 +722,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Reverts unless the current block timestamp is inside the campaign window.
     function _requireWindow() private view {
         if (block.timestamp < startTime || block.timestamp > _endTime) {
-            revert OutsideWindow(startTime, _endTime);
+            revert Errors.OutsideWindow(startTime, _endTime);
         }
     }
 
@@ -739,9 +740,9 @@ contract Campaign is ICampaign, ReentrancyGuard {
     /// @dev Reverts unless the status may receive reports: Active, or Ended inside `CLAIM_GRACE`.
     function _requireReportableStatus() private view {
         if (status == Types.CampaignStatus.Ended) {
-            if (block.timestamp > endedAt + CLAIM_GRACE) revert WrongStatus(status);
+            if (block.timestamp > endedAt + CLAIM_GRACE) revert Errors.WrongStatus(status);
         } else if (status != Types.CampaignStatus.Active) {
-            revert WrongStatus(status);
+            revert Errors.WrongStatus(status);
         }
     }
 
@@ -758,7 +759,7 @@ contract Campaign is ICampaign, ReentrancyGuard {
             return;
         }
         if (status == Types.CampaignStatus.Ended && block.timestamp <= aggregateUpdateDeadline()) return;
-        revert WrongStatus(status);
+        revert Errors.WrongStatus(status);
     }
 
     // ── views ────────────────────────────────────────────────────
@@ -784,13 +785,13 @@ contract Campaign is ICampaign, ReentrancyGuard {
 
     /// @inheritdoc ICampaign
     function kpi(uint256 index) external view returns (Types.KpiSpec memory) {
-        if (index >= _kpis.length) revert UnknownKpi(index);
+        if (index >= _kpis.length) revert Errors.UnknownKpi(index);
         return _kpis[index];
     }
 
     /// @inheritdoc ICampaign
     function tiers(uint256 kpiIndex) external view returns (Types.RewardTier[] memory) {
-        if (kpiIndex >= _kpis.length) revert UnknownKpi(kpiIndex);
+        if (kpiIndex >= _kpis.length) revert Errors.UnknownKpi(kpiIndex);
         return _tiers[kpiIndex];
     }
 

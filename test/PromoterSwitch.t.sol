@@ -12,6 +12,7 @@ import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -144,7 +145,7 @@ contract PromoterSwitchTest is Test {
         _touch(idB, 7 days);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        vm.expectRevert(abi.encodeWithSelector(Errors.AmbiguousAttribution.selector, user, 0));
         campaign.reportUserAction(0, user, 50, "");
 
         assertEq(campaign.progressOf(promoterA, 0), 0, "nothing moves either way");
@@ -183,7 +184,7 @@ contract PromoterSwitchTest is Test {
         _advance(1 hours);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        vm.expectRevert(abi.encodeWithSelector(Errors.AmbiguousAttribution.selector, user, 0));
         campaign.reportUserAction(0, user, 50, "");
 
         assertEq(campaign.progressOf(promoterA, 0), 10);
@@ -338,7 +339,7 @@ contract PromoterSwitchTest is Test {
         actions[0] = _act(5);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.UnorderedEvidence.selector, 1));
+        vm.expectRevert(abi.encodeWithSelector(Errors.UnorderedEvidence.selector, 1));
         campaign.reportUserAction(0, user, 10, _evidence(actions));
     }
 
@@ -355,7 +356,7 @@ contract PromoterSwitchTest is Test {
         }
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.TooManyActions.selector, max + 1, max));
+        vm.expectRevert(abi.encodeWithSelector(Errors.TooManyActions.selector, max + 1, max));
         campaign.reportUserAction(0, user, max + 1, _evidence(actions));
     }
 
@@ -415,7 +416,7 @@ contract PromoterSwitchTest is Test {
 
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _sign(idB, 7 days);
         vm.expectRevert(
-            abi.encodeWithSelector(IAttributionRegistry.TouchNotNewer.selector, t.signedAt, t.signedAt)
+            abi.encodeWithSelector(Errors.TouchNotNewer.selector, t.signedAt, t.signedAt)
         );
         attribution.storeTouch(user, t, sig, promoterB);
 
@@ -438,7 +439,7 @@ contract PromoterSwitchTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 7 days
+                Errors.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 7 days
             )
         );
         attribution.storeTouch(user, t, sig, promoterA);
