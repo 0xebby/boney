@@ -11,6 +11,7 @@ import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -186,7 +187,7 @@ contract AttributionPoCTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.PromoterNotRegistered.selector, address(campaign), victimId
+                Errors.PromoterNotRegistered.selector, address(campaign), victimId
             )
         );
         attribution.storeTouch(user, t, sig, attacker);
@@ -237,7 +238,7 @@ contract AttributionPoCTest is Test {
         vm.prank(kol);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchNotNewer.selector, first.signedAt, second.signedAt
+                Errors.TouchNotNewer.selector, first.signedAt, second.signedAt
             )
         );
         attribution.storeTouch(user, first, firstSig, kol);
@@ -280,7 +281,7 @@ contract AttributionPoCTest is Test {
             vm.prank(kol);
             vm.expectRevert(
                 abi.encodeWithSelector(
-                    IAttributionRegistry.TouchNotNewer.selector, stale.signedAt, fresh.signedAt
+                    Errors.TouchNotNewer.selector, stale.signedAt, fresh.signedAt
                 )
             );
             attribution.storeTouch(user, stale, staleSig, kol);
@@ -326,7 +327,7 @@ contract AttributionPoCTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchNotYetValid.selector, future, uint64(block.timestamp)
+                Errors.TouchNotYetValid.selector, future, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t, sig, kol);

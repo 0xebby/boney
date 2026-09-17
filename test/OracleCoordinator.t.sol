@@ -15,6 +15,7 @@ import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IOracleCoordinator} from "../src/interfaces/IOracleCoordinator.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -443,7 +444,7 @@ contract OracleCoordinatorTest is Test {
         bytes32[] memory reportIds = coordinator.submitUserReports(reports);
 
         vm.warp(block.timestamp + DISPUTE_WINDOW);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user2));
+        vm.expectRevert(abi.encodeWithSelector(Errors.NoAttribution.selector, user2));
         coordinator.applyReports(reportIds);
 
         assertEq(campaign.progressOf(reporter, 1), 0);

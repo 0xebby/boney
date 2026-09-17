@@ -11,6 +11,7 @@ import {AttestationVerifier} from "../src/reputation/AttestationVerifier.sol";
 import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract MockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -126,7 +127,7 @@ contract PostEndTouchTest is Test {
         (IAttributionRegistry.Touch memory t2, bytes memory s2) = _signNow(id2, 7 days);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.CampaignOver.selector, endTime, uint64(block.timestamp)
+                Errors.CampaignOver.selector, endTime, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t2, s2, promoter2);
@@ -152,7 +153,7 @@ contract PostEndTouchTest is Test {
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _signNow(id, 7 days);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.CampaignOver.selector, endTime, uint64(block.timestamp)
+                Errors.CampaignOver.selector, endTime, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t, sig, promoter);
@@ -173,7 +174,7 @@ contract PostEndTouchTest is Test {
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _signNow(id, 7 days);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.CampaignTerminal.selector, uint256(Types.CampaignStatus.Ended)
+                Errors.CampaignTerminal.selector, uint256(Types.CampaignStatus.Ended)
             )
         );
         attribution.storeTouch(user, t, sig, promoter);
@@ -193,7 +194,7 @@ contract PostEndTouchTest is Test {
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _signNowFor(pending, id, 7 days);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.CampaignTerminal.selector, uint256(Types.CampaignStatus.Cancelled)
+                Errors.CampaignTerminal.selector, uint256(Types.CampaignStatus.Cancelled)
             )
         );
         attribution.storeTouch(user, t, sig, promoter);
@@ -228,7 +229,7 @@ contract PostEndTouchTest is Test {
         (IAttributionRegistry.Touch memory t, bytes memory sig) = _signNow(id, 7 days);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.CampaignOver.selector, endTime, uint64(block.timestamp)
+                Errors.CampaignOver.selector, endTime, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t, sig, promoter);
@@ -293,7 +294,7 @@ contract PostEndTouchTest is Test {
         // otherwise be the "next call" the expectation attaches to.
         bytes memory sig = _sign(t);
 
-        vm.expectRevert(abi.encodeWithSelector(IAttributionRegistry.CampaignTerminal.selector, 255));
+        vm.expectRevert(abi.encodeWithSelector(Errors.CampaignTerminal.selector, 255));
         attribution.storeTouch(user, t, sig, address(hostile));
     }
 

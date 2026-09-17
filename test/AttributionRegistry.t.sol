@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {AttributionRegistry} from "../src/attribution/AttributionRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
+import {Errors} from "src/libraries/Errors.sol";
 
 contract AttributionRegistryTest is Test {
     AttributionRegistry internal attribution;
@@ -110,14 +111,14 @@ contract AttributionRegistryTest is Test {
         bytes memory sig = _sign(userPk, t);
 
         vm.expectRevert(
-            abi.encodeWithSelector(IAttributionRegistry.PromoterNotRegistered.selector, campaign, unclaimed)
+            abi.encodeWithSelector(Errors.PromoterNotRegistered.selector, campaign, unclaimed)
         );
         attribution.storeTouch(user, t, sig, relayer);
     }
 
     function test_RegisterPromoter_revertsZeroId() public {
         vm.prank(campaign);
-        vm.expectRevert(IAttributionRegistry.InvalidPromoterId.selector);
+        vm.expectRevert(Errors.InvalidPromoterId.selector);
         attribution.registerPromoter(bytes32(0));
     }
 
@@ -152,7 +153,7 @@ contract AttributionRegistryTest is Test {
         // Promoter signs on the user's behalf.
         bytes memory forged = _sign(strangerPk, t);
 
-        vm.expectRevert(IAttributionRegistry.InvalidSignature.selector);
+        vm.expectRevert(Errors.InvalidSignature.selector);
         attribution.storeTouch(user, t, forged, relayer);
 
         assertEq(attribution.activePromoter(campaign, user), bytes32(0));
@@ -165,7 +166,7 @@ contract AttributionRegistryTest is Test {
         // Relayer tries to redirect the signed touch to a rival promoter.
         t.promoterId = rivalId;
 
-        vm.expectRevert(IAttributionRegistry.InvalidSignature.selector);
+        vm.expectRevert(Errors.InvalidSignature.selector);
         attribution.storeTouch(user, t, sig, relayer);
     }
 
@@ -189,7 +190,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchExpired.selector, expiresAt, uint64(block.timestamp)
+                Errors.TouchExpired.selector, expiresAt, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
@@ -203,7 +204,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + MAX_DURATION
+                Errors.TouchTooLong.selector, tooLong, uint64(block.timestamp) + MAX_DURATION
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
@@ -245,7 +246,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchNotNewer.selector, first.signedAt, second.signedAt
+                Errors.TouchNotNewer.selector, first.signedAt, second.signedAt
             )
         );
         attribution.storeTouch(user, first, firstSig, relayer);
@@ -261,7 +262,7 @@ contract AttributionRegistryTest is Test {
         attribution.storeTouch(user, t, sig, relayer);
 
         vm.expectRevert(
-            abi.encodeWithSelector(IAttributionRegistry.TouchNotNewer.selector, t.signedAt, t.signedAt)
+            abi.encodeWithSelector(Errors.TouchNotNewer.selector, t.signedAt, t.signedAt)
         );
         attribution.storeTouch(user, t, sig, relayer);
     }
@@ -280,7 +281,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchAlreadyActive.selector, promoterId, first.expiresAt
+                Errors.TouchAlreadyActive.selector, promoterId, first.expiresAt
             )
         );
         attribution.storeTouch(user, again, sig, relayer);
@@ -335,7 +336,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchNotYetValid.selector, future, uint64(block.timestamp)
+                Errors.TouchNotYetValid.selector, future, uint64(block.timestamp)
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
@@ -363,7 +364,7 @@ contract AttributionRegistryTest is Test {
         bytes memory sig = _sign(userPk, t);
 
         vm.expectRevert(
-            abi.encodeWithSelector(IAttributionRegistry.PromoterNotRegistered.selector, campaign, unknown)
+            abi.encodeWithSelector(Errors.PromoterNotRegistered.selector, campaign, unknown)
         );
         attribution.storeTouch(user, t, sig, relayer);
     }
@@ -376,7 +377,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.PromoterNotRegistered.selector, otherCampaign, promoterId
+                Errors.PromoterNotRegistered.selector, otherCampaign, promoterId
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
@@ -405,7 +406,7 @@ contract AttributionRegistryTest is Test {
         IAttributionRegistry.Touch memory t = _touch(campaign, promoterId, uint64(block.timestamp + 1 days));
         bytes memory sig = _sign(userPk, t);
 
-        vm.expectRevert(IAttributionRegistry.ZeroAddress.selector);
+        vm.expectRevert(bytes(Errors.ZERO_ADDRESS));
         attribution.storeTouch(address(0), t, sig, relayer);
     }
 
@@ -413,12 +414,12 @@ contract AttributionRegistryTest is Test {
         IAttributionRegistry.Touch memory t = _touch(campaign, bytes32(0), uint64(block.timestamp + 1 days));
         bytes memory sig = _sign(userPk, t);
 
-        vm.expectRevert(IAttributionRegistry.InvalidPromoterId.selector);
+        vm.expectRevert(Errors.InvalidPromoterId.selector);
         attribution.storeTouch(user, t, sig, relayer);
     }
 
     function test_Constructor_revertsZeroWindow() public {
-        vm.expectRevert(IAttributionRegistry.ZeroWindow.selector);
+        vm.expectRevert(Errors.ZeroWindow.selector);
         new AttributionRegistry(0);
     }
 
@@ -427,7 +428,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchDurationTooLong.selector, attribution.MAX_TOUCH_DURATION(), provided
+                Errors.TouchDurationTooLong.selector, attribution.MAX_TOUCH_DURATION(), provided
             )
         );
         new AttributionRegistry(provided);
@@ -460,7 +461,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 1 days
+                Errors.TouchTooLong.selector, tooLong, uint64(block.timestamp) + 1 days
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
@@ -490,7 +491,7 @@ contract AttributionRegistryTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAttributionRegistry.TouchTooLong.selector, tooLong, uint64(block.timestamp) + MAX_DURATION
+                Errors.TouchTooLong.selector, tooLong, uint64(block.timestamp) + MAX_DURATION
             )
         );
         attribution.storeTouch(user, t, sig, relayer);
@@ -654,7 +655,7 @@ contract AttributionRegistryTest is Test {
         uint64[] memory blocks = new uint64[](2);
         uint64[] memory timestamps = new uint64[](1);
 
-        vm.expectRevert(abi.encodeWithSelector(IAttributionRegistry.LengthMismatch.selector, 2, 1));
+        vm.expectRevert(abi.encodeWithSelector(Errors.LengthMismatch.selector, 2, 1));
         attribution.promotersAt(campaign, user, blocks, timestamps);
     }
 
@@ -742,7 +743,7 @@ contract AttributionRegistryTest is Test {
         IAttributionRegistry.Touch memory t = _touch(campaign, promoterId, uint64(block.timestamp + 1 days));
         bytes memory sig = _sign(userPk, t);
 
-        vm.expectRevert(IAttributionRegistry.InvalidSignature.selector);
+        vm.expectRevert(Errors.InvalidSignature.selector);
         other.storeTouch(user, t, sig, relayer);
     }
 

@@ -134,12 +134,12 @@ export function CampaignsPage() {
         of their own, so they sit inside the lockup instead of in a card.
       */}
       <header className="pt-2 sm:pt-4">
-        <h1 className="animate-rise-in max-w-[18ch] text-balance font-display text-4xl leading-tight text-ink sm:text-5xl">
-          Pay only for verified growth.
+        <h1 className="animate-rise-in max-w-[35ch] text-balance font-display text-4xl leading-tight text-ink sm:text-5xl">
+          Pay only for <p className="text-brand">verified</p>growth.
         </h1>
 
-        <p className="animate-rise-in mt-3 max-w-[48ch] text-balance text-sm leading-snug text-ink-secondary [animation-delay:60ms] sm:mt-4 sm:text-base">
-          The marketplace for verifiable Web3 growth: projects escrow rewards, promoters earn them
+        <p className="text-brand max-w-[68ch] text-balance text-sm leading-snug sm:mt-4 sm:text-base">
+          performance-based marketplace for verifiable Web3 growth: projects escrow rewards, promoters earn them
           per verified result.
         </p>
 
@@ -160,7 +160,7 @@ export function CampaignsPage() {
             </ButtonLink>
 
             <p className="text-balance text-xs leading-snug text-ink-muted">
-              Set the KPIs, escrow the reward pool, pay for verified results.
+              Set the KPIs, escrow the reward pool, pay for verified results only.
             </p>
           </div>
 
@@ -169,7 +169,7 @@ export function CampaignsPage() {
             onJoined={refetchJoined}
             loading={isLoading}
             variant="brand-outline"
-            caption="Generate a boneylink, share it, earn per verified result."
+            caption="Generate a unique boneylink, share it, earn as you cross reward thresholds."
             className="sm:w-64"
           />
         </div>

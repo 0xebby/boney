@@ -4,9 +4,9 @@
   "isTestnet": true,
   "evm": {
     "chainSelectorName": "ethereum-testnet-sepolia-base-1",
-    "receiverAddress": "0x0000000000000000000000000000000000000000",
-    "campaignAddress": "0x0000000000000000000000000000000000000000",
-    "verifierAddress": "0x0000000000000000000000000000000000000000",
+    "receiverAddress": "0x764D6Bed47ccf020d52Cdc3537bCc9F42d33b6a9",
+    "campaignAddress": "0xa2D316E61616E6956C6Df11358bA17ea4A32Ad23",
+    "verifierAddress": "0x5384F00a1d241E1415B624954271EC0c85980b67",
     "kpiIndex": "0",
     "scanLimit": "32",
     "gasLimit": "3000000",
