@@ -221,23 +221,40 @@ type ContractRead = {
   args?: readonly unknown[];
 };
 
-const readContracts = (context: ReadContext, reads: readonly ContractRead[]): readonly unknown[] =>
-  reads.map(({address, abi, functionName, args = []}) => {
-    const data = encodeFunctionData({abi, functionName, args});
-    const response = new cre.capabilities.EVMClient(context.config.chainSelector)
-      .callContract(context.runtime, {
-        call: encodeCallMsg({from: ZERO_ADDRESS, to: address, data}),
-        blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-      })
-      .result();
+const readContracts = (context: ReadContext, reads: readonly ContractRead[]): readonly unknown[] => {
+  const calls = reads.map(({address, abi, functionName, args = []}) => ({
+    target: address,
+    allowFailure: false,
+    callData: encodeFunctionData({abi, functionName, args}),
+  }));
+  const data = encodeFunctionData({abi: MULTICALL3_ABI, functionName: "aggregate3", args: [calls]});
+  const response = new cre.capabilities.EVMClient(context.config.chainSelector)
+    .callContract(context.runtime, {
+      call: encodeCallMsg({from: ZERO_ADDRESS, to: MULTICALL3_ADDRESS, data}),
+      blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+    })
+    .result();
 
-    const payload = response.data ? bytesToHex(response.data) : "0x";
-    if (payload === "0x") {
+  const payload = response.data ? bytesToHex(response.data) : "0x";
+  if (payload === "0x") {
+    throw new Error(`read-empty-response:aggregate3@${MULTICALL3_ADDRESS}`);
+  }
+
+  const results = decodeFunctionResult({
+    abi: MULTICALL3_ABI,
+    functionName: "aggregate3",
+    data: payload,
+  });
+  return results.map((result, index) => {
+    const {address, abi, functionName} = reads[index];
+    requireCondition(result.success, `multicall-read-failed-${index}`);
+    // A codeless target returns success with no data rather than reverting.
+    if (result.returnData === "0x") {
       throw new Error(`read-empty-response:${functionName}@${address}`);
     }
-
-    return decodeFunctionResult({abi, functionName, data: payload});
+    return decodeFunctionResult({abi, functionName, data: result.returnData});
   });
+};
 
 type Preflight = {
   blockTimestamp: bigint;

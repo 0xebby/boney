@@ -1,3 +1,4 @@
+
 # Boneyard
 
 **Onchain growth marketplace that pays promoters for verified project-set KPIs.**
@@ -103,7 +104,7 @@ verification adapters. `Campaign` is deployed per campaign; `BoneyCreRouter` is 
 | `ReputationRegistry`     | `(wallet, schemaId) => (value, updatedAt)`, and a weighted score over the fresh ones                                                  |
 | `AttestationVerifier`    | k-of-n threshold EIP-712 attestations with per-attestor nonces. Handles never touch the chain                                           |
 | `OracleCoordinator`      | Allowlisted optimistic reporting with a dispute window; carries aggregate and per-user reports                                          |
-| `BoneyCreRouter`         | One shared router per deployment; authenticates CRE reports and fans them out to campaigns              |
+| `BoneyCreRouter`         | One shared router per deployment; authenticates CRE reports and fans them out to campaigns                                              |
 | `GuardedKpiVerifier`     | What a campaign's`KpiSpec.verifier` should point at. Composes Boney's reading with an optional second verifier                        |
 | `EventMetricKpiVerifier` | Boney's canonical reading, fed by an independent relayer scanning real event logs                                                       |
 | `TouchWindowVerifier`    | Stateless attribution-timing lens, for off-chain window reads.**Not** to be wired as a KPI's verifier                             |
@@ -434,6 +435,13 @@ Campaign `endTime` is a per-fixture choice rather than a constant. `SeedLocal`, 
 `SeedEventKpi` run 30–60 days out, putting expiry out of reach of a testing session; the Base Sepolia
 fixture (`script/SeedDemo.s.sol`) instead expires campaigns at 24 hours and 3/5/7/10/14 days, so the
 window-closed → `end()` → grace → `reclaimUnspent` path is reachable without warping a chain.
+
+# Deployment and verification:
+
+```
+forge script script/DeployBoney.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --chain-id 84532 --verify --verifier etherscan --etherscan-api-k
+ey $BASESCAN_API_KEY --optimize --optimizer-runs 200
+```
 
 ## Repository layout
 

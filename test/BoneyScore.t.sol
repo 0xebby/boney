@@ -11,6 +11,7 @@ import {CampaignRegistry} from "../src/campaign/CampaignRegistry.sol";
 import {EscrowVault} from "../src/escrow/EscrowVault.sol";
 import {Types} from "../src/libraries/Types.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 /// @dev The gate tests never move this token; a campaign simply cannot be built without one.
 contract GateMockToken is ERC20 {
@@ -413,7 +414,7 @@ contract BoneyScoreTest is Test {
 
         vm.prank(kol2);
         vm.expectRevert(
-            abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 14_863, GATED_MIN_REPUTATION)
+            abi.encodeWithSelector(Errors.InsufficientReputation.selector, 14_863, GATED_MIN_REPUTATION)
         );
         gated.join();
     }
@@ -425,7 +426,7 @@ contract BoneyScoreTest is Test {
 
         vm.prank(fresh);
         vm.expectRevert(
-            abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, 0, GATED_MIN_REPUTATION)
+            abi.encodeWithSelector(Errors.InsufficientReputation.selector, 0, GATED_MIN_REPUTATION)
         );
         gated.join();
     }
@@ -439,7 +440,7 @@ contract BoneyScoreTest is Test {
         vm.prank(kol1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ICampaign.InsufficientReputation.selector,
+                Errors.InsufficientReputation.selector,
                 REACH_WEIGHT * SCHEMA_MAX_VALUE,
                 GATED_MIN_REPUTATION
             )
@@ -461,7 +462,7 @@ contract BoneyScoreTest is Test {
         Campaign gated = _activeGatedCampaign(score + 1);
 
         vm.prank(kol1);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.InsufficientReputation.selector, score, score + 1));
+        vm.expectRevert(abi.encodeWithSelector(Errors.InsufficientReputation.selector, score, score + 1));
         gated.join();
 
         assertEq(registry.valueOf(kol1, followersId), 50_000_000, "stored, readable, and inert");
@@ -491,7 +492,7 @@ contract BoneyScoreTest is Test {
         vm.prank(kol1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ICampaign.InsufficientReputation.selector, REACH_WEIGHT * KOL1_REACH, GATED_MIN_REPUTATION
+                Errors.InsufficientReputation.selector, REACH_WEIGHT * KOL1_REACH, GATED_MIN_REPUTATION
             )
         );
         afterExpiry.join();
@@ -512,7 +513,7 @@ contract BoneyScoreTest is Test {
         vm.prank(project);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ICampaign.UnreachableReputation.selector, MAX_BONEY_SCORE + 1, MAX_BONEY_SCORE
+                Errors.UnreachableReputation.selector, MAX_BONEY_SCORE + 1, MAX_BONEY_SCORE
             )
         );
         campaignRegistry.createCampaign(_gateConfig(MAX_BONEY_SCORE + 1), _kpis(), _tiers());
@@ -551,7 +552,7 @@ contract BoneyScoreTest is Test {
             vm.prank(kol1);
             vm.expectRevert(
                 abi.encodeWithSelector(
-                    ICampaign.InsufficientReputation.selector, predicted, GATED_MIN_REPUTATION
+                    Errors.InsufficientReputation.selector, predicted, GATED_MIN_REPUTATION
                 )
             );
             gated.join();

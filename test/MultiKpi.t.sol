@@ -12,6 +12,7 @@ import {ReputationRegistry} from "../src/reputation/ReputationRegistry.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract MultiKpiMockToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -296,13 +297,13 @@ contract MultiKpiTest is Test {
         _joinAndAttribute(campaign);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.AggregateKpi.selector, TVL_KPI));
+        vm.expectRevert(abi.encodeWithSelector(Errors.AggregateKpi.selector, TVL_KPI));
         campaign.reportUserAction(TVL_KPI, user, 500_000, "");
     }
 
     function test_AttributedKpi_refusesAnAggregateUpdate() public {
         vm.prank(oracle);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotAggregateKpi.selector, MINT_KPI));
+        vm.expectRevert(abi.encodeWithSelector(Errors.NotAggregateKpi.selector, MINT_KPI));
         campaign.applyAggregateUpdate(MINT_KPI, 100);
     }
 

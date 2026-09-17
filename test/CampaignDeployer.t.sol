@@ -11,6 +11,7 @@ import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {ICampaignDeployer} from "../src/interfaces/ICampaignDeployer.sol";
 import {IEscrowVault} from "../src/interfaces/IEscrowVault.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract DeployerToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -119,7 +120,7 @@ contract CampaignDeployerTest is Test {
         Types.KpiSpec[] memory kpis = new Types.KpiSpec[](0);
         Types.RewardTier[][] memory campaignTiers = new Types.RewardTier[][](0);
 
-        vm.expectRevert(ICampaign.NoKpis.selector);
+        vm.expectRevert(Errors.NoKpis.selector);
         registry.createCampaign(cfg, kpis, campaignTiers);
 
         assertEq(registry.campaignCount(), 0);

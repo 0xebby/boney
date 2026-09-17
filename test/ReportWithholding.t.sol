@@ -13,6 +13,7 @@ import {OracleCoordinator} from "../src/oracle/OracleCoordinator.sol";
 import {IAttributionRegistry} from "../src/interfaces/IAttributionRegistry.sol";
 import {IOracleCoordinator} from "../src/interfaces/IOracleCoordinator.sol";
 import {Types} from "../src/libraries/Types.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
 
 contract MockToken is ERC20 {
@@ -250,7 +251,7 @@ contract ReportWithholdingTest is Test {
 
         vm.warp(uint256(campaign.endedAt()) + campaign.CLAIM_GRACE() + 1);
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Ended));
+        vm.expectRevert(abi.encodeWithSelector(Errors.WrongStatus.selector, Types.CampaignStatus.Ended));
         campaign.reportUserAction(0, user, DELIVERED, "");
     }
 
@@ -291,7 +292,7 @@ contract ReportWithholdingTest is Test {
         campaign.pause();
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.WrongStatus.selector, Types.CampaignStatus.Paused));
+        vm.expectRevert(abi.encodeWithSelector(Errors.WrongStatus.selector, Types.CampaignStatus.Paused));
         campaign.reportUserAction(0, user, DELIVERED, "");
 
         // A promoter waits out the window and ends it themselves.
@@ -325,7 +326,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.NotAggregateKpi.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(Errors.NotAggregateKpi.selector, 0));
         coordinator.applyReport(reportId);
     }
 
@@ -471,7 +472,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.warp(block.timestamp + DISPUTE_WINDOW + 1);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(Errors.NoAttribution.selector, stranger));
         coordinator.applyUserReport(reportId);
     }
 
@@ -506,7 +507,7 @@ contract ReportWithholdingTest is Test {
         skip(1 days + 1);
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.NoAttribution.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(Errors.NoAttribution.selector, user));
         campaign.reportUserAction(0, user, DELIVERED, "");
     }
 
@@ -557,7 +558,7 @@ contract ReportWithholdingTest is Test {
         );
 
         vm.prank(project);
-        vm.expectRevert(abi.encodeWithSelector(ICampaign.AmbiguousAttribution.selector, user, 0));
+        vm.expectRevert(abi.encodeWithSelector(Errors.AmbiguousAttribution.selector, user, 0));
         campaign.reportUserAction(0, user, DELIVERED, "");
 
         assertEq(token.balanceOf(promoter), 0, "the displaced promoter gets nothing");

@@ -13,6 +13,7 @@ import {Types} from "../src/libraries/Types.sol";
 import {Names} from "../src/libraries/Names.sol";
 import {ICampaign} from "../src/interfaces/ICampaign.sol";
 import {ICampaignRegistry} from "../src/interfaces/ICampaignRegistry.sol";
+import {Errors} from "../src/libraries/Errors.sol";
 
 contract NameToken is ERC20 {
     constructor() ERC20("Mock", "MOCK") {}
@@ -212,7 +213,7 @@ contract CampaignNamesTest is Test {
         cfg.rewardPool = 0; // Campaign's constructor: ZeroRewardPool
 
         vm.prank(project);
-        vm.expectRevert(ICampaign.ZeroRewardPool.selector);
+        vm.expectRevert(Errors.ZeroRewardPool.selector);
         registry.createCampaign(cfg, _kpis(), _tiers());
 
         assertTrue(registry.isNameAvailable("Aave"), "a name must survive a failed creation");

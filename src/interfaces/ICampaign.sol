@@ -6,7 +6,7 @@ import {IAttributionRegistry} from "./IAttributionRegistry.sol";
 
 /// @title ICampaign
 /// @notice A single performance campaign: escrowed rewards released as attributed KPI progress
-///         crosses per-promoter thresholds.
+/// crosses per-promoter thresholds.
 interface ICampaign {
     /// @notice One cumulative user-action report in a campaign batch.
     /// @param kpiIndex Index of the KPI being reported against.
@@ -19,51 +19,6 @@ interface ICampaign {
         uint256 newTotal;
         bytes evidence;
     }
-
-    // ── errors ───────────────────────────────────────────────────
-
-    error NotProject();
-    error NotReporter();
-    error NotOracle();
-    error WrongStatus(Types.CampaignStatus actual);
-    error AlreadyJoined();
-    error NotJoined();
-    error InsufficientReputation(uint256 score, uint256 required);
-    error UnreachableReputation(uint256 required, uint256 maxScore);
-    error UnknownKpi(uint256 kpiIndex);
-    error AggregateKpi(uint256 kpiIndex);
-    error NotAggregateKpi(uint256 kpiIndex);
-    error NoAttribution(address user);
-    error AmbiguousAttribution(address user, uint256 kpiIndex);
-    error NonMonotonic(uint256 current, uint256 provided);
-    error VerifierOvercredit(uint256 credited, uint256 max);
-    error OutsideWindow(uint64 startTime, uint64 endTime);
-    error NotFunded(uint256 balance, uint256 required);
-    error ClaimWindowOpen(uint64 until);
-    error NothingToReclaim();
-    error ZeroAddress();
-    error InvalidWindow();
-    error ZeroRewardPool();
-    error NoKpis();
-    error TierLengthMismatch();
-    error EmptyTiers(uint256 kpiIndex);
-    error TiersNotAscending(uint256 kpiIndex, uint256 tierIndex);
-    error ZeroTierReward(uint256 kpiIndex, uint256 tierIndex);
-    error CustomKpiNeedsVerifier(uint256 kpiIndex);
-    error TooManyKpis(uint256 provided, uint256 max);
-    error TooManyTiers(uint256 kpiIndex, uint256 provided, uint256 max);
-    error TooManyActions(uint256 provided, uint256 max);
-    error EmptyReportBatch();
-    error TooManyReports(uint256 provided, uint256 max);
-    error UnorderedEvidence(uint256 index);
-    error ExtensionTooLarge(uint64 maximum, uint64 provided);
-    error ExtensionNotForward(uint64 current, uint64 provided);
-    error TopUpTooEarly(uint256 paidOut, uint256 required);
-    error TopUpTooSmall(uint256 provided, uint256 required);
-    error ShortfallUnfunded(uint256 provided, uint256 required);
-    error NoShortFallOwed(address promoter);
-    error OutstandingShortfall(uint256 amount);
-    error InvalidReporter();
 
     // ── events ───────────────────────────────────────────────────
 
@@ -169,28 +124,20 @@ interface ICampaign {
 
     /// @notice Add project funds to the reward pool after it is substantially depleted.
     /// @dev Requires 90 percent of the current pool to be paid out and a top-up of at least 20
-    ///      percent of the initial pool. The credited amount may be lower for fee-on-transfer tokens.
+    ///      percent of the initial pool.
     /// @param amount Amount requested from the project.
     function topUp(uint256 amount) external;
 
     /// @notice Join as a promoter (KOL). Reverts unless the caller's reputation clears
     ///         `minReputation`.
-    /// @return promoterId The caller's campaign-bound promoter id, to encode in tracking links.
+    /// @return promoterId The caller's campaign-bound promoter id, to encode in boneylink(boney promoter tracking link) links.
     function join() external returns (bytes32 promoterId);
 
     /// @notice Credit an attributed end-user action toward the promoter who owns that user.
-    /// @dev Callable by the project or the oracle coordinator. Runs the KPI's verifier adapter
-    ///      when one is configured, then settles any newly crossed tiers.
-    ///
-    ///      With per-action `evidence` the credited amount is split across the promoters who held the
-    ///      user when each action happened, one `ProgressCredited` each. With empty `evidence` it all
-    ///      goes to whoever holds attribution now.
     /// @param kpiIndex Index of the KPI being reported against.
     /// @param user The end user whose action is credited.
-    /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta. Only
-    ///        `newTotal` minus what was already credited is applied, so replays are no-ops.
-    /// @param evidence Report-specific proof data forwarded to the KPI's verifier. An abi-encoded
-    ///        `Types.Action[]`, ascending by `blockNumber`, or empty.
+    /// @param newTotal Cumulative amount for this `(user, kpiIndex)` pair, not a delta.
+    /// @param evidence Report-specific proof data forwarded to the KPI's verifier.
     function reportUserAction(uint256 kpiIndex, address user, uint256 newTotal, bytes calldata evidence)
         external;
 
