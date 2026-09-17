@@ -33,11 +33,11 @@ export function LeaderboardTeaser() {
   return (
     <Card>
       <CardHeader
-        title="Leaderboard"
-        subtitle="BoneyPoints for verified actions"
+        title="Boneyboard"
+        subtitle="Accumulate BoneyPoints for verified actions"
         action={
           <Link href="/leaderboard" className="text-xs font-medium text-brand hover:opacity-80">
-            Full board →
+            Full Boneyboard →
           </Link>
         }
       />
