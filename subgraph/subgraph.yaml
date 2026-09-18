@@ -14,9 +14,9 @@ dataSources:
     name: CampaignRegistry
     network: base-sepolia
     source:
-      address: "0x3e0a2fc423dE77bEE9147879308BFfFC6129c4EE"
+      address: "0x8d72aD86F44beD0ca769Ec15bA294B51F0B9bAa7"
       abi: CampaignRegistry
-      startBlock: 46110182
+      startBlock: 46971641
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9
@@ -42,9 +42,9 @@ dataSources:
     name: AttributionRegistry
     network: base-sepolia
     source:
-      address: "0xe04C5185eDd4C9b1c91e31c790843c335766258e"
+      address: "0xd44E66F4Ee7AA6e73F48fc117f36575CD66B55A9"
       abi: AttributionRegistry
-      startBlock: 46110182
+      startBlock: 46971641
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

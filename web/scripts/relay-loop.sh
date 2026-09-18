@@ -12,29 +12,24 @@ INTERVAL="${1:-120}"
 # campaign:kpiIndex.
 #
 # Only the **gated** KPIs belong here. Relaying an ungated one is pointless: with `verifier == 0x0` the
-# campaign credits the reported figure as-is, so there is no ceiling to raise. Venus, Sdy Labs and
-# SuperBridge are ungated throughout and never belong here; Gyndore and Uniswap gate all three of
-# theirs, so those six are the whole list. The empty-list branch below stays for a fixture reseed, where a
-# stale address must be removed before the new one exists.
+# campaign credits the reported figure as-is, so there is no ceiling to raise. The empty-list branch
+# below stays for a fixture reseed, where a stale address must be removed before the new one exists.
 #
 # Addresses change with every `DeployBoney` + reseed, and a stale one is silent: the relayer reports
 # against a dead campaign, credits nothing, and the gated KPI simply stays flat.
 #
-# Keep any KPI that watches the escrow token *out* of this list. Its `Transfer` events include things
-# that are not user actions — the referral's own self-transfers, tier payouts leaving the EscrowVault,
-# the Boney facade moving tokens — and the payout case is self-reinforcing, since a payout raises the
-# observed ceiling, which unlocks the next tier, which pays out again. Both campaigns below pay in a
-# token none of their own KPIs watch — Gyndore in GYND, Uniswap in bUSD against pool, USDC and WETH
-# events — so all six are safe to list.
+# A KPI that watches the escrow token is normally kept *out* of this list. Its `Transfer` events
+# include things that are not user actions — the referral's own self-transfers, tier payouts leaving
+# the EscrowVault, the Boney facade moving tokens — and the payout case is self-reinforcing, since a
+# payout raises the observed ceiling, which unlocks the next tier, which pays out again. The
+# 2026-09-18 fixture below is the exception: `SeedDemo` escrows bUSD and points every KPI at bUSD
+# `Transfer`, so the three targets watch their own payout token.
 TARGETS=(
-  # Gyndore Testnet, seeded 2026-08-31: swaps, GYND stakes, LP mints.
-  0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:0
-  0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:1
-  0x86B7b22aEd09452232Ca1A072db5BE7a837F06fc:2
-  # Uniswap, seeded 2026-09-04: pool swaps, USDC volume into the pool, WETH deposits.
-  0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b:0
-  0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b:1
-  0x101431E3Cc9d8fec1221c0ED888c210f5E362b8b:2
+  # Creed Test, seeded 2026-09-18: bUSD received.
+  0x1c77040cF14d575dAC689ADc127bc009F78D2658:0
+  # Zero Labs, seeded 2026-09-18: bUSD received, two KPIs.
+  0x920e1B05A3BC1ee81360DB2eBf3032a2a63CeACF:0
+  0x920e1B05A3BC1ee81360DB2eBf3032a2a63CeACF:1
 )
 
 if [ "${#TARGETS[@]}" -eq 0 ]; then
