@@ -135,7 +135,7 @@ export function CampaignsPage() {
       */}
       <header className="pt-2 sm:pt-4">
         <h1 className="animate-rise-in max-w-[35ch] text-balance font-display text-4xl leading-tight text-ink sm:text-5xl">
-          Pay only for <p className="text-brand">verified</p>growth.
+          Pay only for <p className="text-brand">verified</p>results.
         </h1>
 
         <p className="text-brand max-w-[68ch] text-balance text-sm leading-snug sm:mt-4 sm:text-base">
