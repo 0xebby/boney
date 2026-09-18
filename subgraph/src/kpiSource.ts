@@ -157,7 +157,7 @@ export function templateFor(src: EventSource): string | null {
   const sum = src.amountMode == AMOUNT_MODE_DATA_WORD_0;
 
   if (topic0 == TRANSFER_TOPIC0 && src.actorTopic == 2) {
-    return sum ? "Erc20Transfer" : "Erc721Transfer";
+    return sum ? "TransferToActor" : "TransferToActorCount";
   }
 
   if (topic0 == DEPOSIT_TOPIC0 && src.actorTopic == 1) return "WethDeposit";
@@ -170,8 +170,8 @@ export function templateFor(src: EventSource): string | null {
 
 /** Concrete event layout emitted by a manifest template. */
 export function eventShapeForTemplate(template: string): string | null {
-  if (template == "Erc20Transfer") return EVENT_SHAPE_ERC20_TRANSFER;
-  if (template == "Erc721Transfer") return EVENT_SHAPE_ERC721_TRANSFER;
+  if (template == "TransferToActor") return EVENT_SHAPE_ERC20_TRANSFER;
+  if (template == "TransferToActorCount") return EVENT_SHAPE_ERC721_TRANSFER;
   if (template == "WethDeposit") return EVENT_SHAPE_WETH_DEPOSIT;
   if (template == "WethWithdrawal") return EVENT_SHAPE_WETH_WITHDRAWAL;
   if (template == "AaveSupply") return EVENT_SHAPE_AAVE_SUPPLY;
@@ -190,6 +190,6 @@ export function sourceCommitmentId(campaign: Bytes, kpiIndex: i32, src: EventSou
   values[5] = ethereum.Value.fromUnsignedBigInt(BigInt.fromI32(src.filterTopic));
   values[6] = ethereum.Value.fromFixedBytes(src.filterValue);
   const encoded = ethereum.encode(ethereum.Value.fromTuple(changetype<ethereum.Tuple>(values)));
-  if (encoded == null) return campaign.toHexString() + "-" + kpiIndex.toString();
+  if (encoded === null) return campaign.toHexString() + "-" + kpiIndex.toString();
   return crypto.keccak256(encoded as Bytes).toHexString();
 }

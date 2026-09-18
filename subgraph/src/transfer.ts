@@ -1,6 +1,6 @@
 import {BigInt, Bytes, ethereum} from "@graphprotocol/graph-ts";
-import {Transfer as Erc20Transfer} from "../generated/templates/Erc20Transfer/ERC20";
-import {Transfer as Erc721Transfer} from "../generated/templates/Erc721Transfer/ERC721";
+import {Transfer} from "../generated/templates/TransferToActor/ERC20";
+import {Transfer as TransferCount} from "../generated/templates/TransferToActorCount/ERC20";
 import {addressTopic, eventData, uintTopic, writeAction} from "./action";
 import {
   EVENT_SHAPE_ERC20_TRANSFER,
@@ -9,7 +9,7 @@ import {
 } from "./kpiSource";
 
 /** Stores one ERC-20 transfer with its raw amount. */
-export function handleErc20Transfer(event: Erc20Transfer): void {
+export function handleTransferToActor(event: Transfer): void {
   const topics = new Array<Bytes>(2);
   topics[0] = addressTopic(event.params.from);
   topics[1] = addressTopic(event.params.to);
@@ -28,11 +28,11 @@ export function handleErc20Transfer(event: Erc20Transfer): void {
 }
 
 /** Stores one ERC-721 transfer with its token id as raw evidence. */
-export function handleErc721Transfer(event: Erc721Transfer): void {
+export function handleTransferToActorCount(event: TransferCount): void {
   const topics = new Array<Bytes>(3);
   topics[0] = addressTopic(event.params.from);
   topics[1] = addressTopic(event.params.to);
-  topics[2] = uintTopic(event.params.tokenId);
+  topics[2] = uintTopic(event.params.value);
 
   writeAction(
     event,

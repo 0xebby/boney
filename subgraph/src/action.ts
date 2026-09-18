@@ -31,19 +31,22 @@ export function writeAction(
 /** ABI word containing an address. */
 export function addressTopic(address: Address): Bytes {
   const encoded = ethereum.encode(ethereum.Value.fromAddress(address));
-  return encoded == null ? Bytes.empty() : (encoded as Bytes);
+  if (encoded === null) return Bytes.empty();
+  return encoded as Bytes;
 }
 
 /** ABI word containing an unsigned integer. */
 export function uintTopic(value: BigInt): Bytes {
   const encoded = ethereum.encode(ethereum.Value.fromUnsignedBigInt(value));
-  return encoded == null ? Bytes.empty() : (encoded as Bytes);
+  if (encoded === null) return Bytes.empty();
+  return encoded as Bytes;
 }
 
 /** ABI-encoded event data tuple. */
 export function eventData(values: Array<ethereum.Value>): Bytes {
   const encoded = ethereum.encode(ethereum.Value.fromTuple(changetype<ethereum.Tuple>(values)));
-  return encoded == null ? Bytes.empty() : (encoded as Bytes);
+  if (encoded === null) return Bytes.empty();
+  return encoded as Bytes;
 }
 
 /** Chronological identity for one Ethereum log. */
