@@ -3,6 +3,7 @@
 #
 # Start order: ethos stub, Next, blocking relay pass, relay loop, indexer pass.
 # The relay pass must precede the indexer so gated KPI ceilings exist before reports.
+# Next is probed for a stale `.next` once it is up, and restarted on a cleared cache if it 404s.
 #
 # Usage: ./scripts/dev-up.sh          (or: pnpm dev:up)
 #        ./scripts/dev-up.sh --down   (or: pnpm dev:down)
@@ -150,8 +151,46 @@ start "ethos stub" "$LOGS/ethos-stub.log" pnpm ethos:stub:dev
 waitfor "ethos stub" "http://127.0.0.1:8787/health" 30 || exit 1
 
 # ---- 2. next dev ---------------------------------------------------------------------------------
-start "next dev" "$LOGS/next-dev.log" pnpm dev --port "$PORT"
-waitfor "next dev" "http://localhost:$PORT/" 90 || exit 1
+start_next() {
+  start "next dev" "$LOGS/next-dev.log" pnpm dev --port "$PORT"
+  waitfor "next dev" "http://localhost:$PORT/" 90
+}
+
+# Kills the group `start` recorded for next dev and waits for the port to free.
+stop_next() {
+  local pg i=0
+  pg="$(cat "$PGDIR/next-dev" 2>/dev/null)"
+  case "$pg" in "" | *[!0-9]*) return 0 ;; esac
+  kill -- "-$pg" 2>/dev/null
+  while [ "$i" -lt 20 ] && kill -0 -- "-$pg" 2>/dev/null; do i=$((i + 1)); sleep 0.25; done
+  kill -9 -- "-$pg" 2>/dev/null
+  rm -f "$PGDIR/next-dev"
+}
+
+# A stale `.next` 404s the nested routes while the top-level ones still answer, and logs nothing.
+# Both probes are safe: neither route calls `notFound()`, so a 404 from either can only be the cache.
+nested_ok() {
+  local u code
+  for u in /campaign/1 /api/stub-wallets; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 180 "http://localhost:$PORT$u")"
+    [ "$code" = 404 ] && return 1
+  done
+  return 0
+}
+
+start_next || exit 1
+
+# Probed rather than cleared on principle: a cold `.next` costs a ~30s compile on the first hit of
+# every route and re-fetches the fonts, and that burst can throttle and 500 every route. Cleared at
+# most once — a second 404 is not a cache problem.
+echo "  checking nested routes…"
+if ! nested_ok; then
+  echo "  nested routes 404 — clearing a stale .next and restarting next dev"
+  stop_next
+  rm -rf .next
+  start_next || exit 1
+  nested_ok || echo "  nested routes still 404 after a clean .next — not a stale cache" >&2
+fi
 
 # ---- 3. relay, then 4. indexer -------------------------------------------------------------------
 if [ "$PLAYGROUND" = 1 ]; then

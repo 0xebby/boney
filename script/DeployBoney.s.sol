@@ -46,6 +46,7 @@ contract DeployBoney is Script {
     /// @return registry Campaign registry.
     function run() external returns (Boney boney, CampaignRegistry registry) {
         uint64 maxTouch = uint64(vm.envOr("BONEY_MAX_TOUCH", uint256(MAX_TOUCH_DURATION)));
+        // uint256 privateKey = vm.envUint("PRIVATE_KEY");
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(privateKey);
         bytes32 workflowId = vm.envBytes32("CRE_WORKFLOW_ID");
