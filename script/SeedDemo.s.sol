@@ -90,12 +90,12 @@ contract SeedDemo is Script {
     error VerifierNotOwned(address verifier, address owner, address seeder);
 
     /// @dev The number of campaigns in the fixture. Named so the arrays below cannot drift.
-    uint256 constant COUNT = 6;
+    uint256 constant COUNT = 2;
 
     /// @dev The longest campaign seeded here, and therefore the minimum global touch cap this
     ///      fixture needs. Kept as a named constant so the guard in `run()` and the durations
     ///      cannot drift apart.
-    uint64 constant LONGEST = 14 days;
+    uint64 constant LONGEST = 30 days;
 
     /// @dev Seconds per block on Base Sepolia, used to project a campaign's reporting close onto a
     ///      block number for `windowEndBlock`.
@@ -154,14 +154,14 @@ contract SeedDemo is Script {
         // Ascending, so campaign id order is also expiry order: id 0 is the one that lapses first,
         // which is the row a tester actually wants to watch.
         uint64[COUNT] memory durations =
-            [uint64(24 hours), uint64(3 days), uint64(5 days), uint64(7 days), uint64(10 days), LONGEST];
+            [uint64(3 days), uint64(30 days)];
 
         // Pools rise with duration so the list is not six identical rows: utilization meters, the
         // pool column, and the by-denomination totals each get a spread to render. Small on
         // purpose — these campaigns exercise expiry, not the payout ladder, and one testnet wallet
         // funds all six.
         uint256[COUNT] memory pools =
-            [uint256(2_000 ether), 5_000 ether, 8_000 ether, 12_000 ether, 25_000 ether, 50_000 ether];
+            [uint256(20_000 ether), 50_000 ether];
 
         // Uniform, and deliberately so. These six previously carried a different `kind` each purely
         // so the marketplace rows looked distinguishable, while every one of them tracked the same
@@ -174,10 +174,6 @@ contract SeedDemo is Script {
         // contradict the event source: it is the one part of a KPI a reader trusts without decoding
         // anything. `TokenPurchase` is the honest reading of "this wallet received tokens".
         Types.KpiKind[COUNT] memory kinds = [
-            Types.KpiKind.TokenPurchase,
-            Types.KpiKind.TokenPurchase,
-            Types.KpiKind.TokenPurchase,
-            Types.KpiKind.TokenPurchase,
             Types.KpiKind.TokenPurchase,
             Types.KpiKind.TokenPurchase
         ];
@@ -197,13 +193,13 @@ contract SeedDemo is Script {
         // Every value sits under `maxScore()` (28,000 = 7*2800 + 3*2800). `Campaign`'s constructor
         // rejects a gate above that ceiling with `UnreachableReputation`, and an unseeded registry
         // reports a ceiling of 0 — which is why `SeedDevRep` must run before this script.
-        uint256[COUNT] memory gates = [uint256(0), 0, 10_000, 0, 24_000, 26_000];
+        uint256[COUNT] memory gates = [uint256(5000), 0];
 
         // Names are what the marketplace's project column renders. These six are the labels the
         // old `PROJECT_NAMES` placeholder map in `web/src/lib/projects.ts` used to fake by campaign
         // id — now that a name is on chain, the fixture supplies them for real and that map is gone.
         // Each must be unique after normalization or `createCampaign` reverts `NameTaken`.
-        string[COUNT] memory names = ["Aerodrome", "Velodrome", "Moonwell", "Aave", "Compound", "Openseas"];
+        string[COUNT] memory names = ["Creed", "Zero Labs"];
 
         address[COUNT] memory created;
         uint256 funded;
@@ -217,7 +213,7 @@ contract SeedDemo is Script {
             funded += pools[i];
         }
 
-        string[COUNT] memory labels = ["24h ", "3d  ", "5d  ", "7d  ", "10d ", "14d "];
+        string[COUNT] memory labels = [ "3d  ", "30d  "];
 
         console.log("");
         console.log("Demo fixture seeded: %s campaigns, %s bUSD escrowed", COUNT, funded / 1 ether);
